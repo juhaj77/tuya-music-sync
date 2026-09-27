@@ -65,3 +65,19 @@ def scan_network(timeout: float = 8.0) -> List[DiscoveredDevice]:
             )
     logger.info("Scan found %d candidate device(s) on the LAN", len(results))
     return results
+
+
+def find_device_address(device_id: str) -> Optional[DiscoveredDevice]:
+    """Blocking (up to ~tinytuya's scan time): listens for one specific
+    device's LAN broadcast and returns where it currently is, or None. Used
+    to follow a lamp whose IP address changed (DHCP)."""
+    try:
+        import tinytuya
+
+        info = tinytuya.find_device(dev_id=device_id)
+    except Exception:
+        logger.exception("Looking for device %s on the LAN failed", device_id)
+        return None
+    if not isinstance(info, dict) or not info.get("ip"):
+        return None
+    return DiscoveredDevice(ip=info["ip"], device_id=device_id, version=str(info.get("version") or "3.3"))

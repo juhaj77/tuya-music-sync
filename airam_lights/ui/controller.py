@@ -42,6 +42,7 @@ class AppController(QObject):
     runningChanged = Signal(bool)
     logChanged = Signal()
     audioError = Signal(str)
+    configReplaced = Signal()  # many settings changed at once (preset) - rebuild the settings tabs
 
     def __init__(self):
         super().__init__()
@@ -166,6 +167,13 @@ class AppController(QObject):
         """Call after mutating self.config in place (sliders, mode changes,
         etc.) to propagate it to the engine and lamp manager."""
         self.engine.apply_config(self.config)
+
+    def replace_config_settings(self) -> None:
+        """Like apply_config_changes(), after a change too broad for the
+        widgets to follow one by one (e.g. loading a preset): also asks the
+        main window to rebuild its settings tabs from the new values."""
+        self.apply_config_changes()
+        self.configReplaced.emit()
 
     def save_config(self, quiet: bool = False) -> None:
         self.config.devices = [d.config for d in self.lamp_manager.devices.values()]

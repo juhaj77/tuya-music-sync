@@ -1,7 +1,9 @@
 """Color Mapping tab: full detail controls for RGB Frequency / Custom / HSV
-Music modes, plus global response curve, smoothing, and presets."""
+Music modes, the shared beat clock, plus global response curve, smoothing,
+and presets."""
 from __future__ import annotations
 
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -18,10 +20,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...config.schema import ChaseEffectConfig, ColorMappingConfig, RGBModeConfig
+from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
+from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, WHITE_PATTERNS
+from ...config.schema import (
+    PULSE_TRIGGERS,
+    ChaseEffectConfig,
+    ColorMappingConfig,
+    GroupSwitchEffectConfig,
+    PulseSequencerConfig,
+    RGBModeConfig,
+    RhythmConfig,
+)
 from ..controller import AppController
 from ..widgets.channel_map_editor import ChannelMapEditor
 from ..widgets.hue_slider import HueSlider
+from ..widgets.musical import (
+    PHRASE_LENGTHS,
+    beat_divisions,
+    choice_combo,
+    inactive_note,
+    set_active,
+    show_note,
+)
 from ..widgets.param_slider import FloatSlider
 
 
@@ -71,6 +91,8 @@ class ColorMappingTab(QWidget):
         inner = QWidget()
         scroll.setWidget(inner)
         root = QVBoxLayout(inner)
+
+        root.addWidget(self._build_rhythm_box(controller.config.rhythm))
 
         sub_tabs = QTabWidget()
         root.addWidget(sub_tabs)
@@ -145,6 +167,8 @@ class ColorMappingTab(QWidget):
         )
         beat_band_note.setWordWrap(True)
         beat_layout.addWidget(beat_band_note)
+        self.beat_detect_note = inactive_note()
+        beat_layout.addWidget(self.beat_detect_note)
 
         self.beat_sensitivity_slider = FloatSlider(
             "Sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2,
@@ -191,6 +215,19 @@ class ColorMappingTab(QWidget):
         )
         beat_hue_mode_note.setWordWrap(True)
         beat_layout.addWidget(beat_hue_mode_note)
+
+        hue_every_row = QHBoxLayout()
+        hue_every_row.addWidget(QLabel("Change hue:"))
+        self.beat_hue_every_combo = choice_combo(
+            beat_divisions(controller.config.rhythm.beats_per_bar), bs.hue_every_n_beats,
+            "Every beat still flashes, but the color only changes on these beats. With the shared beat "
+            "clock this is counted from the bar start, so e.g. 'every bar' changes color exactly on "
+            "beat 1. The choices follow Beats per bar in the Rhythm box.",
+        )
+        self.beat_hue_every_combo.currentIndexChanged.connect(self._on_beat_changed)
+        hue_every_row.addWidget(self.beat_hue_every_combo)
+        hue_every_row.addStretch(1)
+        beat_layout.addLayout(hue_every_row)
 
         self.beat_hue_step_slider = FloatSlider(
             "Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg",
@@ -261,6 +298,9 @@ class ColorMappingTab(QWidget):
         )
         self.beat_dark_enabled_checkbox.toggled.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_dark_enabled_checkbox)
+        self.beat_dark_trigger_combo = self._trigger_combo(beat_layout, "Dark pulse on:", bs.dark_pulse_trigger)
+        self.beat_dark_note = inactive_note()
+        beat_layout.addWidget(self.beat_dark_note)
 
         self.beat_dark_prob_slider = FloatSlider(
             "Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2,
@@ -358,6 +398,9 @@ class ColorMappingTab(QWidget):
         white_target_row.addWidget(self.beat_white_pulse_target_combo)
         white_target_row.addStretch(1)
         beat_layout.addLayout(white_target_row)
+        self.beat_white_trigger_combo = self._trigger_combo(beat_layout, "White pulse on:", bs.white_pulse_trigger)
+        self.beat_white_note = inactive_note()
+        beat_layout.addWidget(self.beat_white_note)
 
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
@@ -410,6 +453,8 @@ class ColorMappingTab(QWidget):
 
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
+
+        beat_layout.addWidget(self._build_sequencer_box(controller.config.sequencer))
 
         sub_tabs.addTab(beat_widget, "Beat Sync")
 
@@ -668,7 +713,31 @@ class ColorMappingTab(QWidget):
 
         # -- presets ------------------------------------------------------------------------
         preset_box = QGroupBox("Presets")
-        preset_row = QHBoxLayout(preset_box)
+        preset_layout = QVBoxLayout(preset_box)
+
+        builtin_row = QHBoxLayout()
+        builtin_row.addWidget(QLabel("Built-in look:"))
+        self.builtin_combo = QComboBox()
+        self.builtin_combo.addItems(list(BUILTIN_PRESETS))
+        self.builtin_combo.currentTextChanged.connect(self._show_builtin_description)
+        builtin_row.addWidget(self.builtin_combo, stretch=1)
+        apply_builtin_btn = QPushButton("Apply")
+        apply_builtin_btn.setToolTip(
+            "Sets the shared beat clock, Beat Sync, Chase and Group Switch together (Chase and Group "
+            "Switch are on the 8-Band && Per-Lamp tab). Leaves your lamp groups, Chase width/intensity, "
+            "Group Switch intensity, beat detection band/sensitivity, lead time and true-white "
+            "depth/brightness/cool ratio as they are."
+        )
+        apply_builtin_btn.clicked.connect(self._apply_builtin_preset)
+        builtin_row.addWidget(apply_builtin_btn)
+        preset_layout.addLayout(builtin_row)
+        self.builtin_description = QLabel()
+        self.builtin_description.setWordWrap(True)
+        preset_layout.addWidget(self.builtin_description)
+        self._show_builtin_description(self.builtin_combo.currentText())
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("Saved:"))
         self.preset_combo = QComboBox()
         self._reload_presets()
         preset_row.addWidget(self.preset_combo, stretch=1)
@@ -678,9 +747,100 @@ class ColorMappingTab(QWidget):
         save_btn = QPushButton("Save As...")
         save_btn.clicked.connect(self._save_preset)
         preset_row.addWidget(save_btn)
+        preset_layout.addLayout(preset_row)
         root.addWidget(preset_box)
 
         root.addStretch(1)
+        self._update_beat_states()
+
+    # -- which Beat Sync settings are in use right now --------------------------------
+
+    def _update_beat_states(self) -> None:
+        """Grey out the Beat Sync / sequencer settings the current combination
+        doesn't use, and say why - so changing one never looks ignored."""
+        cfg = self.controller.config
+        bs, rh, sq = cfg.color_mapping.beat_sync, cfg.rhythm, cfg.sequencer
+        shared = rh.shared_clock
+        sequencing = shared and sq.enabled
+        true_white = bs.white_pulse_true_white and not bs.white_pulse_invert
+
+        clock_reason = "Beat Sync follows the shared beat clock (Rhythm box at the top)."
+        set_active(
+            [self.beat_low_spin, self.beat_high_spin, self.beat_sensitivity_slider,
+             self.beat_min_interval_slider, self.beat_min_energy_slider],
+            not shared, clock_reason,
+        )
+        show_note(self.beat_detect_note, (
+            "Beat Sync follows the shared beat clock, so its own detection settings here are greyed "
+            "out - tune detection in the Rhythm box instead."
+        ) if shared else "")
+
+        set_active([self.beat_hue_step_slider], bs.hue_mode == "step", f"Hue mode is '{bs.hue_mode}'.")
+        set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
+
+        seq_reason = "the Pulse sequencer (below) places the pulses."
+        no_clock_reason = "accent/downbeat need the shared beat clock (Rhythm box)."
+        for enabled, prob, trigger, others, note, name in (
+            (bs.dark_pulse_enabled, self.beat_dark_prob_slider, self.beat_dark_trigger_combo,
+             [self.beat_dark_duration_slider, self.beat_dark_depth_slider, self.beat_dark_attack_slider,
+              self.beat_dark_release_slider], self.beat_dark_note, "Dark"),
+            (bs.white_pulse_enabled, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo,
+             [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
+              self.beat_white_pulse_release_slider], self.beat_white_note, "White"),
+        ):
+            off_reason = f"{name} pulses are switched off."
+            set_active(others, enabled, off_reason)
+            set_active([prob], enabled and not sequencing, off_reason if not enabled else seq_reason.capitalize())
+            set_active(
+                [trigger], enabled and shared and not sequencing,
+                off_reason if not enabled else (seq_reason.capitalize() if sequencing else no_clock_reason.capitalize()),
+            )
+            if enabled and sequencing:
+                show_note(note, f"{name} pulses are placed by the Pulse sequencer, so the probability and "
+                          "trigger here are greyed out; durations and strength still apply.")
+            elif enabled and not shared:
+                show_note(note, "'accent' and 'downbeat' triggers need the shared beat clock (Rhythm box) - "
+                          "without it every beat rolls the probability.")
+            else:
+                show_note(note, "")
+
+        white = bs.white_pulse_enabled
+        set_active([self.beat_white_pulse_invert_checkbox], white, "White pulses are switched off.")
+        set_active(
+            [self.beat_white_pulse_true_white_checkbox], white and not bs.white_pulse_invert,
+            "White pulses are switched off." if not white else "Invert is on - there's no 'true white, but fully saturated'.",
+        )
+        set_active(
+            [self.beat_white_pulse_depth_slider], white and not true_white,
+            "White pulses are switched off." if not white else
+            "True white is on: the lamp switches to its real white LEDs, so there's no RGB desaturation "
+            "for Depth to scale.",
+        )
+        set_active(
+            [self.beat_white_pulse_white_brightness_slider, self.beat_white_pulse_cool_ratio_slider],
+            white and true_white,
+            "White pulses are switched off." if not white else "True white is off (or Invert is on).",
+        )
+        set_active(
+            [self.beat_white_pulse_target_combo], white and true_white and not sequencing,
+            "White pulses are switched off." if not white else (
+                seq_reason.capitalize() + " Its group walk decides the lamps." if sequencing else
+                "True white is off (or Invert is on)."
+            ),
+        )
+
+        seq_controls = [
+            self.seq_white_combo, self.seq_walk_combo, self.seq_white_density_slider, self.seq_double_slider,
+            self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
+            self.seq_phrase_combo, self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
+        ]
+        set_active([self.seq_enabled_checkbox], shared, "The sequencer needs the shared beat clock.")
+        set_active(seq_controls, sequencing, "The sequencer is off." if shared else "The sequencer needs the shared beat clock.")
+        if not shared:
+            show_note(self.seq_note, "The sequencer places pulses on the shared beat clock's grid - turn on "
+                      "'Beat Sync follows the shared clock' in the Rhythm box at the top first.")
+        else:
+            show_note(self.seq_note, "")
 
     # -- handlers -----------------------------------------------------------------------
 
@@ -712,6 +872,7 @@ class ColorMappingTab(QWidget):
         bs.min_energy = self.beat_min_energy_slider.value()
         bs.hue_mode = self.beat_hue_mode_combo.currentText()
         bs.hue_step_deg = self.beat_hue_step_slider.value()
+        bs.hue_every_n_beats = self.beat_hue_every_combo.currentData()
         bs.min_hue_jump_deg = self.beat_min_jump_slider.value()
         bs.saturation = self.beat_saturation_slider.value()
         bs.flash_brightness = self.beat_flash_slider.value()
@@ -721,6 +882,7 @@ class ColorMappingTab(QWidget):
         bs.brightness_release_ms = self.beat_bright_release_slider.value()
         bs.dark_pulse_enabled = self.beat_dark_enabled_checkbox.isChecked()
         bs.dark_pulse_probability = self.beat_dark_prob_slider.value()
+        bs.dark_pulse_trigger = self.beat_dark_trigger_combo.currentText()
         bs.dark_pulse_duration_ms = self.beat_dark_duration_slider.value()
         bs.dark_pulse_depth = self.beat_dark_depth_slider.value()
         bs.dark_pulse_attack_ms = self.beat_dark_attack_slider.value()
@@ -728,6 +890,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_enabled = self.beat_white_pulse_enabled_checkbox.isChecked()
         bs.white_pulse_invert = self.beat_white_pulse_invert_checkbox.isChecked()
         bs.white_pulse_probability = self.beat_white_pulse_prob_slider.value()
+        bs.white_pulse_trigger = self.beat_white_trigger_combo.currentText()
         bs.white_pulse_duration_ms = self.beat_white_pulse_duration_slider.value()
         bs.white_pulse_depth = self.beat_white_pulse_depth_slider.value()
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
@@ -736,6 +899,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_target = self.beat_white_pulse_target_combo.currentText()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
+        self._update_beat_states()
         self.controller.apply_config_changes()
 
     def _on_beat_white_changed(self, *_args) -> None:
@@ -815,6 +979,9 @@ class ColorMappingTab(QWidget):
         snapshot = {
             "color_mapping": cfg.color_mapping.to_dict(),
             "chase": cfg.chase.to_dict(),
+            "group_switch": cfg.group_switch.to_dict(),
+            "rhythm": cfg.rhythm.to_dict(),
+            "sequencer": cfg.sequencer.to_dict(),
             "per_lamp_chase_orders": {
                 device_id: effect.chase_order
                 for device_id, effect in cfg.per_lamp_effects.items()
@@ -837,6 +1004,13 @@ class ColorMappingTab(QWidget):
         if "color_mapping" in data:
             self.controller.config.color_mapping = ColorMappingConfig.from_dict(data["color_mapping"])
             self.controller.config.chase = ChaseEffectConfig.from_dict(data.get("chase", {}))
+            # Presets saved before these existed keep the current settings.
+            if "group_switch" in data:
+                self.controller.config.group_switch = GroupSwitchEffectConfig.from_dict(data["group_switch"])
+            if "rhythm" in data:
+                self.controller.config.rhythm = RhythmConfig.from_dict(data["rhythm"])
+            if "sequencer" in data:
+                self.controller.config.sequencer = PulseSequencerConfig.from_dict(data["sequencer"])
             for device_id, chase_order in data.get("per_lamp_chase_orders", {}).items():
                 self.controller.get_or_create_effect(device_id).chase_order = chase_order
         else:
@@ -844,7 +1018,309 @@ class ColorMappingTab(QWidget):
             # existed stored a bare color_mapping dict directly.
             self.controller.config.color_mapping = ColorMappingConfig.from_dict(data)
 
-        self.controller.apply_config_changes()
-        QMessageBox.information(
-            self, "Preset loaded", f"Loaded preset '{name}'. Reopen the Color Mapping and 8-Band tabs to see updated sliders."
+        self.controller.replace_config_settings()
+
+    def _show_builtin_description(self, name: str) -> None:
+        self.builtin_description.setText(BUILTIN_PRESETS.get(name, {}).get("description", ""))
+
+    def _apply_builtin_preset(self) -> None:
+        name = self.builtin_combo.currentText()
+        if name:
+            apply_builtin_preset(self.controller.config, name)
+            self.controller.replace_config_settings()
+
+    # -- shared beat clock -------------------------------------------------------------------
+
+    @staticmethod
+    def _trigger_combo(layout: QVBoxLayout, label: str, value: str) -> QComboBox:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        combo = QComboBox()
+        combo.addItems(list(PULSE_TRIGGERS))
+        combo.setCurrentText(value)
+        combo.setToolTip(
+            "Which beats may roll this pulse's probability at all. random: every beat. accent: only "
+            "the hardest hits. downbeat: only bar starts. accent/downbeat need the shared beat clock "
+            "(Rhythm box at the top) - without it they behave like random."
         )
+        row.addWidget(combo)
+        row.addStretch(1)
+        layout.addLayout(row)
+        return combo
+
+    def _build_rhythm_box(self, rh: RhythmConfig) -> QGroupBox:
+        box = QGroupBox("Rhythm - shared beat clock")
+        layout = QVBoxLayout(box)
+        intro = QLabel(
+            "One beat detector that every layer can follow, so the flash, the color changes, Chase and "
+            "Group Switch all move on the same beats instead of each reacting to different hits. It "
+            "locks onto the tempo, ignores off-beat hits (hi-hats, vocals), fills in a missed kick, and "
+            "counts bars so slower layers can change on bar starts. Chase / Group Switch follow it with "
+            "Speed source 'clock' (8-Band && Per-Lamp tab)."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.rhythm_shared_checkbox = QCheckBox("Beat Sync (and Beat Sync White) follow the shared clock")
+        self.rhythm_shared_checkbox.setChecked(rh.shared_clock)
+        self.rhythm_shared_checkbox.setToolTip(
+            "On: Beat Sync flashes on the clock's beats instead of its own detector (whose band/"
+            "sensitivity settings are then unused), and its pulse triggers can use accents/bar starts."
+        )
+        self.rhythm_shared_checkbox.toggled.connect(self._on_rhythm_changed)
+        layout.addWidget(self.rhythm_shared_checkbox)
+
+        band_row = QHBoxLayout()
+        band_row.addWidget(QLabel("Beat detection band:"))
+        self.rhythm_low_spin = QSpinBox()
+        self.rhythm_low_spin.setRange(20, 20000)
+        self.rhythm_low_spin.setSuffix(" Hz")
+        self.rhythm_low_spin.setValue(int(rh.detect_low_hz))
+        band_row.addWidget(self.rhythm_low_spin)
+        band_row.addWidget(QLabel("-"))
+        self.rhythm_high_spin = QSpinBox()
+        self.rhythm_high_spin.setRange(20, 20000)
+        self.rhythm_high_spin.setSuffix(" Hz")
+        self.rhythm_high_spin.setValue(int(rh.detect_high_hz))
+        band_row.addWidget(self.rhythm_high_spin)
+        band_row.addStretch(1)
+        layout.addLayout(band_row)
+        for spin in (self.rhythm_low_spin, self.rhythm_high_spin):
+            spin.setToolTip(
+                "Keep this on the kick drum (default 40-150 Hz): a narrow bass band gives the cleanest, "
+                "most regular beat. A wide band also picks up hi-hats and vocals."
+            )
+            spin.valueChanged.connect(self._on_rhythm_changed)
+
+        self.rhythm_sensitivity_slider = FloatSlider(
+            "Sensitivity", 1.01, 2.0, rh.sensitivity, decimals=2,
+            tooltip="How far above the recent average a kick must rise to count. The level is in dB, so "
+            "small values are already selective - around 1.08-1.15 suits most music. Once the tempo "
+            "is locked, missed kicks are filled in anyway, so erring on the high side is fine.",
+        )
+        self.rhythm_min_interval_slider = FloatSlider(
+            "Min interval", 50.0, 1000.0, rh.min_interval_ms, decimals=0, suffix=" ms",
+            tooltip="Minimum time between two detected kicks before the tempo is locked (after that, "
+            "the tempo itself decides).",
+        )
+        self.rhythm_min_energy_slider = FloatSlider(
+            "Min energy floor", 0.0, 1.0, rh.min_energy, decimals=2,
+            tooltip="Below this level nothing counts as a beat, and the clock stops when the music does.",
+        )
+        self.rhythm_lead_slider = FloatSlider(
+            "Lead time", 0.0, 300.0, rh.lead_ms, decimals=0, suffix=" ms",
+            tooltip="Once the tempo is locked, send each beat this much early so the lamps light up ON "
+            "the beat instead of after it (Wi-Fi + bulb reaction is typically ~100-150 ms). Raise it if "
+            "the flashes look late, lower it if they look early. 0 = react to the actual kick.",
+        )
+        self.rhythm_accent_slider = FloatSlider(
+            "Accent share", 0.05, 1.0, rh.accent_ratio, decimals=2,
+            tooltip="What share of beats count as accents (the hardest hits) for pulse triggers set to "
+            "'accent' - 0.25 = the hardest quarter.",
+        )
+        for w in (
+            self.rhythm_sensitivity_slider,
+            self.rhythm_min_interval_slider,
+            self.rhythm_min_energy_slider,
+            self.rhythm_lead_slider,
+            self.rhythm_accent_slider,
+        ):
+            w.valueChanged.connect(self._on_rhythm_changed)
+            layout.addWidget(w)
+
+        bar_row = QHBoxLayout()
+        self.rhythm_lock_checkbox = QCheckBox("Lock to tempo")
+        self.rhythm_lock_checkbox.setChecked(rh.tempo_lock)
+        self.rhythm_lock_checkbox.setToolTip(
+            "On: once a steady tempo is found, only kicks near the expected beat count, missing ones are "
+            "filled in, and Lead time applies. Off: every detected kick is a beat, as-is."
+        )
+        self.rhythm_lock_checkbox.toggled.connect(self._on_rhythm_changed)
+        bar_row.addWidget(self.rhythm_lock_checkbox)
+        bar_row.addSpacing(20)
+        bar_row.addWidget(QLabel("Beats per bar:"))
+        self.rhythm_bpb_spin = QSpinBox()
+        self.rhythm_bpb_spin.setRange(2, 8)
+        self.rhythm_bpb_spin.setValue(rh.beats_per_bar)
+        self.rhythm_bpb_spin.setToolTip("4 for almost all pop/dance music; 3 for waltz time.")
+        self.rhythm_bpb_spin.valueChanged.connect(self._on_rhythm_changed)
+        bar_row.addWidget(self.rhythm_bpb_spin)
+        bar_row.addStretch(1)
+        layout.addLayout(bar_row)
+
+        self.rhythm_status_label = QLabel()
+        layout.addWidget(self.rhythm_status_label)
+        self._rhythm_timer = QTimer(self)
+        self._rhythm_timer.timeout.connect(self._refresh_rhythm_status)
+        self._rhythm_timer.start(200)
+        self._refresh_rhythm_status()
+        return box
+
+    # -- pulse sequencer ---------------------------------------------------------------------
+
+    def _build_sequencer_box(self, sq: PulseSequencerConfig) -> QGroupBox:
+        box = QGroupBox("Pulse sequencer - white and dark pulses on musical positions")
+        layout = QVBoxLayout(box)
+        intro = QLabel(
+            "Instead of rolling a probability on every beat, places the white and dark pulses above "
+            "like a lighting operator would: on rhythm patterns in 16th notes (also between the "
+            "beats), with the white flash walking from lamp group to lamp group (the Group Switch "
+            "groups, 'Effect group' in the Per-Lamp table), phrase fills and a dark breath before each "
+            "new phrase, and busier patterns when the music gets louder. Uses the pulse durations, "
+            "true-white brightness and cool ratio set above. Needs the shared beat clock (Rhythm box) "
+            "- while it isn't locked yet, the per-beat settings above apply."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        self.seq_enabled_checkbox = QCheckBox("Enabled")
+        self.seq_enabled_checkbox.setChecked(sq.enabled)
+        self.seq_enabled_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_enabled_checkbox)
+        self.seq_note = inactive_note()
+        layout.addWidget(self.seq_note)
+
+        self.seq_white_combo = self._labeled_combo(
+            layout, "White pattern:", WHITE_PATTERNS, sq.white_pattern,
+            "Which 16ths of the bar get a white flash. auto: follows the loudness - downbeats when "
+            "quiet, every beat in a normal groove, the 3-3-2 syncopation when it gets loud, the gallop "
+            "at the loudest. downbeats: bar starts. beats: every beat. offbeats: the 'and' between "
+            "beats. syncopated: 3-3-2 (tresillo). gallop: an 8th plus two 16ths. sixteenths: every 16th.",
+        )
+        self.seq_walk_combo = self._labeled_combo(
+            layout, "Group walk:", GROUP_WALKS, sq.group_walk,
+            "Where each white flash goes. forward: the next group each time, so the white travels "
+            "around the room. pingpong: back and forth. random: any other group. all: every lamp.",
+        )
+        self.seq_white_density_slider = FloatSlider(
+            "White density", 0.0, 1.0, sq.white_density, decimals=2,
+            tooltip="Chance each pattern step actually flashes - below 1 leaves gaps, so the pattern "
+            "breathes instead of being mechanical.",
+        )
+        self.seq_double_slider = FloatSlider(
+            "Double chance", 0.0, 1.0, sq.double_chance, decimals=2,
+            tooltip="Chance a flash repeats in the same group an 8th later - a quick 'da-dam' in one "
+            "spot among the walking flashes.",
+        )
+        self.seq_gap_slider = FloatSlider(
+            "Min gap per lamp", 100.0, 1000.0, sq.min_group_gap_ms, decimals=0, suffix=" ms",
+            tooltip="A lamp never starts two white flashes closer than this. Switching to white and "
+            "back takes several commands, so too little here can make lamps lag or get stuck.",
+        )
+        for combo in (self.seq_white_combo, self.seq_walk_combo):
+            combo.currentTextChanged.connect(self._on_sequencer_changed)
+        self.seq_dark_combo = self._labeled_combo(
+            layout, "Dark pattern:", DARK_PATTERNS, sq.dark_pattern,
+            "Where the dark pulses (a short dip toward black) go. before_downbeat: the last 16th "
+            "before each bar - a breath, then the downbeat hits. before_phrase: only before a new "
+            "phrase. before_backbeats: before beats 2 and 4 too. stutter: fast dark 16ths in the "
+            "phrase-end fill. auto: more of these the louder the music is.",
+        )
+        self.seq_dark_density_slider = FloatSlider(
+            "Dark density", 0.0, 1.0, sq.dark_density, decimals=2,
+            tooltip="Chance each dark step actually happens (the breath before a phrase always does, "
+            "when Phrase accents is on).",
+        )
+        self.seq_dark_length_slider = FloatSlider(
+            "Dark length", 0.3, 3.0, sq.dark_length, decimals=2, suffix="x",
+            tooltip="Multiplies the dark pulse duration set above - longer reads as a deeper breath.",
+        )
+        self.seq_dark_combo.currentTextChanged.connect(self._on_sequencer_changed)
+        for w in (
+            self.seq_white_density_slider,
+            self.seq_double_slider,
+            self.seq_gap_slider,
+            self.seq_dark_density_slider,
+            self.seq_dark_length_slider,
+        ):
+            w.valueChanged.connect(self._on_sequencer_changed)
+            layout.addWidget(w)
+
+        phrase_row = QHBoxLayout()
+        phrase_row.addWidget(QLabel("Phrase length:"))
+        self.seq_phrase_combo = choice_combo(
+            PHRASE_LENGTHS, sq.phrase_bars,
+            "Most pop and dance music is built from 4- or 8-bar phrases: something changes or a new "
+            "part starts every 8 bars. The fill, breath and accent below mark those boundaries.",
+        )
+        self.seq_phrase_combo.currentIndexChanged.connect(self._on_sequencer_changed)
+        phrase_row.addWidget(self.seq_phrase_combo)
+        phrase_row.addStretch(1)
+        layout.addLayout(phrase_row)
+
+        self.seq_fills_checkbox = QCheckBox("Fills (denser flashes at the end of each phrase)")
+        self.seq_fills_checkbox.setChecked(sq.fills)
+        self.seq_accent_checkbox = QCheckBox("Phrase accents (dark breath, then every lamp flashes on the new phrase)")
+        self.seq_accent_checkbox.setChecked(sq.phrase_accent)
+        self.seq_drop_checkbox = QCheckBox("Follow drops (a quiet-to-loud jump starts a new phrase right there)")
+        self.seq_drop_checkbox.setChecked(sq.drop_detection)
+        for cb in (self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox):
+            cb.toggled.connect(self._on_sequencer_changed)
+            layout.addWidget(cb)
+        return box
+
+    @staticmethod
+    def _labeled_combo(layout: QVBoxLayout, label: str, items, value: str, tooltip: str) -> QComboBox:
+        row = QHBoxLayout()
+        row.addWidget(QLabel(label))
+        combo = QComboBox()
+        combo.addItems(list(items))
+        combo.setCurrentText(value)
+        combo.setToolTip(tooltip)
+        row.addWidget(combo)
+        row.addStretch(1)
+        layout.addLayout(row)
+        return combo
+
+    def _on_sequencer_changed(self, *_args) -> None:
+        sq = self.controller.config.sequencer
+        sq.enabled = self.seq_enabled_checkbox.isChecked()
+        sq.white_pattern = self.seq_white_combo.currentText()
+        sq.group_walk = self.seq_walk_combo.currentText()
+        sq.white_density = self.seq_white_density_slider.value()
+        sq.double_chance = self.seq_double_slider.value()
+        sq.min_group_gap_ms = self.seq_gap_slider.value()
+        sq.dark_pattern = self.seq_dark_combo.currentText()
+        sq.dark_density = self.seq_dark_density_slider.value()
+        sq.dark_length = self.seq_dark_length_slider.value()
+        sq.phrase_bars = self.seq_phrase_combo.currentData()
+        sq.fills = self.seq_fills_checkbox.isChecked()
+        sq.phrase_accent = self.seq_accent_checkbox.isChecked()
+        sq.drop_detection = self.seq_drop_checkbox.isChecked()
+        self._update_beat_states()
+        self.controller.apply_config_changes()
+
+    def _on_rhythm_changed(self, *_args) -> None:
+        rh = self.controller.config.rhythm
+        rh.shared_clock = self.rhythm_shared_checkbox.isChecked()
+        rh.detect_low_hz = self.rhythm_low_spin.value()
+        rh.detect_high_hz = self.rhythm_high_spin.value()
+        rh.sensitivity = self.rhythm_sensitivity_slider.value()
+        rh.min_interval_ms = self.rhythm_min_interval_slider.value()
+        rh.min_energy = self.rhythm_min_energy_slider.value()
+        rh.lead_ms = self.rhythm_lead_slider.value()
+        rh.accent_ratio = self.rhythm_accent_slider.value()
+        rh.tempo_lock = self.rhythm_lock_checkbox.isChecked()
+        bar_changed = rh.beats_per_bar != self.rhythm_bpb_spin.value()
+        rh.beats_per_bar = self.rhythm_bpb_spin.value()
+        if bar_changed:
+            # The every-N-beats choices on both settings tabs depend on the bar length.
+            self.controller.replace_config_settings()
+            return
+        self._update_beat_states()
+        self.controller.apply_config_changes()
+
+    def _refresh_rhythm_status(self) -> None:
+        engine = self.controller.engine
+        if not engine.running or not engine.clock_active:
+            self.rhythm_status_label.setText("Clock: idle (not running, or nothing is following it)")
+            return
+        beat = engine.latest_clock_beat
+        tempo = f"{beat.bpm:.0f} BPM" if beat.bpm else "finding tempo..."
+        lock = "locked" if beat.locked else "not locked"
+        bar = self.controller.config.rhythm.beats_per_bar
+        text = f"Clock: {tempo}, {lock}, beat {beat.bar_position + 1}/{bar}"
+        seq = engine.sequencer_status
+        if seq is not None:
+            text += f"  |  phrase bar {seq['phrase_bar'] + 1}/{seq['phrase_bars']}, loudness: {seq['level']}"
+        self.rhythm_status_label.setText(text)

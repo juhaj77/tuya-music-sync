@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from ...config.schema import BandDefinition, PerLampEffect
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
+from ..widgets.musical import beat_divisions, choice_combo, inactive_note, set_active, show_note
 from ..widgets.param_slider import FloatSlider
 
 _BAND_COLUMNS = ["Name", "Low (Hz)", "High (Hz)"]
@@ -284,7 +285,7 @@ class BandModeTab(QWidget):
         sync_mode_row = QHBoxLayout()
         sync_mode_row.addWidget(QLabel("Speed source:"))
         self.chase_sync_mode_combo = QComboBox()
-        self.chase_sync_mode_combo.addItems(["off", "beat", "intensity_peak"])
+        self.chase_sync_mode_combo.addItems(["off", "beat", "intensity_peak", "clock"])
         self.chase_sync_mode_combo.setCurrentText(ch.sync_mode)
         self.chase_sync_mode_combo.setToolTip(
             "off: use the constant Speed slider above. beat/intensity_peak: ignore that slider and "
@@ -298,7 +299,9 @@ class BandModeTab(QWidget):
             "off: constant speed above, ignoring audio. beat: sits still and only advances on a "
             "detected bass-drum-style hit. intensity_peak: sits still and only advances on ANY sudden "
             "loudness spike (better for tracks without a strong, steady beat). Both hit-based modes "
-            "never drift on their own between hits - they move only with the actual rhythm."
+            "never drift on their own between hits - they move only with the actual rhythm. clock: "
+            "steps on the shared beat clock (Color Mapping tab, Rhythm box) every N beats below - the "
+            "same beats every other clock-driven layer uses."
         )
         sync_mode_label.setWordWrap(True)
         speed_col.addWidget(sync_mode_label)
@@ -316,6 +319,11 @@ class BandModeTab(QWidget):
         )
         multiplier_label.setWordWrap(True)
         speed_col.addWidget(multiplier_label)
+        self.chase_clock_every_combo, self.chase_clock_steps_spin = self._clock_controls(
+            speed_col, ch.clock_every_n_beats, ch.beat_multiplier, "lamp-steps", self._on_chase_changed
+        )
+        self.chase_mode_note = inactive_note()
+        speed_col.addWidget(self.chase_mode_note)
 
         beat_detect_row = QHBoxLayout()
         beat_detect_row.addWidget(QLabel("Beat detection band:"))
@@ -547,7 +555,7 @@ class BandModeTab(QWidget):
         gs_sync_mode_row = QHBoxLayout()
         gs_sync_mode_row.addWidget(QLabel("Speed source:"))
         self.gs_sync_mode_combo = QComboBox()
-        self.gs_sync_mode_combo.addItems(["off", "beat", "intensity_peak"])
+        self.gs_sync_mode_combo.addItems(["off", "beat", "intensity_peak", "clock"])
         self.gs_sync_mode_combo.setCurrentText(gs.sync_mode)
         self.gs_sync_mode_combo.setToolTip(
             "off: use the constant Speed slider above. beat/intensity_peak: ignore that slider and "
@@ -561,7 +569,9 @@ class BandModeTab(QWidget):
             "off: constant speed above, ignoring audio. beat: sits still and only switches on a "
             "detected bass-drum-style hit. intensity_peak: sits still and only switches on ANY sudden "
             "loudness spike (better for tracks without a strong, steady beat). Both hit-based modes "
-            "never switch on their own between hits - they move only with the actual rhythm."
+            "never switch on their own between hits - they move only with the actual rhythm. clock: "
+            "switches on the shared beat clock (Color Mapping tab, Rhythm box) every N beats below - "
+            "e.g. 4 = once per bar."
         )
         gs_sync_mode_label.setWordWrap(True)
         gs_speed_col.addWidget(gs_sync_mode_label)
@@ -579,6 +589,11 @@ class BandModeTab(QWidget):
         )
         gs_multiplier_label.setWordWrap(True)
         gs_speed_col.addWidget(gs_multiplier_label)
+        self.gs_clock_every_combo, self.gs_clock_steps_spin = self._clock_controls(
+            gs_speed_col, gs.clock_every_n_beats, gs.beat_multiplier, "groups", self._on_group_switch_changed
+        )
+        self.gs_mode_note = inactive_note()
+        gs_speed_col.addWidget(self.gs_mode_note)
 
         gs_beat_detect_row = QHBoxLayout()
         gs_beat_detect_row.addWidget(QLabel("Beat detection band:"))
@@ -727,6 +742,7 @@ class BandModeTab(QWidget):
         self._populated_lamps = None
         controller.lampsChanged.connect(self._populate_effects_table)
         self._populate_effects_table()
+        self._update_overlay_states()
 
     # -- band definitions --------------------------------------------------------------
 
@@ -859,6 +875,69 @@ class BandModeTab(QWidget):
         setattr(effect, attr, value)
         self.controller.apply_config_changes()
 
+    def _clock_controls(self, layout: QVBoxLayout, every: int, multiplier: float, unit: str, on_change):
+        """Speed source 'clock': how often (a fixed musical division, so moves
+        always land on the same place in the bar) and how far (whole steps -
+        a fraction would park the highlight between two lamps)."""
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Clock: move"))
+        combo = choice_combo(
+            beat_divisions(self.controller.config.rhythm.beats_per_bar), every,
+            "Only used when Speed source is 'clock' - moves on the shared beat clock, counted from the "
+            "bar start, so every move lands on the same place in the bar. The choices follow Beats per "
+            "bar (Color Mapping tab, Rhythm box).",
+        )
+        combo.currentIndexChanged.connect(on_change)
+        row.addWidget(combo)
+        row.addWidget(QLabel("by"))
+        spin = QSpinBox()
+        spin.setRange(1, 8)
+        spin.setValue(max(1, int(round(multiplier))))
+        spin.setSuffix(f" {unit}")
+        spin.setToolTip(
+            f"Only used when Speed source is 'clock' - how many {unit} each move advances. Whole steps "
+            "only: with the clock, a half step would leave the highlight halfway between two lamps."
+        )
+        spin.valueChanged.connect(on_change)
+        row.addWidget(spin)
+        row.addStretch(1)
+        layout.addLayout(row)
+        return combo, spin
+
+    def _update_overlay_states(self) -> None:
+        """Grey out whatever the chosen Speed source / color mode doesn't use."""
+        for prefix, name in (("chase", "Chase"), ("gs", "Group Switch")):
+            w = lambda n: getattr(self, f"{prefix}_{n}")  # noqa: E731
+            mode = w("sync_mode_combo").currentText()
+            reason = f"{name}'s Speed source is '{mode}'."
+            set_active([w("speed_slider")], mode == "off", reason)
+            set_active([w("multiplier_slider")], mode in ("beat", "intensity_peak"), reason)
+            set_active(
+                [w("beat_low_spin"), w("beat_high_spin"), w("beat_sensitivity_slider"), w("beat_min_interval_slider")],
+                mode == "beat", reason,
+            )
+            set_active(
+                [w("peak_low_spin"), w("peak_high_spin"), w("peak_sensitivity_slider"), w("peak_min_interval_slider")],
+                mode == "intensity_peak", reason,
+            )
+            set_active([w("clock_every_combo"), w("clock_steps_spin")], mode == "clock", reason)
+            notes = {
+                "off": "Speed source 'off': only the constant Speed is used - the hit, detector and clock "
+                "settings are greyed out.",
+                "beat": "Speed source 'beat': moves on this overlay's own beat detector (the Beat detection "
+                "settings). Constant speed, peak and clock settings are greyed out.",
+                "intensity_peak": "Speed source 'intensity_peak': moves on loudness peaks (the Peak detection "
+                "settings). Constant speed, beat and clock settings are greyed out.",
+                "clock": "Speed source 'clock': moves on the shared beat clock, set up in the Color Mapping "
+                "tab's Rhythm box - this overlay's own detector settings are greyed out.",
+            }
+            show_note(w("mode_note"), notes.get(mode, ""))
+
+            color_mode = w("color_mode_combo").currentText()
+            color_reason = f"{name}'s color mode is '{color_mode}'."
+            set_active([w("hue_slider"), w("sat_slider")], color_mode in ("custom", "hue_shift"), color_reason)
+            set_active([w("hue_shift_slider")], color_mode == "hue_shift", color_reason)
+
     # -- chase overlay --------------------------------------------------------------------
 
     def _on_chase_changed(self, *_args) -> None:
@@ -868,7 +947,11 @@ class BandModeTab(QWidget):
         ch.speed_rotations_per_s = self.chase_speed_slider.value()
         ch.reverse = self.chase_reverse_checkbox.isChecked()
         ch.sync_mode = self.chase_sync_mode_combo.currentText()
-        ch.beat_multiplier = self.chase_multiplier_slider.value()
+        if ch.sync_mode == "clock":
+            ch.beat_multiplier = float(self.chase_clock_steps_spin.value())
+        else:
+            ch.beat_multiplier = self.chase_multiplier_slider.value()
+        ch.clock_every_n_beats = self.chase_clock_every_combo.currentData()
         ch.beat_detect_low_hz = self.chase_beat_low_spin.value()
         ch.beat_detect_high_hz = self.chase_beat_high_spin.value()
         ch.beat_sensitivity = self.chase_beat_sensitivity_slider.value()
@@ -884,6 +967,7 @@ class BandModeTab(QWidget):
         ch.custom_hue_deg = self.chase_hue_slider.value()
         ch.custom_saturation = self.chase_sat_slider.value()
         ch.hue_shift_step_deg = self.chase_hue_shift_slider.value()
+        self._update_overlay_states()
         self.controller.apply_config_changes()
 
     # -- group switch overlay --------------------------------------------------------------
@@ -894,7 +978,11 @@ class BandModeTab(QWidget):
         gs.speed_rotations_per_s = self.gs_speed_slider.value()
         gs.reverse = self.gs_reverse_checkbox.isChecked()
         gs.sync_mode = self.gs_sync_mode_combo.currentText()
-        gs.beat_multiplier = self.gs_multiplier_slider.value()
+        if gs.sync_mode == "clock":
+            gs.beat_multiplier = float(self.gs_clock_steps_spin.value())
+        else:
+            gs.beat_multiplier = self.gs_multiplier_slider.value()
+        gs.clock_every_n_beats = self.gs_clock_every_combo.currentData()
         gs.beat_detect_low_hz = self.gs_beat_low_spin.value()
         gs.beat_detect_high_hz = self.gs_beat_high_spin.value()
         gs.beat_sensitivity = self.gs_beat_sensitivity_slider.value()
@@ -908,4 +996,5 @@ class BandModeTab(QWidget):
         gs.custom_hue_deg = self.gs_hue_slider.value()
         gs.custom_saturation = self.gs_sat_slider.value()
         gs.hue_shift_step_deg = self.gs_hue_shift_slider.value()
+        self._update_overlay_states()
         self.controller.apply_config_changes()

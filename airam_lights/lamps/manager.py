@@ -27,8 +27,9 @@ from typing import Dict, List, Optional
 
 from ..color.models import Color, WhiteTarget
 from ..config.schema import DeviceConfig, NetworkConfig
-from .discovery import DiscoveredDevice, scan_network
-from .tuya_device import LampDevice
+from . import cloud_keys
+from .discovery import DiscoveredDevice, find_device_address, scan_network
+from .tuya_device import KEY_CODES, UNREACHABLE_CODES, LampDevice
 
 logger = logging.getLogger("airam_lights.lamps")
 
@@ -58,6 +59,17 @@ _WHITE_RETRY_COOLDOWN_S = 30.0
 # connection is dead, so this only fires once failures are clearly not
 # limited to just the white-mode DP layout issue that threshold covers.
 _RECONNECT_THRESHOLD = 8
+
+# If this many reconnects in a row haven't brought the lamp back, stop
+# retrying at the (backed-off) send rate and park the lamp in a "dormant"
+# state: it's skipped by the show, and a single connectivity probe runs every
+# _DORMANT_PROBE_INTERVAL_S instead - with automatic fixes for the two causes
+# that don't go away on their own (a new IP from DHCP, a new local_key after
+# re-pairing). The moment a probe succeeds, the lamp rejoins the show.
+_DORMANT_AFTER_RECONNECTS = 2
+_DORMANT_PROBE_INTERVAL_S = 15.0
+_REDISCOVER_INTERVAL_S = 120.0
+_CLOUD_KEY_INTERVAL_S = 600.0
 
 
 @dataclass
@@ -106,6 +118,13 @@ class LampWorker(threading.Thread):
         self._white_unsupported = False
         self._white_retry_after = 0.0  # perf_counter() timestamp - see _WHITE_RETRY_COOLDOWN_S
 
+        # See _DORMANT_AFTER_RECONNECTS.
+        self._reconnects_without_success = 0
+        self.dormant = False
+        self._next_probe_at = 0.0
+        self._next_rediscover_at = 0.0
+        self._next_cloud_key_at = 0.0
+
     def set_target(self, color: Color) -> None:
         with self._lock:
             self._target_color = color
@@ -140,6 +159,11 @@ class LampWorker(threading.Thread):
             got_signal = self._wake.wait(timeout=0.5)
             if self._stop.is_set():
                 break
+            if self.dormant:
+                self._wake.clear()
+                if time.perf_counter() >= self._next_probe_at:
+                    self._probe_and_recover()
+                continue
             if not got_signal:
                 continue
             self._wake.clear()
@@ -176,6 +200,7 @@ class LampWorker(threading.Thread):
         self.stats.commands_sent += 1
         self.stats.last_send_time = self._last_send_time
         self._consecutive_failures = 0
+        self._reconnects_without_success = 0
         self.device.status.online = True
         self.device.status.last_error = None
 
@@ -193,7 +218,14 @@ class LampWorker(threading.Thread):
         self._consecutive_failures += 1
         self.device.status.online = False
         self.device.status.last_error = str(e)
-        logger.warning("Failed to send to '%s' (%s): %s", self.device.config.name, self.device.config.ip, e)
+        # Only the first failure of a streak is worth a warning - the same
+        # message repeated at every backoff step just buries everything else.
+        log = logger.warning if self._consecutive_failures == 1 and self._reconnects_without_success == 0 else logger.debug
+        log("Failed to send to '%s' (%s): %s", self.device.config.name, self.device.config.ip, e)
+
+        if self._consecutive_failures >= _RECONNECT_THRESHOLD and self._reconnects_without_success + 1 >= _DORMANT_AFTER_RECONNECTS:
+            self._enter_dormant(e)
+            return
 
         if self._consecutive_failures >= _RECONNECT_THRESHOLD:
             # A bulb's persistent socket can silently die (Wi-Fi blip, the
@@ -204,11 +236,12 @@ class LampWorker(threading.Thread):
             # to accept a fresh connection); do the app-side equivalent
             # instead - tear down and rebuild the tinytuya connection, then
             # give this device a clean slate to try again with.
-            logger.warning(
+            logger.info(
                 "'%s' (%s) failed %d times in a row - reconnecting (rebuilding the connection)...",
                 self.device.config.name, self.device.config.ip, self._consecutive_failures,
             )
             self.device.reconnect()
+            self._reconnects_without_success += 1
             self._consecutive_failures = 0
             self._colour_mode_ensured = False
             self._white_mode_ensured = False
@@ -220,6 +253,86 @@ class LampWorker(threading.Thread):
             # DP-layout incompatibility.
             self._consecutive_white_failures = 0
             self._white_unsupported = False
+
+    # -- dormant: a lamp that won't come back by just retrying ----------------------
+
+    def _enter_dormant(self, error: Exception) -> None:
+        self.dormant = True
+        self._next_probe_at = time.perf_counter() + _DORMANT_PROBE_INTERVAL_S
+        logger.warning(
+            "'%s' (%s) is not responding: %s. Leaving it out of the show and checking it every %ds - "
+            "it rejoins automatically as soon as it answers; the other lamps keep playing.",
+            self.device.config.name, self.device.config.ip, error, int(_DORMANT_PROBE_INTERVAL_S),
+        )
+
+    def _leave_dormant(self) -> None:
+        self.dormant = False
+        self._consecutive_failures = 0
+        self._reconnects_without_success = 0
+        self._colour_mode_ensured = False
+        self._white_mode_ensured = False
+        self._last_sent_color = None
+        self._last_sent_white = None
+        self._consecutive_white_failures = 0
+        self._white_unsupported = False
+        logger.warning("'%s' (%s) is responding again - back in the show.", self.device.config.name, self.device.config.ip)
+        self._wake.set()
+
+    def _probe_and_recover(self) -> None:
+        """One dormant-state check: probe, and if it still fails, try the
+        automatic fix that matches the error (new IP / new key)."""
+        now = time.perf_counter()
+        self._next_probe_at = now + _DORMANT_PROBE_INTERVAL_S
+        self.device.reconnect()
+        problem = self.device.probe()
+        if problem is None:
+            self._leave_dormant()
+            return
+        logger.debug("'%s' still not responding: %s", self.device.config.name, problem)
+
+        if problem.code in UNREACHABLE_CODES and now >= self._next_rediscover_at:
+            self._next_rediscover_at = now + _REDISCOVER_INTERVAL_S
+            if self._try_new_address():
+                return
+        if problem.code in KEY_CODES and now >= self._next_cloud_key_at:
+            self._next_cloud_key_at = now + _CLOUD_KEY_INTERVAL_S
+            self._try_new_key()
+
+    def _reconfigure_and_probe(self) -> bool:
+        self.device.reconfigure(self.device.config)
+        if self.device.probe() is None:
+            self._leave_dormant()
+            return True
+        return False
+
+    def _try_new_address(self) -> bool:
+        cfg = self.device.config
+        found = find_device_address(cfg.id)
+        if found is None or (found.ip == cfg.ip and found.version == cfg.version):
+            return False
+        logger.warning(
+            "'%s' found on the network at %s (protocol %s) instead of %s - updating its settings.",
+            cfg.name, found.ip, found.version, cfg.ip,
+        )
+        cfg.ip, cfg.version = found.ip, found.version
+        return self._reconfigure_and_probe()
+
+    def _try_new_key(self) -> bool:
+        cfg = self.device.config
+        try:
+            key = cloud_keys.fetch_local_keys([cfg.id]).get(cfg.id)
+        except RuntimeError as e:
+            logger.info("Couldn't check '%s''s key in the Tuya cloud: %s", cfg.name, e)
+            return False
+        if not key or key == cfg.local_key:
+            logger.info(
+                "'%s''s key in the Tuya cloud is unchanged - the lamp itself is stuck; switching it off "
+                "and on at the wall usually fixes this.", cfg.name,
+            )
+            return False
+        logger.warning("'%s''s local key changed in the Tuya cloud (re-paired?) - updating it.", cfg.name)
+        cfg.local_key = key
+        return self._reconfigure_and_probe()
 
     def _send_color(self, color: Color) -> None:
         try:
@@ -300,6 +413,33 @@ class LampManager:
             self.add_device(dc)
             return
         dev.reconfigure(dc)
+
+    def dormant_device_ids(self) -> List[str]:
+        return [device_id for device_id, w in self.workers.items() if w.dormant]
+
+    def refresh_keys_from_cloud(self) -> Dict[str, str]:
+        """Blocking: looks up every lamp's current local_key in the Tuya
+        cloud and applies the ones that changed. Returns {name: "updated" |
+        "unchanged" | "not found"}. Raises RuntimeError if the cloud can't be
+        used at all (no credentials, login failed)."""
+        keys = cloud_keys.fetch_local_keys(list(self.devices))
+        report: Dict[str, str] = {}
+        for device_id, dev in self.devices.items():
+            key = keys.get(device_id)
+            if key is None:
+                report[dev.config.name] = "not found"
+            elif key == dev.config.local_key:
+                report[dev.config.name] = "unchanged"
+            else:
+                dev.config.local_key = key
+                dev.reconfigure(dev.config)
+                worker = self.workers.get(device_id)
+                if worker is not None:
+                    worker._next_probe_at = 0.0  # a dormant lamp gets re-checked right away
+                    worker._wake.set()
+                report[dev.config.name] = "updated"
+                logger.warning("Updated '%s''s local key from the Tuya cloud.", dev.config.name)
+        return report
 
     def set_network_config(self, network_cfg: NetworkConfig, min_change_threshold: float) -> None:
         self.network_cfg = network_cfg

@@ -233,6 +233,14 @@ class SpectrumModeConfig:
         )
 
 
+PULSE_TRIGGERS = ("random", "accent", "downbeat")
+SYNC_MODES = ("off", "beat", "intensity_peak", "clock")
+
+
+def _pulse_trigger(value) -> str:
+    return value if value in PULSE_TRIGGERS else "random"
+
+
 @dataclass
 class BeatSyncModeConfig:
     """'Beat Sync' mode: on every detected beat/onset, jump to a fresh,
@@ -248,6 +256,10 @@ class BeatSyncModeConfig:
 
     hue_mode: str = "random"  # "random" | "step" | "spectrum"
     hue_step_deg: float = 137.5  # used when hue_mode == "step" (golden angle - good spread, never repeats)
+    # Every beat still flashes, but the hue only changes on every Nth beat -
+    # e.g. 4 with the shared beat clock (RhythmConfig) = one color per bar,
+    # which reads as a pattern instead of a new random color on every hit.
+    hue_every_n_beats: int = 1
     min_hue_jump_deg: float = 60.0  # used when hue_mode == "random": force a visibly different color each hit
 
     saturation: float = 1.0
@@ -269,6 +281,11 @@ class BeatSyncModeConfig:
     # the normal flash/sustain brightness envelope is already doing.
     dark_pulse_enabled: bool = True
     dark_pulse_probability: float = 0.0  # 0..1: chance a given beat gets a pause first
+    # Which beats may roll the probability above at all: "random" = every
+    # beat; "accent" = only the hardest hits; "downbeat" = only bar starts.
+    # "accent"/"downbeat" need the shared beat clock (RhythmConfig.
+    # shared_clock) - without it they behave like "random".
+    dark_pulse_trigger: str = "random"
     dark_pulse_duration_ms: float = 70.0  # how long the pause lasts
     dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
     dark_pulse_attack_ms: float = 15.0  # how fast brightness snaps down into the pause
@@ -292,6 +309,7 @@ class BeatSyncModeConfig:
     white_pulse_enabled: bool = True
     white_pulse_invert: bool = False
     white_pulse_probability: float = 0.26  # 0..1: chance a given beat's flash also gets this pulse
+    white_pulse_trigger: str = "random"  # same options as dark_pulse_trigger
     white_pulse_duration_ms: float = 45.0  # how long saturation holds at the extreme
     white_pulse_depth: float = 1.0  # 0..1: how far toward the extreme (1.0 = fully white/fully saturated)
     white_pulse_attack_ms: float = 17.0  # how fast saturation snaps toward the extreme
@@ -348,6 +366,7 @@ class BeatSyncModeConfig:
             min_energy=float(d.get("min_energy", 0.12)),
             hue_mode=d.get("hue_mode", "random"),
             hue_step_deg=float(d.get("hue_step_deg", 137.5)),
+            hue_every_n_beats=max(1, int(d.get("hue_every_n_beats", 1))),
             min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
             saturation=float(d.get("saturation", 1.0)),
             flash_brightness=float(d.get("flash_brightness", 1.0)),
@@ -357,6 +376,7 @@ class BeatSyncModeConfig:
             brightness_release_ms=float(d.get("brightness_release_ms", 350.0)),
             dark_pulse_enabled=bool(d.get("dark_pulse_enabled", True)),
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
+            dark_pulse_trigger=_pulse_trigger(d.get("dark_pulse_trigger")),
             dark_pulse_duration_ms=float(d.get("dark_pulse_duration_ms", 70.0)),
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
             dark_pulse_attack_ms=float(d.get("dark_pulse_attack_ms", 15.0)),
@@ -364,6 +384,7 @@ class BeatSyncModeConfig:
             white_pulse_enabled=bool(d.get("white_pulse_enabled", True)),
             white_pulse_invert=bool(d.get("white_pulse_invert", False)),
             white_pulse_probability=float(d.get("white_pulse_probability", 0.26)),
+            white_pulse_trigger=_pulse_trigger(d.get("white_pulse_trigger")),
             white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 45.0)),
             white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
@@ -688,8 +709,12 @@ class ChaseEffectConfig:
 
     speed_rotations_per_s: float = 0.3  # constant speed when sync_mode == "off": full loops/second
     reverse: bool = False  # flips which way the highlight travels around the chase order
-    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak"
+    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak" | "clock"
     beat_multiplier: float = 1.0  # lamp-steps advanced per detected beat/peak, when synced
+    # sync_mode == "clock": step on every Nth beat of the shared beat clock
+    # (RhythmConfig), counted from the bar start - 1 = every beat, 2 = beats
+    # 1 and 3, 4 = once per bar - so every layer moves on the same beats.
+    clock_every_n_beats: int = 1
 
     # The chase's own independent beat detector (works regardless of which
     # color mode/its own beat detector, if any, is active). Used when
@@ -751,7 +776,7 @@ class ChaseEffectConfig:
         # instead of today's 3-way "sync_mode" - translate it if that's all an
         # old saved file has.
         sync_mode = d.get("sync_mode")
-        if sync_mode not in ("off", "beat", "intensity_peak"):
+        if sync_mode not in SYNC_MODES:
             sync_mode = "beat" if d.get("sync_to_beat", False) else "off"
         return cls(
             enabled=bool(d.get("enabled", False)),
@@ -760,6 +785,7 @@ class ChaseEffectConfig:
             reverse=bool(d.get("reverse", False)),
             sync_mode=sync_mode,
             beat_multiplier=float(d.get("beat_multiplier", 1.0)),
+            clock_every_n_beats=max(1, int(d.get("clock_every_n_beats", 1))),
             beat_detect_low_hz=float(d.get("beat_detect_low_hz", 40.0)),
             beat_detect_high_hz=float(d.get("beat_detect_high_hz", 200.0)),
             beat_sensitivity=float(d.get("beat_sensitivity", 1.6)),
@@ -808,8 +834,9 @@ class GroupSwitchEffectConfig:
 
     speed_rotations_per_s: float = 0.3  # constant speed when sync_mode == "off": full loops/second
     reverse: bool = False  # flips which way the active group advances through the group order
-    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak"
+    sync_mode: str = "off"  # "off" (constant speed) | "beat" | "intensity_peak" | "clock"
     beat_multiplier: float = 1.0  # groups advanced per detected beat/peak, when synced
+    clock_every_n_beats: int = 4  # sync_mode == "clock": switch every Nth shared-clock beat (4 = once per bar)
 
     # Own independent beat detector, used when sync_mode == "beat".
     beat_detect_low_hz: float = 40.0
@@ -842,7 +869,7 @@ class GroupSwitchEffectConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "GroupSwitchEffectConfig":
         sync_mode = d.get("sync_mode")
-        if sync_mode not in ("off", "beat", "intensity_peak"):
+        if sync_mode not in SYNC_MODES:
             sync_mode = "off"
         return cls(
             enabled=bool(d.get("enabled", False)),
@@ -850,6 +877,7 @@ class GroupSwitchEffectConfig:
             reverse=bool(d.get("reverse", False)),
             sync_mode=sync_mode,
             beat_multiplier=float(d.get("beat_multiplier", 1.0)),
+            clock_every_n_beats=max(1, int(d.get("clock_every_n_beats", 4))),
             beat_detect_low_hz=float(d.get("beat_detect_low_hz", 40.0)),
             beat_detect_high_hz=float(d.get("beat_detect_high_hz", 200.0)),
             beat_sensitivity=float(d.get("beat_sensitivity", 1.6)),
@@ -1006,6 +1034,83 @@ class ManualStateConfig:
 # ---------------------------------------------------------------------------
 
 @dataclass
+class RhythmConfig:
+    """The shared beat clock (dsp.beat_clock.BeatClock): one beat source
+    that Beat Sync (when `shared_clock` is on) and the Chase / Group Switch
+    overlays (sync_mode "clock") all follow, instead of each running its own
+    detector and reacting to different hits at different moments.
+
+    The defaults target kick drums. `sensitivity` is a ratio on a dB-scaled
+    level, so small numbers above 1.0 are already selective (1.1 ~ the top
+    few percent of ticks on typical music)."""
+
+    shared_clock: bool = False  # Beat Sync / Beat Sync White follow the clock instead of their own detector
+    detect_low_hz: float = 40.0
+    detect_high_hz: float = 150.0
+    sensitivity: float = 1.1
+    min_interval_ms: float = 200.0
+    min_energy: float = 0.05
+    tempo_lock: bool = True  # lock onto the tempo: ignore off-beat hits, fill in missed beats
+    lead_ms: float = 100.0  # send locked beats this early, to cancel out network/bulb delay
+    beats_per_bar: int = 4
+    accent_ratio: float = 0.25  # the hardest this fraction of beats count as accents
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RhythmConfig":
+        return cls(
+            shared_clock=bool(d.get("shared_clock", False)),
+            detect_low_hz=float(d.get("detect_low_hz", 40.0)),
+            detect_high_hz=float(d.get("detect_high_hz", 150.0)),
+            sensitivity=float(d.get("sensitivity", 1.1)),
+            min_interval_ms=float(d.get("min_interval_ms", 200.0)),
+            min_energy=float(d.get("min_energy", 0.05)),
+            tempo_lock=bool(d.get("tempo_lock", True)),
+            lead_ms=float(d.get("lead_ms", 100.0)),
+            beats_per_bar=max(1, int(d.get("beats_per_bar", 4))),
+            accent_ratio=float(d.get("accent_ratio", 0.25)),
+        )
+
+
+@dataclass
+class PulseSequencerConfig:
+    """Beat Sync's pulses placed on musical positions (effects/
+    pulse_sequencer.py) instead of a probability roll per beat: rhythm
+    patterns on a 16th-note grid, white flashes walking from lamp group to
+    lamp group (Group Switch's groups), phrase fills and breaths, and
+    loudness-following density. Needs the shared beat clock to be locked;
+    until it is, Beat Sync's normal per-beat pulse settings apply."""
+
+    enabled: bool = False
+    white_pattern: str = "auto"  # see pulse_sequencer.WHITE_PATTERNS
+    white_density: float = 0.85  # chance each pattern step actually flashes
+    group_walk: str = "forward"  # "forward" | "pingpong" | "random" | "all"
+    double_chance: float = 0.25  # chance a flash repeats in the same group an 8th later
+    min_group_gap_ms: float = 180.0  # a lamp never starts two white flashes closer than this
+    dark_pattern: str = "auto"  # see pulse_sequencer.DARK_PATTERNS
+    dark_density: float = 0.7  # chance each dark step actually happens
+    dark_length: float = 1.0  # multiplier on Beat Sync's dark pulse duration
+    phrase_bars: int = 8  # bars per phrase (4 or 8 in most pop/dance music)
+    fills: bool = True  # denser flashes in the second half of a phrase's last bar
+    phrase_accent: bool = True  # dark breath before + all-groups flash on each phrase start
+    drop_detection: bool = True  # a quiet->loud jump restarts the phrase right there
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "PulseSequencerConfig":
+        defaults = cls()
+        kwargs = {}
+        for name, default in asdict(defaults).items():
+            value = d.get(name, default)
+            kwargs[name] = type(default)(value) if value is not None else default
+        return cls(**kwargs)
+
+
+@dataclass
 class AudioConfig:
     device_index: Optional[int] = None  # PyAudioWPatch loopback device index; None = default
     samplerate: int = 48000
@@ -1082,6 +1187,8 @@ class AppConfig:
     bands_3: List[BandDefinition] = field(default_factory=default_3band)
     bands_8: List[BandDefinition] = field(default_factory=default_8band)
     color_mapping: ColorMappingConfig = field(default_factory=ColorMappingConfig)
+    rhythm: RhythmConfig = field(default_factory=RhythmConfig)
+    sequencer: PulseSequencerConfig = field(default_factory=PulseSequencerConfig)
     per_lamp_effects: Dict[str, PerLampEffect] = field(default_factory=dict)
     chase: "ChaseEffectConfig" = field(default_factory=lambda: ChaseEffectConfig())
     group_switch: "GroupSwitchEffectConfig" = field(default_factory=lambda: GroupSwitchEffectConfig())
@@ -1099,6 +1206,8 @@ class AppConfig:
             "bands_3": [b.to_dict() for b in self.bands_3],
             "bands_8": [b.to_dict() for b in self.bands_8],
             "color_mapping": self.color_mapping.to_dict(),
+            "rhythm": self.rhythm.to_dict(),
+            "sequencer": self.sequencer.to_dict(),
             "per_lamp_effects": {k: v.to_dict() for k, v in self.per_lamp_effects.items()},
             "chase": self.chase.to_dict(),
             "group_switch": self.group_switch.to_dict(),
@@ -1118,6 +1227,8 @@ class AppConfig:
             bands_3=[BandDefinition.from_dict(x) for x in d.get("bands_3", [])] or default_3band(),
             bands_8=[BandDefinition.from_dict(x) for x in d.get("bands_8", [])] or default_8band(),
             color_mapping=ColorMappingConfig.from_dict(d.get("color_mapping", {})),
+            rhythm=RhythmConfig.from_dict(d.get("rhythm", {})),
+            sequencer=PulseSequencerConfig.from_dict(d.get("sequencer", {})),
             per_lamp_effects={
                 k: PerLampEffect.from_dict(v) for k, v in d.get("per_lamp_effects", {}).items()
             },

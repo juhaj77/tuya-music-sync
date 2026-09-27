@@ -366,6 +366,23 @@ in visualization, and save/apply named groups (e.g. "All Lamps", "Ceiling", "Lef
 The lamp list, chase rotators, and every per-lamp table scale to however many devices
 you've added - there is no fixed lamp count anywhere in the app.
 
+**When one lamp won't respond** (but still works in the phone app - which goes through
+the Tuya cloud, not your LAN): the app first rebuilds the connection itself; if that
+doesn't help, it leaves the lamp out of the show, logs the actual reason once, and
+checks it again every 15 s - the rest of the lamps keep playing, and the lamp rejoins
+automatically as soon as it answers. While checking, it also fixes the two causes that
+don't go away on their own:
+
+- **New IP address** (DHCP): it looks for the lamp on the network and updates the IP.
+- **New local key** (the lamp was reset and re-paired in the phone app): it fetches the
+  current key from the Tuya cloud, using the credentials the setup wizard saved in
+  `tinytuya.json`. **Refresh keys from Tuya cloud** in this tab does the same for every
+  lamp on demand.
+
+If the error is `Err 914` and the key in the cloud hasn't changed, the lamp's own local
+connection is stuck - switch it off and on at the wall switch; the app picks it up again
+within ~15 s without a restart.
+
 ### Color Mapping tab
 Full detail for **RGB Frequency** and **Custom** modes (per-channel frequency range,
 gain, min/max level, gamma - both modes are literally the same mechanism, Custom just
@@ -377,6 +394,80 @@ spectral contrast), and **Beat Sync** mode (see below). Also: response curve
 brightness response for every mode at once (0 becomes bright, 1 becomes black), for
 when you want quiet passages to light up and loud/energetic moments to go dark instead
 of the usual way around.
+
+#### Rhythm: the shared beat clock
+Beat Sync, Chase and Group Switch can each run their own beat detector - but then the
+same drum hit may advance one layer and not another, or advance them on different
+frames, and the combined show reads as three unrelated rhythms (i.e. random). The
+**Rhythm** box at the top of the tab adds one shared detector that every layer can
+follow instead (`airam_lights/dsp/beat_clock.py`):
+
+- **Tempo lock** - estimates the tempo from the last few seconds of the kick-drum band,
+  then only accepts hits near the expected beat (off-beat hi-hats, snares and vocals are
+  ignored) and fills in a beat when a kick is too quiet to detect, so the rhythm stays
+  regular.
+- **Lead time** - once locked, each beat is sent this many milliseconds early, cancelling
+  out the Wi-Fi + bulb reaction delay (~100-150 ms) so flashes land *on* the beat instead
+  of just after it. Raise it if flashes look late, lower it if they look early.
+- **Bars and accents** - beats are counted in bars (`Beats per bar`, 4 by default), with
+  the bar start placed on the position that usually hits hardest. The hardest hits are
+  flagged as accents.
+
+What follows the clock:
+
+- **Beat Sync** (checkbox *Beat Sync follows the shared clock*) - flashes on the clock's
+  beats. **Change hue every N beats** keeps a color for several beats (4 = one color per
+  bar) instead of a new color on every hit. Dark and white pulses get a trigger:
+  `random` (every beat rolls the probability, as before), `accent` (only the hardest
+  hits) or `downbeat` (only bar starts).
+- **Chase / Group Switch** - Speed source `clock`, moving every N beats counted from the
+  bar start (e.g. Chase every beat, Group Switch once per bar).
+
+The status line under the Rhythm box shows the detected tempo, whether it's locked, and
+the current beat in the bar.
+
+Settings that don't do anything in the current combination are **greyed out**, with the
+reason in their tooltip and a short note next to them - e.g. Beat Sync's own detection
+band while it follows the shared clock, a Chase's beat detector while its Speed source
+is `clock`, or *White pulse depth* while *True white* is on (the lamp then uses its real
+white LEDs, so there's no RGB desaturation to scale). Rhythm divisions are chosen from
+values that line up with the bar - *every beat*, *every 2 beats*, *every bar*, *every 2
+bars*... following *Beats per bar* - and phrases from 1/2/4/8/16 bars, so a setting can't
+drift against the music (e.g. "every 3 beats" in 4/4 would land on a different beat of
+each bar).
+
+#### Pulse sequencer: white and dark pulses on musical positions
+In the Beat Sync tab, the **Pulse sequencer** takes over the white and dark pulses from
+the per-beat probability rolls and places them the way a lighting operator (or a
+drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequencer.py`):
+
+- **Patterns** - which 16ths of the bar flash white: downbeats, every beat, off-beats
+  (the "and"), a 3-3-2 syncopation, a gallop, straight 16ths - or `auto`, which follows
+  the loudness: sparse when the song is quiet, busier as it gets louder.
+- **Group walk** - each white flash goes to the next lamp group (the Group Switch
+  groups), so the white travels around the room; *Double chance* sometimes repeats a
+  flash in the same group an 8th later.
+- **Dark pulses** - a breath on the last 16th before the downbeat (and before the
+  backbeats, and fast stutters in fills when it's loud), with their own density and
+  length.
+- **Phrases** - bars are counted in phrases (8 by default - most pop/dance music changes
+  something every 8 bars). The end of each phrase gets a fill (denser flashes), a dark
+  breath, and every lamp flashes on the new phrase's first beat. A sudden quiet-to-loud
+  jump (a drop) starts a new phrase right there.
+
+The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
+The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -
+in most dance music that's where the kick is strongest, so it lines up with the real
+bar start after a few bars of listening.
+
+#### Built-in looks
+**Presets -> Built-in look** sets the shared clock, Beat Sync, the pulse sequencer, Chase
+and Group Switch together: *Groove - one color per bar*, *Calm - slow color flow*,
+*Club - punchy*, *Dance - white across groups*, *Chase focus* and *Group focus*. They only change rhythm and color behavior - your lamp
+groups, Chase width/intensity, Group Switch intensity, beat detection band/sensitivity,
+lead time and true-white depth/brightness/cool ratio are left as you set them. Saved
+presets (*Save As...*) now also include the Rhythm and Group Switch settings, and loading
+any preset updates the sliders right away.
 
 #### Beat Sync mode
 The other modes blend colors continuously, which can end up looking muted/washed

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import threading
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -27,6 +28,8 @@ logger = logging.getLogger("airam_lights.ui")
 
 
 class DevicesTab(QWidget):
+    _keysRefreshed = Signal(str)  # result text, emitted from the worker thread
+
     def __init__(self, controller: AppController, parent=None):
         super().__init__(parent)
         self.controller = controller
@@ -83,7 +86,16 @@ class DevicesTab(QWidget):
         edit_btn.clicked.connect(self._edit_selected)
         remove_btn = QPushButton("Remove Selected")
         remove_btn.clicked.connect(self._remove_selected)
-        for b in (add_btn, scan_btn, edit_btn, remove_btn):
+        self.keys_btn = QPushButton("Refresh keys from Tuya cloud")
+        self.keys_btn.setToolTip(
+            "A lamp's local key changes when it's re-paired (reset and added again in the phone app) - "
+            "after that the app can't reach it, even though the phone app still works through the "
+            "cloud. This fetches every lamp's current key with the Tuya IoT credentials the setup "
+            "wizard saved (tinytuya.json) and updates the ones that changed."
+        )
+        self.keys_btn.clicked.connect(self._refresh_keys)
+        self._keysRefreshed.connect(self._on_keys_refreshed)
+        for b in (add_btn, scan_btn, edit_btn, remove_btn, self.keys_btn):
             manage_row.addWidget(b)
         manage_row.addStretch(1)
         root.addLayout(manage_row)
@@ -227,6 +239,40 @@ class DevicesTab(QWidget):
         self.controller.remove_device(self._current_selected_id)
         self.controller.save_config()
         self._current_selected_id = None
+
+    def _refresh_keys(self) -> None:
+        self.keys_btn.setEnabled(False)
+        self.hint_label.setText("Fetching the lamps' current keys from the Tuya cloud...")
+
+        def _run():
+            try:
+                report = self.controller.lamp_manager.refresh_keys_from_cloud()
+            except RuntimeError as e:
+                self._keysRefreshed.emit(f"Couldn't refresh keys: {e}")
+                return
+            except Exception as e:
+                logger.exception("Refreshing keys from the Tuya cloud failed")
+                self._keysRefreshed.emit(f"Couldn't refresh keys: {e}")
+                return
+            updated = [name for name, result in report.items() if result == "updated"]
+            missing = [name for name, result in report.items() if result == "not found"]
+            text = f"Keys updated: {', '.join(updated)}." if updated else "All keys were already up to date."
+            if missing:
+                text += f" Not found in the cloud: {', '.join(missing)}."
+            if not updated:
+                text += (
+                    " If a lamp still doesn't respond, its local connection is probably stuck - switch it "
+                    "off and on at the wall; the app picks it up again automatically."
+                )
+            self._keysRefreshed.emit(text)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_keys_refreshed(self, text: str) -> None:
+        self.keys_btn.setEnabled(True)
+        self.hint_label.setText(text)
+        if text.startswith("Keys updated"):
+            self.controller.save_config()
 
     def _scan_network(self) -> None:
         self.hint_label.setText("Scanning LAN for Tuya devices...")

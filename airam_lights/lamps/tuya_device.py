@@ -24,6 +24,39 @@ from ..config.schema import DeviceConfig
 logger = logging.getLogger("airam_lights.lamps")
 
 
+# What tinytuya's numeric error codes mean in practice for a bulb that was
+# working before, and what to do about it.
+_ERROR_HINTS = {
+    "914": "the lamp rejected the connection handshake (Err 914: key or protocol version). If the "
+    "key is still valid, the lamp's local connection is stuck - switch the lamp off and on at the "
+    "wall switch. If it was re-paired in the phone app, its key changed: use 'Refresh keys from "
+    "Tuya cloud' in the Devices tab",
+    "904": "unexpected reply from the lamp (Err 904) - usually a wrong protocol version in the "
+    "Devices tab",
+    "901": "cannot connect to the lamp at this IP (Err 901) - it's off, or its IP address changed",
+    "902": "the lamp didn't answer in time (Err 902) - weak Wi-Fi or the lamp is busy",
+    "905": "the lamp is unreachable (Err 905) - it's off, out of Wi-Fi range, or its IP changed",
+}
+
+# Codes meaning "nothing answers at this address" - worth looking for the
+# lamp at a new IP (DHCP may have handed it a different one).
+UNREACHABLE_CODES = {"901", "905"}
+KEY_CODES = {"914"}
+
+
+def describe_tuya_error(code: Optional[str], message: str) -> str:
+    return _ERROR_HINTS.get(str(code), message) if code else message
+
+
+class LampConnectionError(RuntimeError):
+    """A send failed because the lamp can't be talked to at all (as opposed
+    to a single command being rejected) - carries tinytuya's error code."""
+
+    def __init__(self, message: str, code: Optional[str] = None):
+        super().__init__(message)
+        self.code = code
+
+
 @dataclass
 class LampStatus:
     online: bool = False
@@ -32,6 +65,7 @@ class LampStatus:
     last_latency_ms: Optional[float] = None
     last_error: Optional[str] = None
     last_updated: Optional[float] = None
+    error_code: Optional[str] = None  # tinytuya "Err" code of the last failed status(), e.g. "914"
 
 
 class LampDevice:
@@ -105,9 +139,12 @@ class LampDevice:
             logger.exception("Error creating tinytuya.BulbDevice for %s", self.config.name)
 
     def reconfigure(self, config: DeviceConfig) -> None:
-        """Called when the user edits IP/local_key/version for this device."""
-        self.config = config
-        self._build()
+        """Called when IP/local_key/version change (user edit, or automatic
+        recovery from a worker/cloud-key thread - hence the lock)."""
+        with self._bulb_lock:
+            self.config = config
+            self._white_detect_attempted = False
+            self._build()
 
     def reconnect(self) -> None:
         """Tears down and rebuilds the tinytuya connection (a fresh socket,
@@ -153,11 +190,13 @@ class LampDevice:
                     last_updated=time.time(),
                 )
             elif isinstance(result, dict) and result.get("Error"):
+                code = str(result.get("Err")) if result.get("Err") else None
                 self.status = LampStatus(
                     online=False,
-                    last_error=str(result.get("Error")),
+                    last_error=describe_tuya_error(code, str(result.get("Error"))),
                     last_latency_ms=latency_ms,
                     last_updated=time.time(),
+                    error_code=code,
                 )
             else:
                 self.status = LampStatus(
@@ -171,6 +210,30 @@ class LampDevice:
             self.status = LampStatus(online=False, last_error=str(e), last_updated=time.time())
             logger.warning("status() failed for '%s' (%s): %s", self.config.name, self.config.ip, e)
             raise
+
+    def probe(self) -> Optional[LampConnectionError]:
+        """Blocking connectivity check (one status() call). None if the lamp
+        answered, otherwise the reason. Never raises."""
+        try:
+            status = self.refresh_status()
+        except Exception as e:
+            return LampConnectionError(str(e))
+        if status.online:
+            return None
+        return LampConnectionError(status.last_error or "no answer", status.error_code)
+
+    def _ensure_detected(self) -> None:
+        """tinytuya only learns the bulb's DP layout from a successful
+        status() reply - until then every command fails with a bare "Bulb not
+        configured", hiding the real problem (bad key, wrong IP, stuck lamp).
+        Ask once up front and raise the actual reason. Caller holds _bulb_lock."""
+        if getattr(self._bulb, "bulb_configured", True):
+            return
+        result = self._bulb.status()
+        if isinstance(result, dict) and result.get("Error"):
+            code = str(result.get("Err")) if result.get("Err") else None
+            self.status.error_code = code
+            raise LampConnectionError(describe_tuya_error(code, str(result.get("Error"))), code)
 
     # -- write ----------------------------------------------------------------
 
@@ -191,11 +254,13 @@ class LampDevice:
             raise RuntimeError(self._connect_error or "device not initialized")
         t0 = time.perf_counter()
         with self._bulb_lock:
+            self._ensure_detected()
             self._bulb.set_colour(r, g, b, nowait=not wait_for_ack)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self.status.last_latency_ms = latency_ms
         self.status.online = True
         self.status.last_error = None
+        self.status.error_code = None
         return latency_ms
 
     def set_brightness_percent(self, percent: float, wait_for_ack: bool = False) -> float:

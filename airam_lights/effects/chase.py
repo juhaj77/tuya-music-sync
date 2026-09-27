@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Sequence, Set
 
 from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
 from ..config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
+from ..dsp.beat_clock import ClockBeat, beat_divides
 from ..dsp.beat_detector import BeatDetector
 
 
@@ -196,6 +197,7 @@ class ChaseAnimator:
         intensity_energy: Optional[float] = None,
         now_s: Optional[float] = None,
         dwell_weights: Optional[Sequence[float]] = None,
+        clock_beat: Optional[ClockBeat] = None,
     ) -> None:
         """Advances the chase position. `num_positions` is the current
         number of distinct chase groups (from `get_chase_groups`) - it can
@@ -230,6 +232,11 @@ class ChaseAnimator:
         scales the size of each discrete hit-triggered step instead, so a
         higher-dwell position still ends up "held" relatively longer across
         many hits.
+
+        sync_mode == "clock": same event-driven stepping, but on the shared
+        beat clock's beats (`clock_beat`, from the engine) - only every
+        `clock_every_n_beats`th one, counted from the bar start - so Chase
+        moves on exactly the same beats as every other clock-driven layer.
         """
         cfg = self.config
         n = max(1, num_positions)
@@ -241,6 +248,9 @@ class ChaseAnimator:
             delta = direction * cfg.beat_multiplier / local_dwell if triggered else 0.0
         elif cfg.sync_mode == "intensity_peak" and now_s is not None:
             triggered = intensity_energy is not None and self._peak_detector.update(intensity_energy, now_s)
+            delta = direction * cfg.beat_multiplier / local_dwell if triggered else 0.0
+        elif cfg.sync_mode == "clock" and now_s is not None:
+            triggered = clock_beat is not None and beat_divides(clock_beat, cfg.clock_every_n_beats)
             delta = direction * cfg.beat_multiplier / local_dwell if triggered else 0.0
         else:
             steps_per_s = cfg.speed_rotations_per_s * n
@@ -412,7 +422,8 @@ class GroupSwitchAnimator:
     ChaseAnimator.tick() (see its docstring for the full rationale): "off"
     advances continuously at `speed_rotations_per_s`; "beat"/
     "intensity_peak" sit still and only step `beat_multiplier` groups on an
-    actual detected hit; with no `now_s` at all (no time/audio context to
+    actual detected hit; "clock" steps on every `clock_every_n_beats`th
+    shared-clock beat; with no `now_s` at all (no time/audio context to
     sync to), both fall back to the same constant speed as "off".
 
     Deliberately no "num_rotators"-style multi-active-group support (yet) -
@@ -454,6 +465,7 @@ class GroupSwitchAnimator:
         beat_band_energy: Optional[float] = None,
         intensity_energy: Optional[float] = None,
         now_s: Optional[float] = None,
+        clock_beat: Optional[ClockBeat] = None,
     ) -> None:
         cfg = self.config
         n = max(1, num_positions)
@@ -464,6 +476,9 @@ class GroupSwitchAnimator:
             delta = direction * cfg.beat_multiplier if triggered else 0.0
         elif cfg.sync_mode == "intensity_peak" and now_s is not None:
             triggered = intensity_energy is not None and self._peak_detector.update(intensity_energy, now_s)
+            delta = direction * cfg.beat_multiplier if triggered else 0.0
+        elif cfg.sync_mode == "clock" and now_s is not None:
+            triggered = clock_beat is not None and beat_divides(clock_beat, cfg.clock_every_n_beats)
             delta = direction * cfg.beat_multiplier if triggered else 0.0
         else:
             steps_per_s = cfg.speed_rotations_per_s * n
