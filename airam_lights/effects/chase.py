@@ -109,6 +109,20 @@ def get_chase_groups(per_lamp_effects: Dict[str, PerLampEffect], selected_ids: S
     return get_effect_order_groups(per_lamp_effects, selected_ids, "chase_order")
 
 
+def spread_positions(positions: List[List[str]], index: int, rotators: int = 1) -> Set[str]:
+    """The lamps at `index` plus `rotators - 1` more positions evenly spaced
+    around the loop - 2 = the opposite side too, 3 = thirds, and so on (the
+    same spacing Chase's num_rotators uses)."""
+    n = len(positions)
+    if n == 0:
+        return set()
+    count = max(1, min(int(rotators), n))
+    lamps: Set[str] = set()
+    for k in range(count):
+        lamps.update(positions[(index + int(round(k * n / count))) % n])
+    return lamps
+
+
 def get_group_switch_groups(per_lamp_effects: Dict[str, PerLampEffect], selected_ids: Sequence[str]) -> List[List[str]]:
     """Lamps grouped by PerLampEffect.effect_group - see get_effect_order_groups().
     A separate, independent grouping from get_chase_groups()'s chase_order -

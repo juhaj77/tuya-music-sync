@@ -268,3 +268,77 @@ def test_old_decay_mode_setting_is_migrated():
     old = BeatSyncModeConfig.from_dict({"decay_mode": "hue"})
     assert old.glide_hue and not old.fade_brightness
     assert BeatSyncModeConfig.from_dict({}).fade_brightness and not BeatSyncModeConfig.from_dict({}).glide_hue
+
+
+def _white_starts(engine, clock, seconds):
+    starts, previous = [], set()
+
+    def on_tick():
+        nonlocal previous
+        current = set(engine.latest_lamp_white_targets)
+        if current - previous:
+            starts.append(frozenset(current - previous))
+        previous = current
+
+    _run(engine, clock, seconds, on_tick)
+    return starts
+
+
+def _rotate_config(rotators):
+    def configure(c):
+        bs = c.color_mapping.beat_sync
+        bs.white_pulse_enabled = True
+        bs.white_pulse_probability = 1.0
+        bs.white_pulse_trigger = "random"
+        bs.white_pulse_duration_ms = 40.0
+        bs.white_pulse_release_ms = 30.0
+        bs.white_pulse_target = "rotate"
+        bs.white_pulse_rotators = rotators
+        # A Chase that jumps 3 lamps per beat: following it would skip lamps.
+        c.chase.enabled = True
+        c.chase.sync_mode = "clock"
+        c.chase.clock_every_n_beats = 1
+        c.chase.beat_multiplier = 3.0
+
+    return configure
+
+
+def test_rotating_white_never_skips_a_lamp(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _rotate_config(1))
+    _run(engine, clock, 6.0, lambda: None)
+    starts = _white_starts(engine, clock, 6.0)
+    assert len(starts) >= 8
+    order = [DEVICES.index(next(iter(s))) for s in starts]
+    assert all(len(s) == 1 for s in starts)
+    assert all(b == (a + 1) % 4 for a, b in zip(order, order[1:]))
+
+
+def test_rotating_white_two_opposite_lamps(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _rotate_config(2))
+    _run(engine, clock, 6.0, lambda: None)
+    starts = _white_starts(engine, clock, 6.0)
+    assert starts and all(s in ({"a", "c"}, {"b", "d"}) for s in starts)
+    assert all(x != y for x, y in zip(starts, starts[1:]))
+
+
+def test_sequencer_walks_the_chase_order_with_evenly_spaced_lamps(monkeypatch):
+    def configure(c):
+        bs = c.color_mapping.beat_sync
+        bs.white_pulse_enabled = True
+        bs.white_pulse_duration_ms = 40.0
+        bs.white_pulse_release_ms = 30.0
+        bs.white_pulse_rotators = 2
+        c.sequencer.enabled = True
+        c.sequencer.white_pattern = "beats"
+        c.sequencer.white_density = 1.0
+        c.sequencer.double_chance = 0.0
+        c.sequencer.dark_pattern = "off"
+        c.sequencer.phrase_accent = False
+        c.sequencer.fills = False
+        c.sequencer.walk_positions = "chase_order"
+
+    engine, clock, _ = _make_engine(monkeypatch, configure)
+    _run(engine, clock, 6.0, lambda: None)
+    starts = _white_starts(engine, clock, 6.0)
+    assert len(starts) >= 8
+    assert all(s in ({"a", "c"}, {"b", "d"}) for s in starts)

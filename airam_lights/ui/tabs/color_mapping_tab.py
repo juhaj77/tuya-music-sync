@@ -398,17 +398,31 @@ class ColorMappingTab(QWidget):
         white_target_row = QHBoxLayout()
         white_target_row.addWidget(QLabel("True white lamps:"))
         self.beat_white_pulse_target_combo = QComboBox()
-        self.beat_white_pulse_target_combo.addItems(["all", "chase", "group"])
+        self.beat_white_pulse_target_combo.addItems(["all", "chase", "group", "rotate"])
         self.beat_white_pulse_target_combo.setCurrentText(bs.white_pulse_target)
         self.beat_white_pulse_target_combo.setToolTip(
             "Which lamps a white flash lands on. all "
-            "(default): every selected lamp at once. chase: only the lamps the Chase effect's moving "
-            "highlight is on at that moment. group: only the lamps in Group Switch's currently active "
-            "group. The lamps are picked when the flash starts and kept for its whole duration. If the "
-            "chosen effect isn't enabled (or has fewer than 2 positions), falls back to all lamps."
+            "(default): every selected lamp at once. chase: the lamps the Chase highlight is on at that "
+            "moment - if Chase moves more than one lamp between flashes, the white skips lamps. group: "
+            "Group Switch's currently active group. rotate: the white gets its own rotation through the "
+            "Chase order ('Chase order' in the Per-Lamp table) - every flash moves exactly one lamp on, "
+            "so none is skipped however fast Chase moves; it turns the same way as Chase. The lamps are "
+            "picked when the flash starts and kept for its whole duration. With too few positions for "
+            "the chosen option, every lamp flashes."
         )
         self.beat_white_pulse_target_combo.currentTextChanged.connect(self._on_beat_changed)
         white_target_row.addWidget(self.beat_white_pulse_target_combo)
+        white_target_row.addSpacing(16)
+        white_target_row.addWidget(QLabel("Rotating:"))
+        self.beat_white_rotators_combo = choice_combo(
+            [(1, "1 lamp"), (2, "2 opposite lamps"), (3, "3 evenly spaced"), (4, "4 evenly spaced")],
+            bs.white_pulse_rotators,
+            "How many lamps flash white at once as the white rotates, evenly spaced around the loop - "
+            "2 = two lamps on opposite sides, 3 = a third of the loop apart. Used by 'rotate' above and "
+            "by the Pulse sequencer's walk.",
+        )
+        self.beat_white_rotators_combo.currentIndexChanged.connect(self._on_beat_changed)
+        white_target_row.addWidget(self.beat_white_rotators_combo)
         white_target_row.addStretch(1)
         beat_layout.addLayout(white_target_row)
         self.beat_white_trigger_combo = self._trigger_combo(beat_layout, "White pulse on:", bs.white_pulse_trigger)
@@ -823,9 +837,17 @@ class ColorMappingTab(QWidget):
             "White pulses are switched off." if not white else
             seq_reason.capitalize() + " Its group walk decides the lamps.",
         )
+        rotating = (bs.white_pulse_target == "rotate") if not sequencing else (sq.group_walk != "all")
+        set_active(
+            [self.beat_white_rotators_combo], white and rotating,
+            "White pulses are switched off." if not white else (
+                "The sequencer's Group walk is 'all' - every lamp flashes." if sequencing else
+                "True white lamps isn't 'rotate'."
+            ),
+        )
 
         seq_controls = [
-            self.seq_white_combo, self.seq_walk_combo, self.seq_white_density_slider, self.seq_double_slider,
+            self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo, self.seq_white_density_slider, self.seq_double_slider,
             self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
             self.seq_phrase_combo, self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
         ]
@@ -893,6 +915,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
         bs.white_pulse_target = self.beat_white_pulse_target_combo.currentText()
+        bs.white_pulse_rotators = self.beat_white_rotators_combo.currentData()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
         self._update_beat_states()
@@ -1203,7 +1226,13 @@ class ColorMappingTab(QWidget):
             tooltip="A lamp never starts two white flashes closer than this. Switching to white and "
             "back takes several commands, so too little here can make lamps lag or get stuck.",
         )
-        for combo in (self.seq_white_combo, self.seq_walk_combo):
+        self.seq_walk_positions_combo = self._labeled_combo(
+            layout, "Walk through:", ("groups", "chase_order"), sq.walk_positions,
+            "What the walk steps through. groups: the Group Switch groups ('Effect group' in the "
+            "Per-Lamp table). chase_order: lamp by lamp in the Chase order ('Chase order'). How many "
+            "lamps flash at once follows 'Rotating' next to True white lamps above.",
+        )
+        for combo in (self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo):
             combo.currentTextChanged.connect(self._on_sequencer_changed)
         self.seq_dark_combo = self._labeled_combo(
             layout, "Dark pattern:", DARK_PATTERNS, sq.dark_pattern,
@@ -1273,6 +1302,7 @@ class ColorMappingTab(QWidget):
         sq.enabled = self.seq_enabled_checkbox.isChecked()
         sq.white_pattern = self.seq_white_combo.currentText()
         sq.group_walk = self.seq_walk_combo.currentText()
+        sq.walk_positions = self.seq_walk_positions_combo.currentText()
         sq.white_density = self.seq_white_density_slider.value()
         sq.double_chance = self.seq_double_slider.value()
         sq.min_group_gap_ms = self.seq_gap_slider.value()

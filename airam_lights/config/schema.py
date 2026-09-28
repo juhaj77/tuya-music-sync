@@ -347,6 +347,12 @@ class BeatSyncModeConfig:
     # "all" when the chosen effect isn't enabled/has fewer than 2 positions,
     # since there's then no moving highlight to follow.
     white_pulse_target: str = "all"
+    # "rotate": the white flash gets its own rotation through the Chase order
+    # (PerLampEffect.chase_order) - every new flash moves exactly one position
+    # on, so it never skips a lamp however fast Chase itself is moving.
+    # `white_pulse_rotators` > 1 adds more lamps evenly spaced around the loop
+    # (2 = opposite lamps, 3 = thirds); the pulse sequencer's walk uses it too.
+    white_pulse_rotators: int = 1
     white_pulse_white_brightness: float = 0.3  # 0..1: brightness during the true-white flash
     # Each true-white flash independently rolls warm (0.0) vs cool (1.0) -
     # this is the probability of landing on cool, not a fixed temperature -
@@ -397,6 +403,7 @@ class BeatSyncModeConfig:
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
             white_pulse_target=d.get("white_pulse_target", "all"),
+            white_pulse_rotators=max(1, min(4, int(d.get("white_pulse_rotators", 1)))),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
             white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),
         )
@@ -1093,6 +1100,10 @@ class PulseSequencerConfig:
     white_pattern: str = "auto"  # see pulse_sequencer.WHITE_PATTERNS
     white_density: float = 0.85  # chance each pattern step actually flashes
     group_walk: str = "forward"  # "forward" | "pingpong" | "random" | "all"
+    # What the walk steps through: "groups" = Group Switch's groups
+    # (PerLampEffect.effect_group); "chase_order" = the Chase order, lamp
+    # position by position. Beat Sync's white_pulse_rotators applies here too.
+    walk_positions: str = "groups"
     double_chance: float = 0.25  # chance a flash repeats in the same group an 8th later
     min_group_gap_ms: float = 180.0  # a lamp never starts two white flashes closer than this
     dark_pattern: str = "auto"  # see pulse_sequencer.DARK_PATTERNS

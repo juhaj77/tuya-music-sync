@@ -46,6 +46,7 @@ from ..effects.chase import (
     get_chase_group_dwell_weights,
     get_chase_groups,
     get_group_switch_groups,
+    spread_positions,
 )
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
 from ..effects.pulse_sequencer import PulseEvent, PulseSequencer
@@ -276,6 +277,7 @@ class VisualizationEngine:
         # first tick and held until it ends, so a chase stepping on mid-flash
         # doesn't turn it into a burst of white on/off commands.
         self._white_pulse_lamps: Optional[Set[str]] = None
+        self._white_rotate_index = -1  # white_pulse_target "rotate": the flash's own position in the Chase order
 
     # -- configuration -----------------------------------------------------------
 
@@ -523,6 +525,17 @@ class VisualizationEngine:
                 groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
                 if len(groups) >= 2:
                     lamps = self._group_switch_animator.active_device_ids(groups)
+            elif target == "rotate":
+                # Its own rotation through the Chase order: exactly one
+                # position per flash, so it can't skip a lamp the way
+                # following a fast-moving Chase highlight can.
+                positions = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+                if len(positions) >= 2:
+                    step = -1 if self.config.chase.reverse else 1
+                    self._white_rotate_index = (self._white_rotate_index + step) % len(positions)
+                    lamps = spread_positions(
+                        positions, self._white_rotate_index, self.config.color_mapping.beat_sync.white_pulse_rotators
+                    )
             # None = "all" (or the chosen effect has no highlight to follow)
             self._white_pulse_lamps = lamps if lamps is not None else set(self._beat_sync_white_targets)
         self._beat_sync_white_targets = {
@@ -879,7 +892,10 @@ class VisualizationEngine:
     def _run_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, cfg) -> None:
         position = self._beat_clock.position(wall_now) if self._sequencing else None
         loudness = band_energy(frame, 20.0, 16000.0)
-        self._seq_groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
+        if self.config.sequencer.walk_positions == "chase_order":
+            self._seq_groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        else:
+            self._seq_groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
         events = self._sequencer.tick(
             position, loudness, wall_now, dt, len(self._seq_groups), self.config.rhythm.beats_per_bar
         )
@@ -895,7 +911,10 @@ class VisualizationEngine:
         if not cfg.white_pulse_enabled:
             return
         groups = self._seq_groups
-        lamps = groups[event.group % len(groups)] if event.group is not None and len(groups) >= 2 else selected_ids
+        if event.group is not None and len(groups) >= 2:
+            lamps = spread_positions(groups, event.group % len(groups), cfg.white_pulse_rotators)
+        else:
+            lamps = selected_ids
         length = (cfg.white_pulse_duration_ms + cfg.white_pulse_release_ms) / 1000.0 * event.length
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0

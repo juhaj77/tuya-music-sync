@@ -558,3 +558,14 @@ def test_per_lamp_effect_group_defaults_to_none_and_is_backward_compatible():
     assert effect.effect_group is None
     restored = PerLampEffect.from_dict({"device_id": "a"})  # no effect_group key at all (old config)
     assert restored.effect_group is None
+
+
+def test_spread_positions_evenly_spaced():
+    from airam_lights.effects.chase import spread_positions
+
+    positions = [["p0"], ["p1"], ["p2"], ["p3"], ["p4"], ["p5"]]
+    assert spread_positions(positions, 1, 1) == {"p1"}
+    assert spread_positions(positions, 1, 2) == {"p1", "p4"}
+    assert spread_positions(positions, 5, 3) == {"p5", "p1", "p3"}
+    assert spread_positions(positions[:2], 0, 3) == {"p0", "p1"}  # never more rotators than positions
+    assert spread_positions([], 0, 2) == set()

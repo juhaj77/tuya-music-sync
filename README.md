@@ -555,7 +555,13 @@ how the beats line up. By default every selected lamp flashes white together;
 `white_pulse_target` (**True white lamps** in the UI) can instead limit the flash to just
 the lamps the **Chase** highlight is currently on (`chase`) or to Group Switch's currently
 active group (`group`) - the lamps are picked when the flash starts and held for its
-duration, and it falls back to all lamps if that effect isn't enabled. The per-lamp
+duration, and it falls back to all lamps if that effect isn't enabled. Following the Chase
+highlight skips lamps whenever Chase moves more than one lamp between two flashes; `rotate`
+avoids that by giving the white its **own rotation** through the Chase order: every flash
+moves exactly one lamp on (in the same direction as Chase), however fast Chase itself
+moves. **Rotating** next to it sets how many lamps flash at once - 1, 2 on opposite sides,
+or 3/4 evenly spaced - and applies to the pulse sequencer's walk too, which can step
+through either the Group Switch groups or the Chase order (*Walk through*). The per-lamp
 **True white x** column (`white_pulse_brightness_mult`) scales an individual lamp's
 true-white brightness relative to the global setting (0.5 = half) - give every lamp in a
 group the same value to balance, say, wall spots next to plants against the ceiling group;
