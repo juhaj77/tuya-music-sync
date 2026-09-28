@@ -283,6 +283,47 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
+        between_row = QHBoxLayout()
+        between_row.addWidget(QLabel("Between beats:"))
+        self.beat_fade_checkbox = QCheckBox("Fade brightness")
+        self.beat_fade_checkbox.setChecked(bs.fade_brightness)
+        self.beat_fade_checkbox.setToolTip(
+            "On: the classic flash - Flash brightness on the beat, fading to Sustain brightness. Off: "
+            "brightness stays at Flash brightness all the time (dark pulses still dip it) - good for "
+            "RGB+CCT bulbs whose colored LEDs are much dimmer than their white ones."
+        )
+        self.beat_glide_checkbox = QCheckBox("Glide hue")
+        self.beat_glide_checkbox.setChecked(bs.glide_hue)
+        self.beat_glide_checkbox.setToolTip(
+            "On: after each beat the color glides toward the next color, and the next beat lands on "
+            "it - the rhythm shows as moving color. Works together with Fade brightness or on its own."
+        )
+        for cb in (self.beat_fade_checkbox, self.beat_glide_checkbox):
+            cb.toggled.connect(self._on_beat_changed)
+            between_row.addWidget(cb)
+        between_row.addSpacing(16)
+        between_row.addWidget(QLabel("Glide timing:"))
+        self.beat_glide_timing_combo = QComboBox()
+        self.beat_glide_timing_combo.addItems(["beat", "decay"])
+        self.beat_glide_timing_combo.setCurrentText(bs.hue_glide_timing)
+        self.beat_glide_timing_combo.setToolTip(
+            "beat: the color moves evenly through the whole beat and arrives right as the next beat "
+            "hits - a color wheel turning in time with the music (uses the tempo). decay: follows "
+            "Brightness attack/decay - a quick sweep right after the hit, then still."
+        )
+        self.beat_glide_timing_combo.currentTextChanged.connect(self._on_beat_changed)
+        between_row.addWidget(self.beat_glide_timing_combo)
+        between_row.addStretch(1)
+        beat_layout.addLayout(between_row)
+        self.beat_hue_glide_slider = FloatSlider(
+            "Glide distance", 0.0, 360.0, bs.hue_glide_deg, decimals=0, suffix=" deg",
+            tooltip="How far around the color wheel the color travels between two beats, toward the next "
+            "color. About the Hue step (in 'step' mode) = it arrives exactly at the next color; more "
+            "overshoots and snaps back on the beat; 360 = a full rainbow every beat.",
+        )
+        self.beat_hue_glide_slider.valueChanged.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_hue_glide_slider)
+
         beat_dark_note = QLabel(
             "Dark pulses: on a random subset of beats, briefly dip brightness toward black BEFORE "
             "flashing - a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
@@ -775,7 +816,16 @@ class ColorMappingTab(QWidget):
             "out - tune detection in the Rhythm box instead."
         ) if shared else "")
 
-        set_active([self.beat_hue_step_slider], bs.hue_mode == "step", f"Hue mode is '{bs.hue_mode}'.")
+        # In spectrum mode the hue glide heads one Hue step onward (there's no known next color).
+        set_active(
+            [self.beat_hue_step_slider], bs.hue_mode == "step" or (bs.glide_hue and bs.hue_mode == "spectrum"),
+            f"Hue mode is '{bs.hue_mode}'.",
+        )
+        set_active(
+            [self.beat_sustain_slider], bs.fade_brightness,
+            "Fade brightness is off: brightness stays at Flash brightness between beats.",
+        )
+        set_active([self.beat_hue_glide_slider, self.beat_glide_timing_combo], bs.glide_hue, "Glide hue is off.")
         set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
 
         seq_reason = "the Pulse sequencer (below) places the pulses."
@@ -880,6 +930,10 @@ class ColorMappingTab(QWidget):
         bs.hue_attack_ms = self.beat_hue_attack_slider.value()
         bs.brightness_attack_ms = self.beat_bright_attack_slider.value()
         bs.brightness_release_ms = self.beat_bright_release_slider.value()
+        bs.fade_brightness = self.beat_fade_checkbox.isChecked()
+        bs.glide_hue = self.beat_glide_checkbox.isChecked()
+        bs.hue_glide_timing = self.beat_glide_timing_combo.currentText()
+        bs.hue_glide_deg = self.beat_hue_glide_slider.value()
         bs.dark_pulse_enabled = self.beat_dark_enabled_checkbox.isChecked()
         bs.dark_pulse_probability = self.beat_dark_prob_slider.value()
         bs.dark_pulse_trigger = self.beat_dark_trigger_combo.currentText()

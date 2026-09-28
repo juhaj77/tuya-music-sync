@@ -436,6 +436,24 @@ bars*... following *Beats per bar* - and phrases from 1/2/4/8/16 bars, so a sett
 drift against the music (e.g. "every 3 beats" in 4/4 would land on a different beat of
 each bar).
 
+#### Between beats: fade brightness and/or glide hue
+Beat Sync's **Between beats** row picks what moves after each flash - either, both or
+neither:
+
+- **Fade brightness** (on by default) - the classic flash that fades toward *Sustain
+  brightness*. Off: brightness stays at *Flash brightness* the whole time (dark pulses
+  still dip it). On RGB+CCT bulbs the colored LEDs are much dimmer than the white ones, so
+  this keeps the colored light - and what reflects off the walls - at full strength.
+- **Glide hue** - after each beat the color travels *Glide distance* degrees toward the
+  next color, and the next beat lands on that color. With *Glide timing* `beat` it moves
+  evenly through the whole beat (following the tempo), so the color wheel keeps turning
+  in time with the music; `decay` follows the brightness attack/decay instead - a quick
+  sweep right after the hit. A distance of about the Hue step arrives exactly at the next
+  color; 360 is a full rainbow every beat.
+
+A gliding color changes on every frame, so lamps receive commands continuously - still
+capped per lamp by *Lamp command rate* (20/s by default).
+
 #### Pulse sequencer: white and dark pulses on musical positions
 In the Beat Sync tab, the **Pulse sequencer** takes over the white and dark pulses from
 the per-beat probability rolls and places them the way a lighting operator (or a

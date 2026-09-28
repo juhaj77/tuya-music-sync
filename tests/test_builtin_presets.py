@@ -5,7 +5,10 @@ from airam_lights.config.schema import PULSE_TRIGGERS, SYNC_MODES, AppConfig
 
 # Personal / installation-specific settings a preset must never overwrite.
 PROTECTED = {
-    "beat_sync": {"white_pulse_depth", "white_pulse_white_brightness", "white_pulse_cool_ratio", "white_pulse_true_white"},
+    "beat_sync": {
+        "white_pulse_depth", "white_pulse_white_brightness", "white_pulse_cool_ratio", "white_pulse_true_white",
+        "fade_brightness", "glide_hue", "hue_glide_deg", "hue_glide_timing",
+    },
     "chase": {"width", "intensity", "num_rotators"},
     "group_switch": {"intensity"},
     "rhythm": {"detect_low_hz", "detect_high_hz", "sensitivity", "lead_ms"},

@@ -34,7 +34,7 @@ import numpy as np
 
 from ..audio.capture import AudioCapture
 from ..color.mapping import ColorMappingEngine, apply_per_lamp_effect
-from ..color.models import Color, WhiteTarget, clip, lerp
+from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
 from ..config.schema import AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
@@ -158,6 +158,11 @@ class VisualizationEngine:
         self._beat_hue_cursor = self._beat_target_hue
         self._hue_smoother_beat = HueSmoother(bs.hue_attack_ms, initial=self._beat_target_hue)
         self._smoother_beat_value = AttackReleaseSmoother(bs.brightness_attack_ms, bs.brightness_release_ms)
+        # glide_hue with timing "decay": the same flash envelope, normalized to
+        # 1 (on the beat) .. 0 (fully decayed), drives how far the hue has
+        # glided toward the next color.
+        self._smoother_beat_glide = AttackReleaseSmoother(bs.brightness_attack_ms, bs.brightness_release_ms)
+        self._beat_upcoming_hue: Optional[float] = None  # hue_mode "random": the next color, picked in advance
         # Both pulse smoothers track a 0..1 "how deep into the pulse are we"
         # fraction, not the underlying brightness/saturation value directly -
         # entering a pulse is always a rise toward 1 and leaving it always a
@@ -305,6 +310,8 @@ class VisualizationEngine:
         self._hue_smoother_beat.time_constant_ms = bs.hue_attack_ms
         self._smoother_beat_value.attack_ms = bs.brightness_attack_ms
         self._smoother_beat_value.release_ms = bs.brightness_release_ms
+        self._smoother_beat_glide.attack_ms = bs.brightness_attack_ms
+        self._smoother_beat_glide.release_ms = bs.brightness_release_ms
         self._smoother_beat_dark.attack_ms = bs.dark_pulse_attack_ms
         self._smoother_beat_dark.release_ms = bs.dark_pulse_release_ms
         self._smoother_beat_white.attack_ms = bs.white_pulse_attack_ms
@@ -725,10 +732,18 @@ class VisualizationEngine:
 
         in_dark_pulse = self._beat_dark_until is not None
         in_white_pulse = self._beat_white_pulse_until is not None
-        hue_s = self._hue_smoother_beat.update(self._beat_target_hue, dt)
-
         target_value = cfg.flash_brightness if flash_now else cfg.sustain_brightness
         value_s = self._smoother_beat_value.update(target_value, dt)
+        if not cfg.fade_brightness:
+            value_s = cfg.flash_brightness  # full strength all the time (dark pulses still dip it below)
+        glide = self._smoother_beat_glide.update(1.0 if flash_now else 0.0, dt)
+        target_hue = self._beat_target_hue
+        if cfg.glide_hue:
+            progress = self._hue_glide_progress(cfg, glide, wall_now)
+            toward = self._upcoming_beat_hue(cfg)
+            direction = -1.0 if ((toward - self._beat_target_hue + 180.0) % 360.0) - 180.0 < 0.0 else 1.0
+            target_hue = (self._beat_target_hue + direction * cfg.hue_glide_deg * progress) % 360.0
+        hue_s = self._hue_smoother_beat.update(target_hue, dt)
         # Dark pulse is layered on top as an independent multiplicative dip,
         # smoothed on its own attack/release - not folded into target_value
         # above, since that would tie its timing to brightness_attack_ms/
@@ -938,14 +953,50 @@ class VisualizationEngine:
 
         # "random" (default): pick a hue that's visibly different from the
         # last one, so every beat gives a clearly new color instead of
-        # sometimes landing right next to the previous hue by chance.
+        # sometimes landing right next to the previous hue by chance. If the
+        # hue glide already picked the next color to glide toward, land
+        # exactly on that one.
+        if self._beat_upcoming_hue is not None:
+            candidate, self._beat_upcoming_hue = self._beat_upcoming_hue, None
+            return candidate
+        return self._random_hue_away_from(self._beat_target_hue, cfg.min_hue_jump_deg)
+
+    @staticmethod
+    def _random_hue_away_from(reference: float, min_jump: float) -> float:
         candidate = random.uniform(0.0, 360.0)
         for _ in range(8):
-            delta = abs(((candidate - self._beat_target_hue + 180.0) % 360.0) - 180.0)
-            if delta >= cfg.min_hue_jump_deg:
+            delta = abs(((candidate - reference + 180.0) % 360.0) - 180.0)
+            if delta >= min_jump:
                 break
             candidate = random.uniform(0.0, 360.0)
         return candidate
+
+    def _hue_glide_progress(self, cfg, decay_glide: float, wall_now: float) -> float:
+        """0 right on a beat .. 1 by the next one. Timing "beat": evenly over
+        the beat interval (the shared clock's tempo, or Beat Sync's own
+        detector's average interval) so the color keeps moving until the next
+        hit. Timing "decay", or no tempo known yet: follows the flash's decay."""
+        if cfg.hue_glide_timing == "beat" and self.last_beat_time is not None:
+            if self.config.rhythm.shared_clock:
+                period = self._clock_beat.period_s
+            else:
+                period = self._beat_detector.average_interval_s()
+            if period:
+                return clip((wall_now - self.last_beat_time) / period)
+        return 1.0 - decay_glide
+
+    def _upcoming_beat_hue(self, cfg) -> float:
+        """The color the next hue change will land on - the hue glide moves
+        in its direction, so the glide flows into the next color."""
+        if cfg.hue_mode == "step":
+            return (self._beat_hue_cursor + cfg.hue_step_deg) % 360.0
+        if cfg.hue_mode == "random":
+            if self._beat_upcoming_hue is None:
+                self._beat_upcoming_hue = self._random_hue_away_from(self._beat_target_hue, cfg.min_hue_jump_deg)
+            return self._beat_upcoming_hue
+        # "spectrum": the next color depends on the music at that moment, so
+        # there's nothing to glide toward yet - drift one hue step onward.
+        return (self._beat_target_hue + cfg.hue_step_deg) % 360.0
 
     def _tick_beat_sync_white_mode(
         self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids

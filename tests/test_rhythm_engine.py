@@ -207,3 +207,66 @@ def test_sequencer_walks_true_white_between_groups(monkeypatch):
     for t, _ in starts:
         phase = ((t - 1000.0) / PERIOD) % 1.0
         assert 0.35 < phase < 0.75, phase
+
+
+def _glide_config(fade, timing="beat", deg=120.0):
+    def configure(c):
+        bs = c.color_mapping.beat_sync
+        bs.fade_brightness = fade
+        bs.glide_hue = True
+        bs.hue_glide_deg = deg
+        bs.hue_glide_timing = timing
+        bs.hue_mode = "step"
+        bs.hue_step_deg = 120.0
+        bs.hue_every_n_beats = 1
+        bs.flash_brightness = 0.9
+        bs.sustain_brightness = 0.1
+        bs.hue_attack_ms = 5.0
+        bs.brightness_attack_ms = 5.0
+        bs.brightness_release_ms = 60.0
+
+    return configure
+
+
+def _collect(engine, clock, seconds=4.0):
+    samples = []  # (is_beat, hue, value, target hue)
+
+    def on_tick():
+        lv = engine.latest_band3_levels
+        samples.append((engine.latest_clock_beat.is_beat, lv["hue"], lv["value"], engine._beat_target_hue))
+
+    _run(engine, clock, seconds, on_tick)
+    return samples
+
+
+def test_glide_without_fade_keeps_full_brightness_and_moves_all_beat(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _glide_config(fade=False, deg=90.0))
+    _run(engine, clock, 6.0, lambda: None)
+    samples = _collect(engine, clock)
+    assert all(abs(v - 0.9) < 1e-9 for _, _, v, _ in samples)  # never dims between beats
+    beat_idx = [i for i, s in enumerate(samples) if s[0]]
+    for a, b in zip(beat_idx[2:], beat_idx[3:]):
+        base = samples[a][3]
+        mid = (samples[(a + b) // 2][1] - base) % 360.0
+        end = (samples[b - 1][1] - base) % 360.0
+        assert 30.0 < mid < 60.0, mid  # still moving halfway through the beat ("beat" timing)...
+        assert 75.0 < end <= 90.5, end  # ...and nearly the full distance just before the next one
+        assert abs((samples[b][3] - base) % 360.0 - 120.0) < 1e-6  # the beat lands on the next color
+
+
+def test_fade_and_glide_together(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _glide_config(fade=True))
+    _run(engine, clock, 6.0, lambda: None)
+    samples = _collect(engine, clock)
+    beat_idx = [i for i, s in enumerate(samples) if s[0]]
+    for a, b in zip(beat_idx[2:], beat_idx[3:]):
+        assert samples[a][2] > 0.8 and samples[b - 1][2] < 0.2  # brightness still flashes and fades
+        assert (samples[b - 1][1] - samples[a][3]) % 360.0 > 90.0  # while the hue travels
+
+
+def test_old_decay_mode_setting_is_migrated():
+    from airam_lights.config.schema import BeatSyncModeConfig
+
+    old = BeatSyncModeConfig.from_dict({"decay_mode": "hue"})
+    assert old.glide_hue and not old.fade_brightness
+    assert BeatSyncModeConfig.from_dict({}).fade_brightness and not BeatSyncModeConfig.from_dict({}).glide_hue

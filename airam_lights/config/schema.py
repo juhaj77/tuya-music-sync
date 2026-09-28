@@ -270,6 +270,20 @@ class BeatSyncModeConfig:
     brightness_attack_ms: float = 15.0  # how fast brightness snaps up on a beat
     brightness_release_ms: float = 350.0  # how slowly brightness decays afterward
 
+    # What moves between beats - either, both or neither:
+    # fade_brightness: the classic flash that decays toward sustain_brightness
+    #   (off = brightness stays at flash_brightness, except dark pulses - for
+    #   RGB+CCT bulbs whose RGB LEDs are much dimmer than their white ones).
+    # glide_hue: after each beat the color glides `hue_glide_deg` degrees in
+    #   the direction of the next color; the next beat then lands on that
+    #   color. Timing "beat" spreads the glide evenly over the whole beat (the
+    #   tempo), so the color keeps moving until the next hit; "decay" follows
+    #   the brightness attack/decay curve - fast right after the hit, then still.
+    fade_brightness: bool = True
+    glide_hue: bool = False
+    hue_glide_deg: float = 120.0
+    hue_glide_timing: str = "beat"  # "beat" | "decay"
+
     # "Dark pulses": on a random subset of beats, briefly dip toward black
     # (a rhythm-synced pause) BEFORE flashing to the new color, instead of
     # flashing immediately - a tension-and-release, strobe-like accent.
@@ -374,6 +388,11 @@ class BeatSyncModeConfig:
             hue_attack_ms=float(d.get("hue_attack_ms", 40.0)),
             brightness_attack_ms=float(d.get("brightness_attack_ms", 15.0)),
             brightness_release_ms=float(d.get("brightness_release_ms", 350.0)),
+            # Older builds had one either/or "decay_mode" setting.
+            fade_brightness=bool(d.get("fade_brightness", d.get("decay_mode") != "hue")),
+            glide_hue=bool(d.get("glide_hue", d.get("decay_mode") == "hue")),
+            hue_glide_deg=float(d.get("hue_glide_deg", 120.0)),
+            hue_glide_timing=d.get("hue_glide_timing") if d.get("hue_glide_timing") in ("beat", "decay") else "beat",
             dark_pulse_enabled=bool(d.get("dark_pulse_enabled", True)),
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
             dark_pulse_trigger=_pulse_trigger(d.get("dark_pulse_trigger")),
