@@ -69,7 +69,6 @@ def _make_engine(monkeypatch, *, energy_sequence, device_ids=("dev1",), cool_rat
     bs.white_pulse_duration_ms = 80.0
     bs.white_pulse_attack_ms = 5.0
     bs.white_pulse_release_ms = 40.0
-    bs.white_pulse_true_white = True
     bs.white_pulse_white_brightness = 1.0
     bs.white_pulse_cool_ratio = cool_ratio
     # Dark pulse would otherwise compete for the same beat (independent
@@ -384,3 +383,25 @@ def test_white_pulse_brightness_mult_scales_per_lamp(monkeypatch):
         assert abs(targets["dev3"].brightness - 0.4) < 1e-9
         assert abs(targets["dev4"].brightness - 0.4) < 1e-9
         assert targets["dev3"].temp == targets["dev1"].temp
+
+
+def test_white_pulse_never_uses_the_rgb_leds(monkeypatch):
+    """White comes from the white LEDs only: even a config saved by an older
+    build with the RGB-desaturation variant (true white off / invert on)
+    flashes the real white LEDs, and the RGB color stays fully saturated."""
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch, energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 15
+    )
+    from airam_lights.config.schema import BeatSyncModeConfig
+
+    legacy = BeatSyncModeConfig.from_dict(
+        {**engine.config.color_mapping.beat_sync.to_dict(), "white_pulse_true_white": False, "white_pulse_invert": True, "white_pulse_depth": 1.0}
+    )
+    engine.config.color_mapping.beat_sync = legacy
+    saturations = []
+    for _ in range(15):
+        engine.tick_visual()
+        saturations.append(engine.latest_band3_levels["saturation"])
+        clock.advance(1.0 / 60.0)
+    assert lamp_manager.white_calls, "the pulse must go to the white LEDs"
+    assert all(s == legacy.saturation for s in saturations)

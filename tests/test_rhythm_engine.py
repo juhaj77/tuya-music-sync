@@ -133,7 +133,6 @@ def test_white_pulse_downbeat_trigger(monkeypatch):
     def configure(c):
         bs = c.color_mapping.beat_sync
         bs.white_pulse_enabled = True
-        bs.white_pulse_true_white = True
         bs.white_pulse_probability = 1.0
         bs.white_pulse_trigger = "downbeat"
         bs.white_pulse_duration_ms = 40.0
@@ -172,7 +171,6 @@ def test_sequencer_walks_true_white_between_groups(monkeypatch):
     def configure(c):
         bs = c.color_mapping.beat_sync
         bs.white_pulse_enabled = True
-        bs.white_pulse_true_white = True
         bs.white_pulse_duration_ms = 40.0
         bs.white_pulse_release_ms = 30.0
         c.sequencer.enabled = True

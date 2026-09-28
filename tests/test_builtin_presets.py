@@ -6,7 +6,7 @@ from airam_lights.config.schema import PULSE_TRIGGERS, SYNC_MODES, AppConfig
 # Personal / installation-specific settings a preset must never overwrite.
 PROTECTED = {
     "beat_sync": {
-        "white_pulse_depth", "white_pulse_white_brightness", "white_pulse_cool_ratio", "white_pulse_true_white",
+        "white_pulse_white_brightness", "white_pulse_cool_ratio",
         "fade_brightness", "glide_hue", "hue_glide_deg", "hue_glide_timing",
     },
     "chase": {"width", "intensity", "num_rotators"},
@@ -36,8 +36,8 @@ def test_preset_leaves_personal_settings_alone(name):
 
 def test_preset_keeps_existing_white_depth():
     config = AppConfig()
-    config.color_mapping.beat_sync.white_pulse_depth = 0.0
+    config.color_mapping.beat_sync.white_pulse_white_brightness = 0.81
     config.chase.width = 3.0
     apply_builtin_preset(config, "Groove - one color per bar")
-    assert config.color_mapping.beat_sync.white_pulse_depth == 0.0
+    assert config.color_mapping.beat_sync.white_pulse_white_brightness == 0.81
     assert config.chase.width == 3.0

@@ -267,7 +267,7 @@ class VisualizationEngine:
         self.latest_lamp_colors: Dict[str, Color] = {}
         self.latest_lamp_white_targets: Dict[str, WhiteTarget] = {}  # actual DP targets for beat_sync_white mode
         # Populated by _tick_beat_sync_mode only, for lamps currently mid
-        # "true white" flash (see BeatSyncModeConfig.white_pulse_true_white) -
+        # true-white flash (see BeatSyncModeConfig's white pulse settings) -
         # reset to {} at the top of every tick_visual() so a stale entry can
         # never survive into a tick where the mode has since changed.
         self._beat_sync_white_targets: Dict[str, WhiteTarget] = {}
@@ -664,7 +664,7 @@ class VisualizationEngine:
         # White pulse ALSO requires the previous one to have fully faded
         # below the epsilon (not just ended) before a new one can start -
         # that extra gate matters there specifically because
-        # white_pulse_true_white briefly switches the lamp's real WHITE
+        # a white pulse briefly switches the lamp's real WHITE
         # work_mode on, and immediately re-triggering before the fade-out
         # finished was, in practice, keeping lamps pinned in that physical
         # mode almost continuously on fast/dense tracks (see
@@ -753,24 +753,14 @@ class VisualizationEngine:
             value_s = value_s * (1.0 - dark_amount * cfg.dark_pulse_depth)
 
         # Smoothed 0..1 "how deep into the white pulse are we" fraction (see
-        # the comment on _smoother_beat_white above for why an amount rather
-        # than the saturation value itself). What it DRIVES depends on
-        # white_pulse_true_white: normally it's used below (per lamp) to
-        # actually switch that lamp's physical WHITE work_mode on for the
-        # pulse - in which case the RGB saturation here is left alone
-        # entirely, since the RGB channel plays no part in what gets sent to
-        # the lamp during the flash, only in what it resumes to afterward.
-        # With white_pulse_invert on, there's no physical "white work_mode,
-        # but fully saturated", so that combination always falls back to the
-        # original RGB-domain blend instead.
+        # the comment on _smoother_beat_white above). It's used below (per
+        # lamp) to switch that lamp's physical WHITE work_mode on for the
+        # pulse. The RGB color is never desaturated for it: the white comes
+        # from the white LEDs only, and the RGB LEDs keep all their (much
+        # weaker) output for color - which is also what the lamp resumes to.
         white_amount = self._smoother_beat_white.update(1.0 if in_white_pulse else 0.0, dt)
         self._last_white_amount = white_amount
-        use_true_white = cfg.white_pulse_true_white and not cfg.white_pulse_invert
-        if use_true_white:
-            saturation_s = cfg.saturation
-        else:
-            extreme = 1.0 if cfg.white_pulse_invert else 0.0
-            saturation_s = lerp(cfg.saturation, extreme, white_amount * cfg.white_pulse_depth)
+        saturation_s = cfg.saturation
 
         self.latest_band3_levels = {
             "beat_energy": raw_energy,
@@ -804,7 +794,7 @@ class VisualizationEngine:
         # worker's existing min_change_threshold dedup collapse this down to
         # one real send on entry and one on exit (reverting to RGB), exactly
         # like every other beat-triggered event in this app already works.
-        use_true_white_now = use_true_white and white_amount > _WHITE_PULSE_EPSILON
+        use_true_white_now = white_amount > _WHITE_PULSE_EPSILON
 
         # Absolute safety ceiling (see _WHITE_MAX_CONTINUOUS_S) - independent
         # of the individual-pulse cooldown logic above, which only guarantees
@@ -861,16 +851,12 @@ class VisualizationEngine:
             mult = effect.sensitivity_mult if effect else 1.0
 
             if self._sequencing and self._seq_white_active(device_id, wall_now):
-                if use_true_white:
-                    brightness = cfg.white_pulse_white_brightness
-                    if effect is not None:
-                        brightness *= effect.white_pulse_brightness_mult
-                    white_targets[device_id] = WhiteTarget(
-                        brightness=brightness, temp=self._seq_white_temp.get(device_id, 1.0)
-                    ).clamped()
-                else:
-                    extreme = 1.0 if cfg.white_pulse_invert else 0.0
-                    vals = np.array([vals[0], vals[1], lerp(vals[2], extreme, cfg.white_pulse_depth)])
+                brightness = cfg.white_pulse_white_brightness
+                if effect is not None:
+                    brightness *= effect.white_pulse_brightness_mult
+                white_targets[device_id] = WhiteTarget(
+                    brightness=brightness, temp=self._seq_white_temp.get(device_id, 1.0)
+                ).clamped()
             elif shared_white_target is not None:
                 if effect is not None and effect.white_pulse_brightness_mult != 1.0:
                     white_targets[device_id] = WhiteTarget(

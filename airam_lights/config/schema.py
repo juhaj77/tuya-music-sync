@@ -305,40 +305,31 @@ class BeatSyncModeConfig:
     dark_pulse_attack_ms: float = 15.0  # how fast brightness snaps down into the pause
     dark_pulse_release_ms: float = 150.0  # how fast it eases back out once the pause ends
 
-    # "White pulses": on a random subset of beats, briefly push saturation
-    # toward one extreme, right in sync with that beat's flash - e.g. a
-    # hi-hat/cymbal accent snapping the color to near-white for an instant.
-    # `white_pulse_invert` flips which extreme: off (default) = desaturate
-    # toward white; on = saturate toward a fully vivid color instead (handy
-    # if the base `saturation` above is already fairly pastel/muted).
-    # Independent of dark pulses above - each rolls its own probability on
+    # "White pulses": on a subset of beats, a brief flash of the bulb's own
+    # white LEDs, right in sync with that beat's flash - e.g. a hi-hat/cymbal
+    # accent. Independent of dark pulses above - each rolls its own probability on
     # every beat (an earlier version tried to make them mutually exclusive
     # via separate detection bands, but that wasn't reliable - see
     # VisualizationEngine._tick_beat_sync_mode's docstring for why).
-    # On by default with tuned timing (see white_pulse_true_white below) -
-    # this combination (probability/duration/attack/release/brightness/temp)
+    # On by default with tuned timing - this combination (probability/duration/attack/release/brightness/temp)
     # was tuned live against real hardware and confirmed to read well, so it
     # ships as the default rather than a generic/untuned starting point that
     # would undersell the effect on first run.
     white_pulse_enabled: bool = True
-    white_pulse_invert: bool = False
     white_pulse_probability: float = 0.26  # 0..1: chance a given beat's flash also gets this pulse
     white_pulse_trigger: str = "random"  # same options as dark_pulse_trigger
-    white_pulse_duration_ms: float = 45.0  # how long saturation holds at the extreme
-    white_pulse_depth: float = 1.0  # 0..1: how far toward the extreme (1.0 = fully white/fully saturated)
-    white_pulse_attack_ms: float = 17.0  # how fast saturation snaps toward the extreme
-    white_pulse_release_ms: float = 49.0  # how fast it settles back to the base saturation afterward
+    white_pulse_duration_ms: float = 45.0  # how long the white flash is held
+    white_pulse_attack_ms: float = 17.0  # timing of the flash's start
+    white_pulse_release_ms: float = 49.0  # how long after the hold it ends
 
-    # "True white" pulses: instead of just desaturating the RGB color toward
-    # white (which on an RGB LED only ever approximates white, and reads as
-    # a fairly subtle accent), actually switch the lamp's physical WHITE
-    # work_mode on for the pulse's duration - the bulb's real white diode(s)
-    # at full intensity, a much more dramatic "flash to true white" accent -
-    # then switch back to RGB colour mode and resume wherever the normal
-    # Beat Sync hue/brightness envelope has evolved to in the meantime.
-    # Only applies when white_pulse_invert is off above (there's no physical
-    # "white work_mode, but fully saturated" - invert's RGB-domain blend is
-    # used instead in that case). Ignored while white_pulse_enabled is off.
+    # The flash always uses the bulb's WHITE work_mode - its real white
+    # diode(s) - never the RGB LEDs: mixing white from RGB would spend the
+    # colored LEDs' (much weaker) output on white light instead of color, and
+    # only ever approximates white anyway. The lamp switches to WHITE for the
+    # pulse, then back to RGB colour mode, resuming wherever the normal Beat
+    # Sync hue/brightness envelope has evolved to in the meantime. (Earlier
+    # builds also had an RGB-desaturation variant and an "invert" option;
+    # both are gone - their saved settings are simply ignored.)
     # The lamp is sent ONE constant WHITE work_mode command on entry (not a
     # per-tick brightness ramp) - white_pulse_attack_ms/release_ms above
     # still govern the timing of when the flash starts/ends, just not a
@@ -348,7 +339,6 @@ class BeatSyncModeConfig:
     # overwhelm the LAN/Wi-Fi and tinytuya's own connection handling in
     # practice, which looked like brightness never quite reaching its peak
     # and inconsistent behavior between lamps.
-    white_pulse_true_white: bool = True
     # Which lamps a true-white flash lands on: "all" (default) = every
     # selected lamp at once, as before; "chase" = only the lamps the Chase
     # effect's moving highlight is currently on; "group" = only the lamps in
@@ -401,14 +391,11 @@ class BeatSyncModeConfig:
             dark_pulse_attack_ms=float(d.get("dark_pulse_attack_ms", 15.0)),
             dark_pulse_release_ms=float(d.get("dark_pulse_release_ms", 150.0)),
             white_pulse_enabled=bool(d.get("white_pulse_enabled", True)),
-            white_pulse_invert=bool(d.get("white_pulse_invert", False)),
             white_pulse_probability=float(d.get("white_pulse_probability", 0.26)),
             white_pulse_trigger=_pulse_trigger(d.get("white_pulse_trigger")),
             white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 45.0)),
-            white_pulse_depth=float(d.get("white_pulse_depth", 1.0)),
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
-            white_pulse_true_white=bool(d.get("white_pulse_true_white", True)),
             white_pulse_target=d.get("white_pulse_target", "all"),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
             white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),

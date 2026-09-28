@@ -429,8 +429,7 @@ the current beat in the bar.
 Settings that don't do anything in the current combination are **greyed out**, with the
 reason in their tooltip and a short note next to them - e.g. Beat Sync's own detection
 band while it follows the shared clock, a Chase's beat detector while its Speed source
-is `clock`, or *White pulse depth* while *True white* is on (the lamp then uses its real
-white LEDs, so there's no RGB desaturation to scale). Rhythm divisions are chosen from
+is `clock`, or *Sustain brightness* while *Fade brightness* is off. Rhythm divisions are chosen from
 values that line up with the bar - *every beat*, *every 2 beats*, *every bar*, *every 2
 bars*... following *Beats per bar* - and phrases from 1/2/4/8/16 bars, so a setting can't
 drift against the music (e.g. "every 3 beats" in 4/4 would land on a different beat of
@@ -533,9 +532,12 @@ independently on every beat - both, either, or neither can happen on any given h
 both enabled at non-trivial probabilities you'll occasionally see them coincide; that's
 expected rather than a bug.
 
-By default (`white_pulse_true_white`, on) this is a **"true white" flash**: at the pulse's
-peak the lamp actually switches its physical **WHITE work_mode** on - the real white
-diode(s), not an RGB approximation - at `white_pulse_white_brightness` (default 0.3).
+This is always a **"true white" flash**: the lamp switches its physical **WHITE
+work_mode** on - the real white diode(s) - at `white_pulse_white_brightness` (default
+0.3). White is never mixed from the RGB LEDs: on RGB+CCT bulbs those are much weaker than
+the white ones, so all their output stays reserved for color (earlier builds had an
+RGB-desaturation variant and an "invert" option; they're gone, and their saved settings
+are ignored).
 Each flash also independently rolls **warm vs. cool** white: `white_pulse_cool_ratio`
 (default 0.5) is the chance a given flash lands on cool white instead of warm (0.0 =
 always warm, 1.0 = always cool, 0.5 = a roughly even, unpredictable mix) - the roll happens
@@ -557,13 +559,8 @@ duration, and it falls back to all lamps if that effect isn't enabled. The per-l
 **True white x** column (`white_pulse_brightness_mult`) scales an individual lamp's
 true-white brightness relative to the global setting (0.5 = half) - give every lamp in a
 group the same value to balance, say, wall spots next to plants against the ceiling group;
-the ratio holds when you change the global brightness. Turn `white_pulse_true_white` off to fall back to the older, softer behavior
-instead: desaturating the RGB color toward white in place (or, with `white_pulse_invert`,
-saturating toward a fully vivid color instead - useful if your base `saturation` is already
-fairly pastel) rather than actually switching work_mode - also what always happens when
-`white_pulse_invert` is on, since there's no physical "white work_mode, but fully
-saturated." The true-white path uses the bulb's WHITE work_mode DP, same as Beat Sync White
-mode - see [section 2](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
+the ratio holds when you change the global brightness. The white flash uses the bulb's
+WHITE work_mode DP, same as Beat Sync White mode - see [section 2](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
 for what's confirmed vs. still-unverified about that path on real hardware.
 
 #### Peak Flash mode

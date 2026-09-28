@@ -378,10 +378,10 @@ class ColorMappingTab(QWidget):
             beat_layout.addWidget(w)
 
         beat_white_pulse_note = QLabel(
-            "White pulses: on a random subset of beats, briefly push saturation toward one extreme "
-            "right as the flash happens - e.g. a hi-hat/cymbal accent snapping to near-white for an "
-            "instant. Independent of dark pulses above - each rolls its own probability on every beat, "
-            "so both, either, or neither can happen on any given hit."
+            "White pulses: on a subset of beats, a brief flash of the lamp's own white LEDs right as "
+            "the beat hits - e.g. a hi-hat/cymbal accent. Always the real white LEDs, never white mixed "
+            "from RGB, so the colored LEDs keep all their output for color. Independent of dark pulses "
+            "above - each rolls its own probability, so both, either, or neither can happen on a hit."
         )
         beat_white_pulse_note.setWordWrap(True)
         beat_layout.addWidget(beat_white_pulse_note)
@@ -389,39 +389,11 @@ class ColorMappingTab(QWidget):
         self.beat_white_pulse_enabled_checkbox = QCheckBox("Enabled")
         self.beat_white_pulse_enabled_checkbox.setChecked(bs.white_pulse_enabled)
         self.beat_white_pulse_enabled_checkbox.setToolTip(
-            "Turns the white/saturation-pulse accent on or off - leave unchecked if you never want "
-            "this effect (dark pulses above are unaffected either way)."
+            "Turns the white-flash accent on or off - leave unchecked if you never want this effect "
+            "(dark pulses above are unaffected either way)."
         )
         self.beat_white_pulse_enabled_checkbox.toggled.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_white_pulse_enabled_checkbox)
-
-        self.beat_white_pulse_invert_checkbox = QCheckBox(
-            "Invert (saturate toward full color instead of desaturating toward white)"
-        )
-        self.beat_white_pulse_invert_checkbox.setChecked(bs.white_pulse_invert)
-        self.beat_white_pulse_invert_checkbox.setToolTip(
-            "Off: the pulse desaturates the color toward white (saturation -> 0). On: it instead "
-            "saturates toward a fully vivid color (saturation -> 1) - useful if the base Saturation "
-            "above is already fairly pastel, where pulsing further toward white wouldn't read as an accent."
-        )
-        self.beat_white_pulse_invert_checkbox.toggled.connect(self._on_beat_changed)
-        beat_layout.addWidget(self.beat_white_pulse_invert_checkbox)
-
-        self.beat_white_pulse_true_white_checkbox = QCheckBox(
-            "True white (switch the lamp's physical WHITE work_mode instead of just desaturating RGB)"
-        )
-        self.beat_white_pulse_true_white_checkbox.setChecked(bs.white_pulse_true_white)
-        self.beat_white_pulse_true_white_checkbox.setToolTip(
-            "Off: the pulse only desaturates/saturates the RGB color as described above - on an RGB "
-            "LED this only ever approximates white, so it tends to read as a fairly subtle accent. On "
-            "(default): at the pulse's peak, the lamp actually switches to its WHITE work_mode - the "
-            "real white diode(s) at White brightness/temp below - a much more dramatic flash, then "
-            "switches back to RGB colour mode afterward and resumes wherever the normal hue/brightness "
-            "envelope has evolved to in the meantime. Ignored (falls back to the RGB blend) while "
-            "Invert above is on, since there's no physical 'white work_mode, but fully saturated'."
-        )
-        self.beat_white_pulse_true_white_checkbox.toggled.connect(self._on_beat_changed)
-        beat_layout.addWidget(self.beat_white_pulse_true_white_checkbox)
 
         white_target_row = QHBoxLayout()
         white_target_row.addWidget(QLabel("True white lamps:"))
@@ -429,7 +401,7 @@ class ColorMappingTab(QWidget):
         self.beat_white_pulse_target_combo.addItems(["all", "chase", "group"])
         self.beat_white_pulse_target_combo.setCurrentText(bs.white_pulse_target)
         self.beat_white_pulse_target_combo.setToolTip(
-            "Only used when True white above is on - which lamps a true-white flash lands on. all "
+            "Which lamps a white flash lands on. all "
             "(default): every selected lamp at once. chase: only the lamps the Chase effect's moving "
             "highlight is on at that moment. group: only the lamps in Group Switch's currently active "
             "group. The lamps are picked when the flash starts and kept for its whole duration. If the "
@@ -445,36 +417,28 @@ class ColorMappingTab(QWidget):
 
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
-            tooltip="Chance a given beat gets this saturation pulse - 0 = never, 1 = every beat.",
+            tooltip="Chance a given beat gets a white flash - 0 = never, 1 = every beat.",
         )
         self.beat_white_pulse_duration_slider = FloatSlider(
             "White pulse duration", 10.0, 500.0, bs.white_pulse_duration_ms, decimals=0, suffix=" ms",
-            tooltip="How long saturation is held at the extreme (white, or fully vivid if inverted) "
-            "before it starts easing back to the base Saturation.",
-        )
-        self.beat_white_pulse_depth_slider = FloatSlider(
-            "White pulse depth", 0.0, 1.0, bs.white_pulse_depth, decimals=2,
-            tooltip="How far toward the extreme the pulse pushes saturation - 1.0 = all the way to "
-            "white/fully vivid, lower = a partial push instead.",
+            tooltip="How long the lamp is held on its white LEDs before switching back to color.",
         )
         self.beat_white_pulse_attack_slider = FloatSlider(
             "White pulse attack", 1.0, 300.0, bs.white_pulse_attack_ms, decimals=0, suffix=" ms",
-            tooltip="How fast saturation snaps to the extreme when the pulse starts - low = an "
-            "instant flash to white/vivid, right on the beat.",
+            tooltip="How quickly the white flash starts after the beat - low = right on the beat.",
         )
         self.beat_white_pulse_release_slider = FloatSlider(
             "White pulse release", 10.0, 1000.0, bs.white_pulse_release_ms, decimals=0, suffix=" ms",
-            tooltip="How slowly saturation (or, in True white mode, the WHITE work_mode's brightness) "
-            "eases back afterward - higher means a longer visible fade back to normal color.",
+            tooltip="How long after the hold the lamp switches back to color - together with the "
+            "duration this sets how long each white flash lasts.",
         )
         self.beat_white_pulse_white_brightness_slider = FloatSlider(
-            "White pulse brightness (True white)", 0.0, 1.0, bs.white_pulse_white_brightness, decimals=2,
-            tooltip="Only used when True white above is on - the lamp's brightness while it's switched "
-            "to WHITE work_mode at the pulse's peak. 1.0 = strongest possible intensity.",
+            "White pulse brightness", 0.0, 1.0, bs.white_pulse_white_brightness, decimals=2,
+            tooltip="Brightness of the white LEDs during the flash. 1.0 = strongest possible intensity.",
         )
         self.beat_white_pulse_cool_ratio_slider = FloatSlider(
-            "White pulse cool ratio (True white)", 0.0, 1.0, bs.white_pulse_cool_ratio, decimals=2,
-            tooltip="Only used when True white above is on - each flash independently rolls warm vs "
+            "White pulse cool ratio", 0.0, 1.0, bs.white_pulse_cool_ratio, decimals=2,
+            tooltip="Each flash independently rolls warm vs "
             "cool white using this as the chance of landing on cool, so flashes vary beat to beat "
             "instead of always looking the same. 0.0 = always warm, 1.0 = always cool, 0.5 (default) = "
             "a roughly even, unpredictable mix. The choice is made once per flash and held for its "
@@ -483,7 +447,6 @@ class ColorMappingTab(QWidget):
         for w in (
             self.beat_white_pulse_prob_slider,
             self.beat_white_pulse_duration_slider,
-            self.beat_white_pulse_depth_slider,
             self.beat_white_pulse_attack_slider,
             self.beat_white_pulse_release_slider,
             self.beat_white_pulse_white_brightness_slider,
@@ -803,7 +766,6 @@ class ColorMappingTab(QWidget):
         bs, rh, sq = cfg.color_mapping.beat_sync, cfg.rhythm, cfg.sequencer
         shared = rh.shared_clock
         sequencing = shared and sq.enabled
-        true_white = bs.white_pulse_true_white and not bs.white_pulse_invert
 
         clock_reason = "Beat Sync follows the shared beat clock (Rhythm box at the top)."
         set_active(
@@ -836,7 +798,8 @@ class ColorMappingTab(QWidget):
               self.beat_dark_release_slider], self.beat_dark_note, "Dark"),
             (bs.white_pulse_enabled, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo,
              [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
-              self.beat_white_pulse_release_slider], self.beat_white_note, "White"),
+              self.beat_white_pulse_release_slider, self.beat_white_pulse_white_brightness_slider,
+              self.beat_white_pulse_cool_ratio_slider], self.beat_white_note, "White"),
         ):
             off_reason = f"{name} pulses are switched off."
             set_active(others, enabled, off_reason)
@@ -855,28 +818,10 @@ class ColorMappingTab(QWidget):
                 show_note(note, "")
 
         white = bs.white_pulse_enabled
-        set_active([self.beat_white_pulse_invert_checkbox], white, "White pulses are switched off.")
         set_active(
-            [self.beat_white_pulse_true_white_checkbox], white and not bs.white_pulse_invert,
-            "White pulses are switched off." if not white else "Invert is on - there's no 'true white, but fully saturated'.",
-        )
-        set_active(
-            [self.beat_white_pulse_depth_slider], white and not true_white,
+            [self.beat_white_pulse_target_combo], white and not sequencing,
             "White pulses are switched off." if not white else
-            "True white is on: the lamp switches to its real white LEDs, so there's no RGB desaturation "
-            "for Depth to scale.",
-        )
-        set_active(
-            [self.beat_white_pulse_white_brightness_slider, self.beat_white_pulse_cool_ratio_slider],
-            white and true_white,
-            "White pulses are switched off." if not white else "True white is off (or Invert is on).",
-        )
-        set_active(
-            [self.beat_white_pulse_target_combo], white and true_white and not sequencing,
-            "White pulses are switched off." if not white else (
-                seq_reason.capitalize() + " Its group walk decides the lamps." if sequencing else
-                "True white is off (or Invert is on)."
-            ),
+            seq_reason.capitalize() + " Its group walk decides the lamps.",
         )
 
         seq_controls = [
@@ -942,14 +887,11 @@ class ColorMappingTab(QWidget):
         bs.dark_pulse_attack_ms = self.beat_dark_attack_slider.value()
         bs.dark_pulse_release_ms = self.beat_dark_release_slider.value()
         bs.white_pulse_enabled = self.beat_white_pulse_enabled_checkbox.isChecked()
-        bs.white_pulse_invert = self.beat_white_pulse_invert_checkbox.isChecked()
         bs.white_pulse_probability = self.beat_white_pulse_prob_slider.value()
         bs.white_pulse_trigger = self.beat_white_trigger_combo.currentText()
         bs.white_pulse_duration_ms = self.beat_white_pulse_duration_slider.value()
-        bs.white_pulse_depth = self.beat_white_pulse_depth_slider.value()
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
-        bs.white_pulse_true_white = self.beat_white_pulse_true_white_checkbox.isChecked()
         bs.white_pulse_target = self.beat_white_pulse_target_combo.currentText()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
