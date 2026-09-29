@@ -313,7 +313,8 @@ class LampDevice:
             logger.debug("set_mode('white') not supported/failed for %s (may be fine)", self.config.name)
 
     def set_white(
-        self, brightness_percent: float, temp_percent: float, wait_for_ack: bool = False, transition: str = "legacy"
+        self, brightness_percent: float, temp_percent: float, wait_for_ack: bool = False, transition: str = "legacy",
+        under_rgb: Optional[tuple] = None,
     ) -> float:
         """brightness_percent, temp_percent in 0..100 (temp: 0=warmest,
         100=coolest). Uses tinytuya's own percentage-based colourtemp/
@@ -336,8 +337,14 @@ class LampDevice:
             t0 = time.perf_counter()
             bright = max(10, min(1000, int(round(brightness_percent * 10))))
             temp = max(0, min(1000, int(round(temp_percent * 10))))
+            h = s = v = 0
+            if under_rgb is not None:
+                # The RGB LEDs keep showing this colour under the white
+                # (verified on the Airam PAR16: the bulb shows both at once).
+                hf, sf, vf = colorsys.rgb_to_hsv(*(c / 255.0 for c in under_rgb))
+                h, s, v = int(round(hf * 360)) % 360, int(round(sf * 1000)), int(round(vf * 1000))
             with self._bulb_lock:
-                self._bulb.set_value(28, self.control_payload(transition, 0, 0, 0, bright, temp), nowait=not wait_for_ack)
+                self._bulb.set_value(28, self.control_payload(transition, h, s, v, bright, temp), nowait=not wait_for_ack)
             latency_ms = (time.perf_counter() - t0) * 1000.0
             self.status.last_latency_ms = latency_ms
             self.status.online = True

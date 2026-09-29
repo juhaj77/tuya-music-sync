@@ -400,7 +400,10 @@ transitions** (Color Mapping tab, Global box) picks the way:
 With instant transitions every command shows as a step, so smooth fades and hue glides
 want a higher **Lamp command rate** (up to 60/s; the color engine computes at least that
 often), and a white flash's brightness now really follows *White pulse attack* /
-*release* (it swells in and fades out) instead of the bulb's own fade.
+*release* (it swells in and fades out) instead of the bulb's own fade. The bulbs can
+show colour and white at the same time on DP 28, so a flash is a **crossfade**: the
+colour dims as the white swells and comes back as it fades - the lamp never drops to
+dark around a flash.
 
 Only bulbs with the v2 datapoint layout (like the Airam ones) use DP 28; others always
 use `legacy`. If your bulbs stop changing color with `direct`/`gradient`, choose `legacy`.

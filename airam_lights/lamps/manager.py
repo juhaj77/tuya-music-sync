@@ -552,6 +552,7 @@ class LampWorker(threading.Thread):
                 self.device.set_white(
                     target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False,
                     transition=self.network_cfg.lamp_transitions,
+                    under_rgb=target.under.to_rgb255() if target.under is not None else None,
                 )
                 self._log_send("white", None, reported=False)
             else:

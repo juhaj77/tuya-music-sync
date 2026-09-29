@@ -34,7 +34,7 @@ import numpy as np
 
 from ..audio.capture import AudioCapture
 from ..color.mapping import ColorMappingEngine, apply_per_lamp_effect
-from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
+from ..color.models import Color, WhiteTarget, clip, lerp
 from ..config.schema import AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
@@ -878,29 +878,40 @@ class VisualizationEngine:
                 vals = np.array([hue_s, value_s, saturation_s])
             mult = effect.sensitivity_mult if effect else 1.0
 
-            if self._sequencing and self._seq_white_active(device_id, wall_now):
-                brightness = cfg.white_pulse_white_brightness * self._seq_white_envelope(device_id, wall_now, cfg)
-                if effect is not None:
-                    brightness *= effect.white_pulse_brightness_mult
-                white_targets[device_id] = WhiteTarget(
-                    brightness=brightness, temp=self._seq_white_temp.get(device_id, 1.0)
-                ).clamped()
-            elif shared_white_target is not None:
-                if effect is not None and effect.white_pulse_brightness_mult != 1.0:
-                    white_targets[device_id] = WhiteTarget(
-                        brightness=shared_white_target.brightness * effect.white_pulse_brightness_mult,
-                        temp=shared_white_target.temp,
-                    ).clamped()
-                else:
-                    white_targets[device_id] = shared_white_target
-
             color = self.color_engine.compute_beat_sync(vals[0], vals[2], clip(vals[1] * mult))
             if effect is not None:
                 color = apply_per_lamp_effect(color, effect)
             colors[device_id] = color
+
+            white_mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+            if self._sequencing and self._seq_white_active(device_id, wall_now):
+                peak = self._seq_white_brightness.get(device_id, 1.0)
+                level = self._seq_white_envelope(device_id, wall_now, cfg)
+                white_targets[device_id] = WhiteTarget(
+                    brightness=cfg.white_pulse_white_brightness * level * white_mult,
+                    temp=self._seq_white_temp.get(device_id, 1.0),
+                    under=self._under_white(color, level / peak if peak > 0.0 else 1.0),
+                ).clamped()
+            elif shared_white_target is not None:
+                white_targets[device_id] = WhiteTarget(
+                    brightness=shared_white_target.brightness * white_mult,
+                    temp=shared_white_target.temp,
+                    under=self._under_white(color, white_amount),
+                ).clamped()
         self._beat_sync_white_targets = white_targets
         self._white_targets_preselected = self._sequencing
         return colors
+
+    def _under_white(self, color: Color, fraction: float) -> Optional[Color]:
+        """The colour kept under a white flash `fraction` (0..1) of the way in:
+        a crossfade - the colour dims as the white swells and comes back as it
+        fades, so the lamp never drops to dark in between. Only with instant
+        transitions (DP 28 shows colour and white at once); with "legacy" the
+        bulb's WHITE work_mode shows no colour at all."""
+        if self.config.network.lamp_transitions == "legacy":
+            return None
+        keep = 1.0 - clip(fraction)
+        return Color(color.r * keep, color.g * keep, color.b * keep)
 
     # -- pulse sequencer ------------------------------------------------------------------
 

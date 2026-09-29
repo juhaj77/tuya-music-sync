@@ -440,3 +440,43 @@ def test_white_flash_ramps_with_attack_and_release_on_instant_transitions(monkey
 def test_white_flash_stays_constant_with_legacy_transitions(monkeypatch):
     curve = [b for b in _flash_brightness_curve(monkeypatch, "legacy") if b > 0.0]
     assert curve and len(set(curve)) == 1  # one target: the bulb's own fade softens it
+
+
+def _flash_frames(monkeypatch, transitions):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch, energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 40
+    )
+    engine.config.network.lamp_transitions = transitions
+    bs = engine.config.color_mapping.beat_sync
+    bs.white_pulse_attack_ms = 40.0
+    bs.white_pulse_duration_ms = 60.0
+    bs.white_pulse_release_ms = 80.0
+    engine._smoother_beat_white.attack_ms = bs.white_pulse_attack_ms
+    engine._smoother_beat_white.release_ms = bs.white_pulse_release_ms
+    frames = []
+    for _ in range(40):
+        engine.tick_visual()
+        target = engine.latest_lamp_white_targets.get("dev1")
+        if target is not None:
+            frames.append(target)
+        clock.advance(1.0 / 60.0)
+    return frames
+
+
+def test_white_flash_crossfades_with_the_colour_on_instant_transitions(monkeypatch):
+    frames = _flash_frames(monkeypatch, "direct")
+    assert frames and all(f.under is not None for f in frames)
+    def level(c):
+        return max(c.r, c.g, c.b)
+    peak = max(range(len(frames)), key=lambda i: frames[i].brightness)
+    # Colour fades out as the white swells, and comes back as it fades: the
+    # lamp never has a moment with neither (no dark gap around the flash).
+    assert level(frames[0].under) > level(frames[peak].under)
+    assert level(frames[-1].under) > level(frames[peak].under)
+    for f in frames:
+        assert f.brightness / 0.8 + level(f.under) / max(level(frames[0].under), 1e-9) > 0.5
+
+
+def test_legacy_white_flash_has_no_colour_underneath(monkeypatch):
+    frames = _flash_frames(monkeypatch, "legacy")
+    assert frames and all(f.under is None for f in frames)

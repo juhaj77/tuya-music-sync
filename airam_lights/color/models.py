@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import colorsys
 from dataclasses import dataclass
+from typing import Optional
 
 
 def clip(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -82,12 +83,22 @@ class WhiteTarget:
 
     brightness: float  # 0..1
     temp: float  # 0..1, 0=warmest .. 1=coolest
+    # The colour shown at the same time underneath the white (the RGB LEDs),
+    # for crossfades - only bulbs driven through the real-time control
+    # datapoint can show both at once (see NetworkConfig.lamp_transitions);
+    # with "legacy" it's ignored and the bulb shows only the white.
+    under: Optional["Color"] = None
 
     def clamped(self) -> "WhiteTarget":
-        return WhiteTarget(clip(self.brightness), clip(self.temp))
+        return WhiteTarget(clip(self.brightness), clip(self.temp), self.under)
 
     def distance(self, other: "WhiteTarget") -> float:
-        return max(abs(self.brightness - other.brightness), abs(self.temp - other.temp))
+        d = max(abs(self.brightness - other.brightness), abs(self.temp - other.temp))
+        if self.under is not None or other.under is not None:
+            a = self.under or Color.black()
+            b = other.under or Color.black()
+            d = max(d, a.distance(b))
+        return d
 
     def to_preview_color(self) -> Color:
         """A perceptually-plausible RGB approximation of this white-balance
@@ -96,4 +107,8 @@ class WhiteTarget:
         LampDevice.set_white(), never this RGB value."""
         # Warm (temp=0) -> a warm amber hue; cool (temp=1) -> a cool blue-white hue.
         hue = lerp(30.0, 210.0, self.temp)
-        return Color.from_hsv(hue, 0.35, self.brightness)
+        white = Color.from_hsv(hue, 0.35, self.brightness)
+        if self.under is None:
+            return white
+        u = self.under
+        return Color(clip(white.r + u.r), clip(white.g + u.g), clip(white.b + u.b))
