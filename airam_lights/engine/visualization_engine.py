@@ -249,6 +249,9 @@ class VisualizationEngine:
         self._seq_white_started: Dict[str, float] = {}
         self._seq_white_temp: Dict[str, float] = {}
         self._seq_white_hold: Dict[str, float] = {}
+        self._seq_white_attack: Dict[str, float] = {}
+        self._seq_white_release: Dict[str, float] = {}
+        self._seq_white_brightness: Dict[str, float] = {}
         self._seq_continuous_since: Dict[str, float] = {}
         self._seq_last_active: Dict[str, float] = {}
         self._seq_forced_gap_until: Dict[str, float] = {}
@@ -927,7 +930,12 @@ class VisualizationEngine:
             lamps = spread_positions(groups, event.group % len(groups), cfg.white_pulse_rotators)
         else:
             lamps = selected_ids
-        length = (cfg.white_pulse_attack_ms + cfg.white_pulse_duration_ms * event.length + cfg.white_pulse_release_ms) / 1000.0
+        # The flash's shape: the white pulse settings, scaled per flash by the
+        # sequencer's pulse dynamics (all 1.0 when that's off).
+        attack = cfg.white_pulse_attack_ms / 1000.0 * event.attack
+        hold = cfg.white_pulse_duration_ms / 1000.0 * event.length * event.hold
+        release = cfg.white_pulse_release_ms / 1000.0 * event.release
+        length = attack + hold + release
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = self._white_pulse_temp(cfg, self._clock_beat, event)
         for lamp in lamps:
@@ -937,7 +945,10 @@ class VisualizationEngine:
                 continue  # protect the bulb: not two flashes back to back
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
-            self._seq_white_hold[lamp] = cfg.white_pulse_duration_ms / 1000.0 * event.length
+            self._seq_white_attack[lamp] = attack
+            self._seq_white_hold[lamp] = hold
+            self._seq_white_release[lamp] = release
+            self._seq_white_brightness[lamp] = event.brightness
             self._seq_white_temp[lamp] = temp
 
     def _white_pulse_temp(self, cfg, clock: Optional[ClockBeat], event: Optional[PulseEvent] = None) -> float:
@@ -970,18 +981,19 @@ class VisualizationEngine:
         """0..1 brightness of a sequencer flash: ramps up over attack, holds,
         ramps down over release (constant 1 with legacy transitions - see
         the comment on shared_white_target in _tick_beat_sync_mode)."""
+        peak = self._seq_white_brightness.get(lamp, 1.0)
         if self.config.network.lamp_transitions == "legacy":
-            return 1.0
+            return peak
         t = wall_now - self._seq_white_started.get(lamp, wall_now)
-        attack = cfg.white_pulse_attack_ms / 1000.0
+        attack = self._seq_white_attack.get(lamp, cfg.white_pulse_attack_ms / 1000.0)
         hold = self._seq_white_hold.get(lamp, cfg.white_pulse_duration_ms / 1000.0)
-        release = cfg.white_pulse_release_ms / 1000.0
+        release = self._seq_white_release.get(lamp, cfg.white_pulse_release_ms / 1000.0)
         if attack > 0.0 and t < attack:
-            return max(0.05, t / attack)
+            return peak * max(0.05, t / attack)
         if t < attack + hold:
-            return 1.0
+            return peak
         if release > 0.0:
-            return max(0.0, 1.0 - (t - attack - hold) / release)
+            return peak * max(0.0, 1.0 - (t - attack - hold) / release)
         return 0.0
 
     def _seq_white_active(self, lamp: str, wall_now: float) -> bool:

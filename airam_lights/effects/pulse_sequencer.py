@@ -68,6 +68,13 @@ class PulseEvent:
     steps_per_bar: int = 16
     phrase_bar: int = 0  # bar within the phrase, 0 = the phrase's first bar
     phrase_bars: int = 1
+    # Shape of a white flash relative to the white pulse settings (see
+    # PulseSequencerConfig.pulse_dynamics): brightness, attack, hold (the
+    # pulse's duration) and release multipliers.
+    brightness: float = 1.0
+    attack: float = 1.0
+    hold: float = 1.0
+    release: float = 1.0
 
 
 def metric_weight(bar_step: int, steps_per_bar: int) -> float:
@@ -84,6 +91,35 @@ def metric_weight(bar_step: int, steps_per_bar: int) -> float:
     if sub == STEPS_PER_BEAT // 2:
         return 0.15
     return 0.0
+
+
+def _blend(amount: float, value: float) -> float:
+    """1.0 (no variation) .. `value` (full variation)."""
+    return 1.0 + (value - 1.0) * amount
+
+
+def flash_shape(reason: str, bar_step: int, steps_per_bar: int, intensity: float, amount: float) -> tuple:
+    """(brightness, attack, hold, release) multipliers for a white flash:
+    - the weight of its position in the bar: the downbeat long and bright, a
+      16th between beats short, crisp and a little dimmer;
+    - the loudness (0..1 percentile): quiet parts dimmer and softer (slower
+      attack), loud parts full and sharp;
+    - fills: short and snappy, getting brighter toward the phrase start;
+    - the phrase start: full brightness, held longer, slow fade out."""
+    amount = max(0.0, min(1.0, amount))
+    if amount == 0.0:
+        return 1.0, 1.0, 1.0, 1.0
+    loud = max(0.0, min(1.0, intensity))
+    attack = _blend(amount, 1.6 - 1.2 * loud)  # quiet 1.6x softer .. loud 0.4x sharper
+    if reason == "phrase":
+        return 1.0, attack, _blend(amount, 1.6), _blend(amount, 3.0)
+    if reason == "fill":
+        progress = bar_step / max(1, steps_per_bar - 1)  # the fill sits in the bar's second half
+        return _blend(amount, 0.6 + 0.4 * progress), _blend(amount, 0.5), _blend(amount, 0.5), _blend(amount, 0.5)
+    weight = metric_weight(bar_step, steps_per_bar)
+    brightness = _blend(amount, (0.55 + 0.45 * weight) * (0.7 + 0.3 * loud))
+    length = _blend(amount, 0.5 + 1.5 * weight)  # 16th 0.5x .. downbeat 2x
+    return brightness, attack, length, length
 
 
 def phrase_progress(phrase_bar: int, phrase_bars: int, bar_step: int, steps_per_bar: int) -> float:
@@ -227,7 +263,12 @@ class PulseSequencer:
                 white_group = self._next_group(num_groups)
                 if white_reason == "pattern" and self._rng.random() < cfg.double_chance:
                     self._pending_doubles[step + STEPS_PER_BEAT // 2] = white_group
-            events.append(PulseEvent("white", white_group, 1.0, white_reason))
+            event = PulseEvent("white", white_group, 1.0, white_reason)
+            if cfg.pulse_dynamics:
+                event.brightness, event.attack, event.hold, event.release = flash_shape(
+                    white_reason, bar_step, steps_per_bar, self.intensity, cfg.pulse_dynamics_amount
+                )
+            events.append(event)
 
         # -- dark (never on the same step as a white flash) --------------------------------
         if cfg.dark_pattern != "off" and not white_reason:

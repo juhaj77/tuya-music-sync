@@ -535,6 +535,13 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   breath, and every lamp flashes on the new phrase's first beat. A sudden quiet-to-loud
   jump (a drop) starts a new phrase right there.
 
+- **Pulse dynamics** - the white pulse settings (brightness, attack, duration, release)
+  are the baseline, and each flash is shaped by where it falls in the music: the downbeat
+  long and bright, flashes between beats short and crisp, fills snappier and brighter
+  toward the phrase start, the phrase start held longest with a slow fade, quiet parts
+  dimmer and softer, loud parts full and sharp. *Dynamics amount* sets how strongly
+  (0 = every flash identical).
+
 The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
 The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -
 in most dance music that's where the kick is strongest, so it lines up with the real

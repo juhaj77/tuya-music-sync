@@ -1127,6 +1127,13 @@ class PulseSequencerConfig:
     fills: bool = True  # denser flashes in the second half of a phrase's last bar
     phrase_accent: bool = True  # dark breath before + all-groups flash on each phrase start
     drop_detection: bool = True  # a quiet->loud jump restarts the phrase right there
+    # Vary each white flash's shape with the music, around Beat Sync's white
+    # pulse settings (which stay the baseline): heavy beats long and bright,
+    # 16ths short and crisp, fills tightening toward the phrase end, the
+    # phrase start longest with a slow fade, quiet parts dimmer and softer.
+    # pulse_dynamics_amount: 0 = every flash identical, 1 = full variation.
+    pulse_dynamics: bool = True
+    pulse_dynamics_amount: float = 0.7
 
     def to_dict(self) -> dict:
         return asdict(self)

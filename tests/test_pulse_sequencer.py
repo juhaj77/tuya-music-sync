@@ -132,3 +132,35 @@ def test_events_carry_their_position_in_bar_and_phrase():
     for p, e in whites:
         assert e.bar_step == int(p * 4 + 1e-6) % 16
         assert e.steps_per_bar == 16 and e.phrase_bars == 4
+
+
+def test_flash_shape_follows_beat_weight_loudness_and_phrase():
+    from airam_lights.effects.pulse_sequencer import flash_shape
+
+    downbeat = flash_shape("pattern", 0, 16, 0.8, 1.0)
+    offbeat = flash_shape("pattern", 2, 16, 0.8, 1.0)
+    sixteenth = flash_shape("pattern", 3, 16, 0.8, 1.0)
+    assert downbeat[0] > offbeat[0] > sixteenth[0]  # brighter on heavier beats
+    assert downbeat[2] > offbeat[2] > sixteenth[2]  # and held longer
+    assert abs(downbeat[2] / sixteenth[2] - 4.0) < 1e-9  # 2x vs 0.5x at full amount
+
+    quiet, loud = flash_shape("pattern", 0, 16, 0.1, 1.0), flash_shape("pattern", 0, 16, 0.9, 1.0)
+    assert loud[0] > quiet[0] and loud[1] < quiet[1]  # louder: brighter and a sharper attack
+
+    phrase = flash_shape("phrase", 0, 16, 0.5, 1.0)
+    assert phrase[0] == 1.0 and phrase[3] > downbeat[3]  # the phrase start fades slowest
+
+    early_fill, late_fill = flash_shape("fill", 8, 16, 0.5, 1.0), flash_shape("fill", 14, 16, 0.5, 1.0)
+    assert late_fill[0] > early_fill[0] and late_fill[2] < 1.0  # short, brightening toward the phrase
+
+    assert flash_shape("pattern", 3, 16, 0.2, 0.0) == (1.0, 1.0, 1.0, 1.0)  # amount 0: all identical
+    half = flash_shape("pattern", 3, 16, 0.8, 0.5)
+    assert sixteenth[2] < half[2] < 1.0
+
+
+def test_events_carry_their_shape_only_with_dynamics_on():
+    for dynamics in (True, False):
+        seq = PulseSequencer(_cfg(white_pattern="sixteenths", pulse_dynamics=dynamics), random.Random(1))
+        whites = [e for _, e in _run(seq, 2, start_beat=0.1) if e.kind == "white"]
+        holds = {round(e.hold, 6) for e in whites}
+        assert (len(holds) > 1) == dynamics

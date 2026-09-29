@@ -899,9 +899,14 @@ class ColorMappingTab(QWidget):
             self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo, self.seq_white_density_slider, self.seq_double_slider,
             self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
             self.seq_phrase_combo, self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
+            self.seq_dynamics_checkbox,
         ]
         set_active([self.seq_enabled_checkbox], shared, "The sequencer needs the shared beat clock.")
         set_active(seq_controls, sequencing, "The sequencer is off." if shared else "The sequencer needs the shared beat clock.")
+        set_active(
+            [self.seq_dynamics_slider], sequencing and sq.pulse_dynamics,
+            "Pulse dynamics is off." if sequencing else "The sequencer is off.",
+        )
         if shared and white and temp_mode == "phrase":
             set_active([self.seq_phrase_combo], True, "")  # warm/cool 'phrase' uses it too
         if not shared:
@@ -1333,6 +1338,25 @@ class ColorMappingTab(QWidget):
         phrase_row.addStretch(1)
         layout.addLayout(phrase_row)
 
+        self.seq_dynamics_checkbox = QCheckBox("Pulse dynamics (vary each white flash's shape with the music)")
+        self.seq_dynamics_checkbox.setChecked(sq.pulse_dynamics)
+        self.seq_dynamics_checkbox.setToolTip(
+            "The white pulse settings above (brightness, attack, duration, release) become the baseline, "
+            "and each flash is shaped by where it falls in the music: the downbeat long and bright, "
+            "flashes between beats short and crisp, fills snappier and brighter toward the phrase start, "
+            "the phrase start held longest with a slow fade, quiet parts dimmer and softer, loud parts "
+            "full and sharp. Off: every flash has exactly the settings above."
+        )
+        self.seq_dynamics_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_dynamics_checkbox)
+        self.seq_dynamics_slider = FloatSlider(
+            "Dynamics amount", 0.0, 1.0, sq.pulse_dynamics_amount, decimals=2,
+            tooltip="How strongly the flashes vary: 0 = all identical, 1 = the full contrast (a downbeat "
+            "flash then lasts about 4x as long as a 16th, and is almost twice as bright).",
+        )
+        self.seq_dynamics_slider.valueChanged.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_dynamics_slider)
+
         self.seq_fills_checkbox = QCheckBox("Fills (denser flashes at the end of each phrase)")
         self.seq_fills_checkbox.setChecked(sq.fills)
         self.seq_accent_checkbox = QCheckBox("Phrase accents (dark breath, then every lamp flashes on the new phrase)")
@@ -1373,6 +1397,8 @@ class ColorMappingTab(QWidget):
         sq.fills = self.seq_fills_checkbox.isChecked()
         sq.phrase_accent = self.seq_accent_checkbox.isChecked()
         sq.drop_detection = self.seq_drop_checkbox.isChecked()
+        sq.pulse_dynamics = self.seq_dynamics_checkbox.isChecked()
+        sq.pulse_dynamics_amount = self.seq_dynamics_slider.value()
         self._update_beat_states()
         self.controller.apply_config_changes()
 
