@@ -400,3 +400,37 @@ def test_warm_cool_phrase_cools_toward_the_phrase_end(monkeypatch):
     assert len(starts) >= 2
     one_phrase = temps[starts[0] + 1:starts[1]]
     assert one_phrase and all(a < b for a, b in zip(one_phrase, one_phrase[1:]))
+
+
+def test_sequencer_white_flash_follows_attack_and_release(monkeypatch):
+    def configure(c):
+        bs = c.color_mapping.beat_sync
+        bs.white_pulse_enabled = True
+        bs.white_pulse_attack_ms = 60.0
+        bs.white_pulse_duration_ms = 60.0
+        bs.white_pulse_release_ms = 120.0
+        c.sequencer.enabled = True
+        c.sequencer.white_pattern = "downbeats"
+        c.sequencer.white_density = 1.0
+        c.sequencer.double_chance = 0.0
+        c.sequencer.dark_pattern = "off"
+        c.sequencer.phrase_accent = False
+        c.sequencer.fills = False
+        c.sequencer.group_walk = "all"
+
+    engine, clock, _ = _make_engine(monkeypatch, configure)
+    _run(engine, clock, 6.0, lambda: None)
+    levels = []
+    _run(engine, clock, 4.0, lambda: levels.append(
+        engine.latest_lamp_white_targets["a"].brightness if "a" in engine.latest_lamp_white_targets else 0.0))
+    flashes, current = [], []
+    for b in levels:
+        if b > 0.0:
+            current.append(b)
+        elif current:
+            flashes.append(current)
+            current = []
+    assert flashes
+    for f in flashes:
+        assert len(f) >= 5
+        assert f[0] < max(f) and f[-1] < max(f)  # ramps in and out instead of an on/off block

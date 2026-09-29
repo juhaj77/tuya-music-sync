@@ -383,6 +383,69 @@ If the error is `Err 914` and the key in the cloud hasn't changed, the lamp's ow
 connection is stuck - switch it off and on at the wall switch; the app picks it up again
 within ~15 s without a restart.
 
+**Lamp transitions: instant vs. faded changes.** The bulbs have two ways to take a color.
+The persistent colour datapoint (DP 24), which earlier builds used, makes the bulb fade
+every change itself over roughly **0.7 s** - measured on video with an Airam PAR16 - so
+at a typical dance tempo (a beat every ~0.4 s) the light never actually arrives before
+the next beat, flashes blur, and white flashes need 4-5 commands (switch work_mode to
+white, brightness, temperature, and back). The real-time control datapoint (DP 28,
+`control_data`) takes a change instantly (within one 30 fps video frame) and lights the
+white LEDs directly with a single command, without switching work_mode. **Lamp
+transitions** (Color Mapping tab, Global box) picks the way:
+
+- `direct` (default) - DP 28 without fade: crisp flashes, beats and white pulses.
+- `gradient` - DP 28 with the bulb's own short fade (~0.25 s).
+- `legacy` - DP 24 and work_mode switching, as before (~0.7 s fades).
+
+With instant transitions every command shows as a step, so smooth fades and hue glides
+want a higher **Lamp command rate** (up to 60/s; the color engine computes at least that
+often), and a white flash's brightness now really follows *White pulse attack* /
+*release* (it swells in and fades out) instead of the bulb's own fade.
+
+Only bulbs with the v2 datapoint layout (like the Airam ones) use DP 28; others always
+use `legacy`. If your bulbs stop changing color with `direct`/`gradient`, choose `legacy`.
+Worth knowing: a warm white takes longer to build up than a cool one (~0.5 s), so very
+short warm flashes come out dimmer than cool ones.
+
+**When a lamp looks online but ignores the show.** Some bulbs occasionally get into a
+state where they still answer status queries - so they look perfectly online - but
+silently ignore every control command. Colour commands are sent without waiting for an
+acknowledgement (waiting would slow every command down), so nothing fails on the app's
+side either: no error, nothing in the log. The phone app keeps working (through the
+cloud), and only switching the lamp off and on at the wall brings it back. This looks
+like a known weakness of the bulbs' local network handling under a long, dense stream
+of commands; how much the show's command rate contributes isn't settled yet - it has
+happened with and without *Glide hue*.
+
+The app now watches for it: every status refresh (~4 s) compares what the lamp *reports*
+it's showing with what it was sent. (The bulb never reports colors sent through DP 28,
+so with `direct`/`gradient` transitions the current color is also written to DP 24 once
+every 5 s, and the check compares against those writes.) A lamp that keeps reporting the exact same color
+while the show sends it plenty of different ones is flagged as **not following
+commands**:
+
+1. The app logs a warning and rebuilds the connection once.
+2. If that doesn't help, the lamp is left out of the show and shown as offline in the
+   Devices tab with the reason ("...switch the lamp off and on at the wall switch"). It's
+   re-checked every 15 s by sending it a test color and reading back what it shows - once
+   it obeys again (e.g. after the power-cycle), it rejoins the show by itself.
+
+Each time, the log (`%APPDATA%\AiramMusicLights\logs\app.log`; search for `not following`
+or `stuck-lamp report`) records what that lamp had been put through, for example:
+
+```
+'OV' (192.168.1.241) is not following commands - ... Rebuilding its connection.
+[18.4 commands/s over the last 60s (1051 colour, 52 white, 97 colour<->white switches),
+connected for 41.3 min; show: mode=beat_sync, fade=on, glide_hue=beat, white_pulses=on,
+sequencer=on, chase=clock, group_switch=clock, lamp_command_rate=20/s, min_change=0.015]
+```
+
+After a few of these it's possible to see what stuck lamps have in common - whether it's
+always the same lamp, the command rate, the number of white switches, glide on or off, or
+simply time. If stuck lamps turn out to follow the load, lowering **Lamp command rate**
+(e.g. to 10/s) or raising **Min change threshold** (Color Mapping tab, Global box)
+reduces it.
+
 ### Color Mapping tab
 Full detail for **RGB Frequency** and **Custom** modes (per-channel frequency range,
 gain, min/max level, gamma - both modes are literally the same mechanism, Custom just
@@ -849,7 +912,7 @@ On top of that, the network layer independently **rate-limits** each lamp
 |---|---|---|
 | Audio analysis (FFT) | `audio.analysis_update_hz` | 60 Hz |
 | Visual/color/smoothing | `network.visual_update_hz` | 30 Hz |
-| Per-lamp network commands | `network.lamp_command_rate_hz` | 20 Hz (auto backs off on failures) |
+| Per-lamp network commands | `network.lamp_command_rate_hz` (Color Mapping -> Global: *Lamp command rate*) | 20 Hz (auto backs off on failures) |
 
 These are deliberately separate: the FFT can run faster than the color engine needs,
 and the color engine can run faster than any real Wi-Fi bulb can reliably accept

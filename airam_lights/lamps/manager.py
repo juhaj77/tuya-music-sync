@@ -19,17 +19,18 @@ Design notes (see README.md "Network / performance"):
 """
 from __future__ import annotations
 
+import collections
 import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from ..color.models import Color, WhiteTarget
 from ..config.schema import DeviceConfig, NetworkConfig
 from . import cloud_keys
 from .discovery import DiscoveredDevice, find_device_address, scan_network
-from .tuya_device import KEY_CODES, UNREACHABLE_CODES, LampDevice
+from .tuya_device import KEY_CODES, UNREACHABLE_CODES, LampDevice, parse_reported_state, reported_matches
 
 logger = logging.getLogger("airam_lights.lamps")
 
@@ -70,6 +71,30 @@ _DORMANT_AFTER_RECONNECTS = 2
 _DORMANT_PROBE_INTERVAL_S = 15.0
 _REDISCOVER_INTERVAL_S = 120.0
 _CLOUD_KEY_INTERVAL_S = 600.0
+
+# "Stuck" lamps: some bulbs get into a state where they still answer status
+# queries (so they look online) but silently ignore every control command -
+# and because colour commands are sent without waiting for an
+# acknowledgement, nothing on our side fails either. The phone app keeps
+# working (it goes through the Tuya cloud) and only switching the lamp off
+# and on fixes it. We catch it by comparing what the lamp REPORTS it's showing
+# (the periodic status refresh) with what we sent it recently: if it hasn't
+# changed at all while commands kept going out, and on this many of those
+# checks it matched none of the recent commands, it's not following.
+_STUCK_CHECKS = 3
+_STUCK_COMPARE_WINDOW_S = 3.0  # "recent" = sent within this long before the status reply
+_STUCK_MIN_SENDS = 5  # fewer commands than this in the window = too idle to judge
+_SENT_LOG_S = 60.0  # how much send history to keep, for the diagnostics report
+
+# With lamp_transitions "direct"/"gradient", colors go to the real-time
+# control datapoint (DP 28), which the bulb doesn't report back in status -
+# its reported colour (DP 24) stays whatever DP 24 was last set to. So every
+# this many seconds the current color is also written to DP 24, and the stuck
+# check compares against those writes instead (few, so a wider window and a
+# lower minimum count apply).
+_DP24_SYNC_S = 5.0
+_STUCK_COMPARE_WINDOW_CONTROL_S = 7.0
+_STUCK_MIN_SENDS_CONTROL = 1
 
 
 @dataclass
@@ -121,6 +146,23 @@ class LampWorker(threading.Thread):
         # See _DORMANT_AFTER_RECONNECTS.
         self._reconnects_without_success = 0
         self.dormant = False
+        self.dormant_reason = ""
+
+        # See _STUCK_CHECKS. _sent_log: (time, "colour"|"white", hsv or None,
+        # reported_in_status) for every successful send in the last
+        # _SENT_LOG_S seconds - the last field is False for DP 28 sends,
+        # which the bulb's status never reflects.
+        self._sent_log: Deque[Tuple[float, str, Optional[tuple], bool]] = collections.deque()
+        self._control_mode = False  # last sends went to DP 28 (see NetworkConfig.lamp_transitions)
+        self._last_dp24_sync = 0.0
+        self._sent_log_lock = threading.Lock()
+        self._suspicious_checks = 0
+        self._last_reported: Optional[tuple] = None
+        self._stuck_pending = False
+        self._stuck_reconnected = False  # already tried a reconnect for the current stuck episode
+        self._dormant_stuck = False  # dormant because it stopped following (vs. not answering at all)
+        self._connected_since = time.perf_counter()
+        self.context_provider: Optional[Callable[[], str]] = None  # what the show was doing, for the report
         self._next_probe_at = 0.0
         self._next_rediscover_at = 0.0
         self._next_cloud_key_at = 0.0
@@ -159,6 +201,8 @@ class LampWorker(threading.Thread):
             got_signal = self._wake.wait(timeout=0.5)
             if self._stop.is_set():
                 break
+            if self._stuck_pending:
+                self._handle_stuck()
             if self.dormant:
                 self._wake.clear()
                 if time.perf_counter() >= self._next_probe_at:
@@ -256,8 +300,10 @@ class LampWorker(threading.Thread):
 
     # -- dormant: a lamp that won't come back by just retrying ----------------------
 
-    def _enter_dormant(self, error: Exception) -> None:
+    def _enter_dormant(self, error: Exception, stuck: bool = False) -> None:
         self.dormant = True
+        self._dormant_stuck = stuck
+        self.dormant_reason = str(error)
         self._next_probe_at = time.perf_counter() + _DORMANT_PROBE_INTERVAL_S
         logger.warning(
             "'%s' (%s) is not responding: %s. Leaving it out of the show and checking it every %ds - "
@@ -267,6 +313,12 @@ class LampWorker(threading.Thread):
 
     def _leave_dormant(self) -> None:
         self.dormant = False
+        self._dormant_stuck = False
+        self.dormant_reason = ""
+        self._stuck_reconnected = False
+        self._suspicious_checks = 0
+        self._last_reported = None
+        self._connected_since = time.perf_counter()
         self._consecutive_failures = 0
         self._reconnects_without_success = 0
         self._colour_mode_ensured = False
@@ -286,6 +338,11 @@ class LampWorker(threading.Thread):
         self.device.reconnect()
         problem = self.device.probe()
         if problem is None:
+            # Answering isn't enough for a lamp that stopped following
+            # commands - it answered all along. Check it actually obeys.
+            if self._dormant_stuck and not self._verify_following():
+                logger.debug("'%s' answers but still doesn't follow commands", self.device.config.name)
+                return
             self._leave_dormant()
             return
         logger.debug("'%s' still not responding: %s", self.device.config.name, problem)
@@ -297,6 +354,128 @@ class LampWorker(threading.Thread):
         if problem.code in KEY_CODES and now >= self._next_cloud_key_at:
             self._next_cloud_key_at = now + _CLOUD_KEY_INTERVAL_S
             self._try_new_key()
+
+    # -- stuck: answers, but doesn't follow commands (see _STUCK_CHECKS) --------------------
+
+    def _log_send(self, kind: str, hsv: Optional[tuple], reported: bool = True) -> None:
+        now = time.perf_counter()
+        with self._sent_log_lock:
+            self._sent_log.append((now, kind, hsv, reported))
+            while self._sent_log and self._sent_log[0][0] < now - _SENT_LOG_S:
+                self._sent_log.popleft()
+
+    def check_following(self, raw_dps: dict, now: Optional[float] = None) -> None:
+        """Called after each status refresh with the lamp's reported state.
+        Flags the lamp as stuck (handled on this worker's own thread) after
+        _STUCK_CHECKS suspicious checks in a row."""
+        if self.dormant:
+            return
+        reported = parse_reported_state(raw_dps)
+        if reported is None:
+            return
+        now = time.perf_counter() if now is None else now
+        window = _STUCK_COMPARE_WINDOW_CONTROL_S if self._control_mode else _STUCK_COMPARE_WINDOW_S
+        min_sends = _STUCK_MIN_SENDS_CONTROL if self._control_mode else _STUCK_MIN_SENDS
+        with self._sent_log_lock:
+            recent = [e for e in self._sent_log if e[3] and now - window <= e[0] <= now]
+        previous, self._last_reported = self._last_reported, reported
+        if previous is None:
+            return  # first look (or first after a reconnect): nothing to compare with yet
+        if reported != previous:
+            # What it shows changed: it's alive and following. A later episode starts over.
+            self._suspicious_checks = 0
+            self._stuck_reconnected = False
+            return
+        # Unchanged since the last check. That only counts against it if
+        # plenty of commands went out meanwhile and none of them is what it
+        # shows - a match can be a coincidence (a frozen lamp showing one of
+        # the colors the show keeps coming back to), so it doesn't clear the
+        # count either; only a change does.
+        if len(recent) < min_sends:
+            return  # too idle to tell
+        if any(reported_matches(reported, kind, hsv) for _, kind, hsv, _ in recent):
+            return
+        self._suspicious_checks += 1
+        if self._suspicious_checks >= _STUCK_CHECKS:
+            self._suspicious_checks = 0
+            self._stuck_pending = True
+            self._wake.set()
+
+    def diagnostics_report(self, now: Optional[float] = None) -> str:
+        """What this lamp was put through recently - to see what stuck lamps
+        have in common (command load, white switching, time connected)."""
+        now = time.perf_counter() if now is None else now
+        with self._sent_log_lock:
+            entries = list(self._sent_log)
+        span = max(1.0, min(_SENT_LOG_S, now - entries[0][0])) if entries else _SENT_LOG_S
+        colour = sum(1 for _, kind, _, _ in entries if kind == "colour")
+        white = len(entries) - colour
+        switches = sum(1 for a, b in zip(entries, entries[1:]) if a[1] != b[1])
+        minutes = (now - self._connected_since) / 60.0
+        context = ""
+        if self.context_provider is not None:
+            try:
+                context = "; " + self.context_provider()
+            except Exception:
+                pass
+        return (
+            f"{len(entries) / span:.1f} commands/s over the last {span:.0f}s ({colour} colour, {white} white, "
+            f"{switches} colour<->white switches), connected for {minutes:.1f} min{context}"
+        )
+
+    def _handle_stuck(self) -> None:
+        self._stuck_pending = False
+        name, ip = self.device.config.name, self.device.config.ip
+        report = self.diagnostics_report()
+        if not self._stuck_reconnected:
+            logger.warning(
+                "'%s' (%s) is not following commands - it answers status queries but keeps showing the "
+                "same color whatever it's sent. Rebuilding its connection. [%s]", name, ip, report,
+            )
+            self._stuck_reconnected = True
+            self.device.reconnect()
+            self._connected_since = time.perf_counter()
+            self._last_reported = None
+            self._colour_mode_ensured = False
+            self._white_mode_ensured = False
+            self._last_sent_color = None  # resend even an unchanged color
+            self._last_sent_white = None
+            self._wake.set()
+            return
+        self._enter_dormant(
+            RuntimeError(
+                "it answers but no longer follows commands, even after a reconnect - its local connection is "
+                "stuck; switch the lamp off and on at the wall switch"
+            ),
+            stuck=True,
+        )
+        logger.warning("'%s' stuck-lamp report: [%s]", name, report)
+
+    def _verify_following(self) -> bool:
+        """Send one color and read back what the lamp reports - does it obey?
+        The test color must differ from what it's showing already, or a lamp
+        frozen on that very color would look obedient."""
+        with self._lock:
+            target = self._target_color
+        try:
+            before = parse_reported_state(self.device.refresh_status().raw_dps)
+        except Exception:
+            return False
+        candidates = [c for c in (target, Color(1.0, 0.0, 0.0), Color(0.0, 0.3, 1.0)) if c is not None]
+        color = next(
+            (c for c in candidates if before is None or not reported_matches(before, "colour", c.to_hsv())),
+            candidates[-1],
+        )
+        try:
+            self.device.ensure_colour_mode()
+            r, g, b = color.to_rgb255()
+            self.device.set_color(r, g, b, wait_for_ack=True)  # DP 24: the one status reports back
+            time.sleep(0.4)
+            status = self.device.refresh_status()
+        except Exception:
+            return False
+        reported = parse_reported_state(status.raw_dps)
+        return reported is not None and reported_matches(reported, "colour", color.to_hsv())
 
     def _reconfigure_and_probe(self) -> bool:
         self.device.reconfigure(self.device.config)
@@ -334,6 +513,10 @@ class LampWorker(threading.Thread):
         cfg.local_key = key
         return self._reconfigure_and_probe()
 
+    def _uses_control_dp(self) -> bool:
+        check = getattr(self.device, "uses_control_dp", None)
+        return bool(check and check(self.network_cfg.lamp_transitions))
+
     def _send_color(self, color: Color) -> None:
         try:
             if not self._colour_mode_ensured:
@@ -341,7 +524,19 @@ class LampWorker(threading.Thread):
                 self._colour_mode_ensured = True
                 self._white_mode_ensured = False
             r, g, b = color.to_rgb255()
-            self.device.set_color(r, g, b, wait_for_ack=False)
+            self._control_mode = self._uses_control_dp()
+            if self._control_mode:
+                self.device.set_color(r, g, b, wait_for_ack=False, transition=self.network_cfg.lamp_transitions)
+                self._log_send("colour", color.to_hsv(), reported=False)
+                now = time.perf_counter()
+                if now - self._last_dp24_sync >= _DP24_SYNC_S:
+                    # See _DP24_SYNC_S: lets the stuck check see what we sent.
+                    self._last_dp24_sync = now
+                    self.device.set_color(r, g, b, wait_for_ack=False)
+                    self._log_send("colour", color.to_hsv())
+            else:
+                self.device.set_color(r, g, b, wait_for_ack=False)
+                self._log_send("colour", color.to_hsv())
             self._last_sent_color = color
             self._last_sent_white = None
             self._on_send_success()
@@ -350,11 +545,22 @@ class LampWorker(threading.Thread):
 
     def _send_white(self, target: WhiteTarget) -> None:
         try:
-            if not self._white_mode_ensured:
-                self.device.ensure_white_mode()
-                self._white_mode_ensured = True
-                self._colour_mode_ensured = False
-            self.device.set_white(target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False)
+            self._control_mode = self._uses_control_dp()
+            if self._control_mode:
+                # DP 28 lights the white LEDs directly - no work_mode switch
+                # there and back, so one command per flash instead of 4-5.
+                self.device.set_white(
+                    target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False,
+                    transition=self.network_cfg.lamp_transitions,
+                )
+                self._log_send("white", None, reported=False)
+            else:
+                if not self._white_mode_ensured:
+                    self.device.ensure_white_mode()
+                    self._white_mode_ensured = True
+                    self._colour_mode_ensured = False
+                self.device.set_white(target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False)
+                self._log_send("white", None)
             self._last_sent_white = target
             self._last_sent_color = None
             self._consecutive_white_failures = 0
@@ -378,6 +584,10 @@ class LampWorker(threading.Thread):
 class LampManager:
     """Owns all configured lamps and their worker threads."""
 
+    # Optional: returns a one-line summary of what the show is doing (mode,
+    # effects, command rate) - included in stuck-lamp diagnostics reports.
+    context_provider: Optional[Callable[[], str]] = None
+
     def __init__(self, network_cfg: NetworkConfig, min_change_threshold: float = 0.015):
         self.network_cfg = network_cfg
         self.min_change_threshold = min_change_threshold
@@ -395,6 +605,7 @@ class LampManager:
             self.remove_device(dc.id)
         dev = LampDevice(dc)
         worker = LampWorker(dev, self.network_cfg, self.min_change_threshold)
+        worker.context_provider = self._context
         worker.start()
         self.devices[dc.id] = dev
         self.workers[dc.id] = worker
@@ -413,6 +624,10 @@ class LampManager:
             self.add_device(dc)
             return
         dev.reconfigure(dc)
+
+    def _context(self) -> str:
+        provider = self.context_provider
+        return provider() if provider is not None else ""
 
     def dormant_device_ids(self) -> List[str]:
         return [device_id for device_id, w in self.workers.items() if w.dormant]
@@ -492,15 +707,23 @@ class LampManager:
     def refresh_all_status(self, executor) -> None:
         """Submits a status() refresh for every device to the given
         concurrent.futures executor so slow/offline lamps don't block others."""
-        for dev in self.devices.values():
-            executor.submit(self._safe_refresh, dev)
+        for device_id, dev in self.devices.items():
+            executor.submit(self._safe_refresh, dev, self.workers.get(device_id))
 
     @staticmethod
-    def _safe_refresh(dev: LampDevice) -> None:
+    def _safe_refresh(dev: LampDevice, worker: Optional["LampWorker"] = None) -> None:
         try:
             dev.refresh_status()
         except Exception:
             pass  # already recorded on dev.status by refresh_status()
+        if worker is None:
+            return
+        if dev.status.online:
+            worker.check_following(dev.status.raw_dps)
+        if worker.dormant:
+            # Show why it's out of the show, even if it answered this status query.
+            dev.status.online = False
+            dev.status.last_error = worker.dormant_reason
 
     def discover(self, timeout: float = 8.0) -> List[DiscoveredDevice]:
         return scan_network(timeout)

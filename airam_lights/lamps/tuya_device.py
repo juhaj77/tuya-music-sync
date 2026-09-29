@@ -13,6 +13,7 @@ one worker thread per lamp for exactly this reason.
 """
 from __future__ import annotations
 
+import colorsys
 import logging
 import threading
 import time
@@ -237,6 +238,25 @@ class LampDevice:
 
     # -- write ----------------------------------------------------------------
 
+    def uses_control_dp(self, transition: str) -> bool:
+        """Whether commands for this `transition` (NetworkConfig.
+        lamp_transitions) go to the real-time control datapoint (DP 28).
+        Only for bulbs with the v2 datapoint layout (tinytuya type "B", like
+        the Airam bulbs) - anything else, or "legacy", uses DP 24 / work_mode."""
+        if transition == "legacy" or self._bulb is None:
+            return False
+        with self._bulb_lock:
+            self._ensure_detected()
+            return getattr(self._bulb, "bulb_type", None) == "B"
+
+    @staticmethod
+    def control_payload(transition: str, h: int, s: int, v: int, bright: int = 0, temp: int = 0) -> str:
+        """DP 28 (control_data) value: change mode (0 = jump, 1 = gradient),
+        then hue 0..360, saturation 0..1000, value 0..1000, white brightness
+        0..1000 and white temperature 0..1000 - 4 hex digits each."""
+        mode = "1" if transition == "gradient" else "0"
+        return f"{mode}{h:04x}{s:04x}{v:04x}{bright:04x}{temp:04x}"
+
     def ensure_colour_mode(self) -> None:
         """Some Tuya bulbs ignore colour DPs unless work_mode is set to
         'colour' first. Safe/cheap to call once after connecting."""
@@ -248,14 +268,21 @@ class LampDevice:
         except Exception:
             logger.debug("set_mode('colour') not supported/failed for %s (may be fine)", self.config.name)
 
-    def set_color(self, r: int, g: int, b: int, wait_for_ack: bool = False) -> float:
-        """r,g,b in 0..255. Returns latency in ms. Raises on failure."""
+    def set_color(self, r: int, g: int, b: int, wait_for_ack: bool = False, transition: str = "legacy") -> float:
+        """r,g,b in 0..255. Returns latency in ms. Raises on failure.
+        `transition`: see NetworkConfig.lamp_transitions."""
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
+        control = self.uses_control_dp(transition)
         t0 = time.perf_counter()
         with self._bulb_lock:
             self._ensure_detected()
-            self._bulb.set_colour(r, g, b, nowait=not wait_for_ack)
+            if control:
+                h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+                payload = self.control_payload(transition, int(round(h * 360)) % 360, int(round(s * 1000)), int(round(v * 1000)))
+                self._bulb.set_value(28, payload, nowait=not wait_for_ack)
+            else:
+                self._bulb.set_colour(r, g, b, nowait=not wait_for_ack)
         latency_ms = (time.perf_counter() - t0) * 1000.0
         self.status.last_latency_ms = latency_ms
         self.status.online = True
@@ -285,7 +312,9 @@ class LampDevice:
         except Exception:
             logger.debug("set_mode('white') not supported/failed for %s (may be fine)", self.config.name)
 
-    def set_white(self, brightness_percent: float, temp_percent: float, wait_for_ack: bool = False) -> float:
+    def set_white(
+        self, brightness_percent: float, temp_percent: float, wait_for_ack: bool = False, transition: str = "legacy"
+    ) -> float:
         """brightness_percent, temp_percent in 0..100 (temp: 0=warmest,
         100=coolest). Uses tinytuya's own percentage-based colourtemp/
         brightness setters (documented BulbDevice methods) rather than
@@ -300,6 +329,20 @@ class LampDevice:
         important, and update DEVICE_NOTES.md with the result."""
         if self._bulb is None:
             raise RuntimeError(self._connect_error or "device not initialized")
+        if self.uses_control_dp(transition):
+            # One command, no work_mode switch: DP 28 with zero HSV and the
+            # white LEDs' brightness/temperature lights them instantly (and
+            # the next colour command on DP 28 switches straight back).
+            t0 = time.perf_counter()
+            bright = max(10, min(1000, int(round(brightness_percent * 10))))
+            temp = max(0, min(1000, int(round(temp_percent * 10))))
+            with self._bulb_lock:
+                self._bulb.set_value(28, self.control_payload(transition, 0, 0, 0, bright, temp), nowait=not wait_for_ack)
+            latency_ms = (time.perf_counter() - t0) * 1000.0
+            self.status.last_latency_ms = latency_ms
+            self.status.online = True
+            self.status.last_error = None
+            return latency_ms
         t0 = time.perf_counter()
         # tinytuya's set_colourtemp_percentage()/set_brightness_percentage()
         # both need self._bulb.bulb_configured (its own DP-layout detection,
@@ -367,3 +410,53 @@ class LampDevice:
             raise RuntimeError(self._connect_error or "device not initialized")
         with self._bulb_lock:
             self._bulb.turn_off(nowait=not wait_for_ack)
+
+
+# -- what the lamp says it's showing ----------------------------------------------------------
+
+def parse_reported_state(raw_dps: dict) -> Optional[tuple]:
+    """The lamp's own report of what it's showing, from a status() reply:
+    ("colour", hue_deg, saturation 0..1, value 0..1) or ("white",) - or None
+    if the reply doesn't contain a recognizable colour datapoint. Handles the
+    v2 layout (DP 24, "hhhhssssvvvv" - the Airam bulbs) and the older one
+    (DP 5, "rrggbb0hhhssvv")."""
+    if not isinstance(raw_dps, dict):
+        return None
+    mode = raw_dps.get("21", raw_dps.get("2"))
+    if mode == "white":
+        return ("white",)
+    if mode not in (None, "colour"):
+        return None  # scene/music mode - nothing to compare against
+    colour = raw_dps.get("24")
+    try:
+        if isinstance(colour, str) and len(colour) == 12:
+            return ("colour", float(int(colour[0:4], 16)), int(colour[4:8], 16) / 1000.0, int(colour[8:12], 16) / 1000.0)
+        colour = raw_dps.get("5")
+        if isinstance(colour, str) and len(colour) == 14:
+            return ("colour", float(int(colour[7:10], 16)), int(colour[10:12], 16) / 255.0, int(colour[12:14], 16) / 255.0)
+    except ValueError:
+        return None
+    return None
+
+
+def reported_matches(reported: tuple, kind: str, hsv: Optional[tuple] = None) -> bool:
+    """Is the lamp's reported state (parse_reported_state) what we sent? For
+    a colour, brightness within 0.12, saturation within 0.12 (ignored near
+    black) and hue within 15 degrees (ignored near grey/black, where it's
+    meaningless) - the
+    bulb rounds, clamps its minimum brightness and reports on its own scale."""
+    if kind == "white":
+        return reported[0] == "white"
+    if reported[0] != "colour" or hsv is None:
+        return False
+    _, h, s, v = reported
+    sh, ss, sv = hsv
+    if abs(v - sv) > 0.12:
+        return False
+    if sv < 0.05:
+        return True  # near black: hue and saturation are just rounding noise
+    if abs(s - ss) > 0.12:
+        return False
+    if ss * sv < 0.05:
+        return True  # too grey or dark for the hue to survive 8-bit rounding
+    return abs(((h - sh + 180.0) % 360.0) - 180.0) <= 15.0

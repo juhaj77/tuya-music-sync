@@ -378,11 +378,14 @@ def test_white_pulse_brightness_mult_scales_per_lamp(monkeypatch):
     white_calls = [targets for kind, targets in lamp_manager.call_log if kind == "white"]
     assert white_calls
     for targets in white_calls:
-        assert targets["dev1"].brightness == 0.8
-        assert targets["dev2"].brightness == 0.8
-        assert abs(targets["dev3"].brightness - 0.4) < 1e-9
-        assert abs(targets["dev4"].brightness - 0.4) < 1e-9
+        # The flash's brightness follows its attack/release envelope (instant
+        # "direct" transitions), so compare lamps within the same step.
+        assert targets["dev1"].brightness <= 0.8 + 1e-9
+        assert targets["dev2"].brightness == targets["dev1"].brightness
+        assert abs(targets["dev3"].brightness - 0.5 * targets["dev1"].brightness) < 1e-9
+        assert abs(targets["dev4"].brightness - 0.5 * targets["dev1"].brightness) < 1e-9
         assert targets["dev3"].temp == targets["dev1"].temp
+    assert max(t["dev1"].brightness for t in white_calls) > 0.75  # reaches (nearly) full strength
 
 
 def test_white_pulse_never_uses_the_rgb_leds(monkeypatch):
@@ -405,3 +408,35 @@ def test_white_pulse_never_uses_the_rgb_leds(monkeypatch):
         clock.advance(1.0 / 60.0)
     assert lamp_manager.white_calls, "the pulse must go to the white LEDs"
     assert all(s == legacy.saturation for s in saturations)
+
+
+def _flash_brightness_curve(monkeypatch, transitions):
+    engine, clock, lamp_manager = _make_engine(
+        monkeypatch, energy_sequence=[0.05, 0.05, 0.05, 0.05, 1.0] + [0.0] * 40
+    )
+    engine.config.network.lamp_transitions = transitions
+    bs = engine.config.color_mapping.beat_sync
+    bs.white_pulse_attack_ms = 40.0
+    bs.white_pulse_duration_ms = 60.0
+    bs.white_pulse_release_ms = 80.0
+    engine._smoother_beat_white.attack_ms = bs.white_pulse_attack_ms
+    engine._smoother_beat_white.release_ms = bs.white_pulse_release_ms
+    curve = []
+    for _ in range(40):
+        engine.tick_visual()
+        target = engine.latest_lamp_white_targets.get("dev1")
+        curve.append(target.brightness if target else 0.0)
+        clock.advance(1.0 / 60.0)
+    return curve
+
+
+def test_white_flash_ramps_with_attack_and_release_on_instant_transitions(monkeypatch):
+    curve = [b for b in _flash_brightness_curve(monkeypatch, "direct") if b > 0.0]
+    peak = curve.index(max(curve))
+    assert peak > 0 and curve[0] < 0.8 * max(curve)  # rises over the attack...
+    assert curve[-1] < 0.5 * max(curve)  # ...and fades out over the release
+
+
+def test_white_flash_stays_constant_with_legacy_transitions(monkeypatch):
+    curve = [b for b in _flash_brightness_curve(monkeypatch, "legacy") if b > 0.0]
+    assert curve and len(set(curve)) == 1  # one target: the bulb's own fade softens it

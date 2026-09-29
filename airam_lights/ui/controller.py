@@ -61,6 +61,7 @@ class AppController(QObject):
             self.config.network, self.config.color_mapping.smoothing.min_change_threshold
         )
         self.lamp_manager.load_devices(self.config.devices)
+        self.lamp_manager.context_provider = self._show_context
         self.engine = VisualizationEngine(self.config, self.audio, self.lamp_manager)
 
         self._status_executor = concurrent.futures.ThreadPoolExecutor(
@@ -146,9 +147,8 @@ class AppController(QObject):
         self.engine.apply_config(self.config)
         self.engine.start()
         interval_analysis = max(1, int(1000 / max(self.config.audio.analysis_update_hz, 1.0)))
-        interval_visual = max(1, int(1000 / max(self.config.network.visual_update_hz, 1.0)))
         self._analysis_timer.start(interval_analysis)
-        self._visual_timer.start(interval_visual)
+        self._visual_timer.start(self._visual_interval_ms())
         self.runningChanged.emit(True)
         return True
 
@@ -163,10 +163,19 @@ class AppController(QObject):
 
     # -- config change plumbing --------------------------------------------------
 
+    def _visual_interval_ms(self) -> int:
+        """The color engine computes at least as often as lamps may be sent
+        commands - otherwise a higher Lamp command rate would just resend the
+        same colors."""
+        net = self.config.network
+        return max(1, int(1000 / max(net.visual_update_hz, net.lamp_command_rate_hz, 1.0)))
+
     def apply_config_changes(self) -> None:
         """Call after mutating self.config in place (sliders, mode changes,
         etc.) to propagate it to the engine and lamp manager."""
         self.engine.apply_config(self.config)
+        if self._visual_timer.isActive() and self._visual_timer.interval() != self._visual_interval_ms():
+            self._visual_timer.setInterval(self._visual_interval_ms())
 
     def replace_config_settings(self) -> None:
         """Like apply_config_changes(), after a change too broad for the
@@ -174,6 +183,23 @@ class AppController(QObject):
         main window to rebuild its settings tabs from the new values."""
         self.apply_config_changes()
         self.configReplaced.emit()
+
+    def _show_context(self) -> str:
+        """One line on what the show is doing, for stuck-lamp reports in the log."""
+        cfg = self.config
+        bs = cfg.color_mapping.beat_sync
+        parts = [f"mode={cfg.color_mapping.mode}"]
+        if cfg.color_mapping.mode == "beat_sync":
+            parts.append(f"fade={'on' if bs.fade_brightness else 'off'}")
+            parts.append(f"glide_hue={bs.hue_glide_timing if bs.glide_hue else 'off'}")
+            parts.append(f"white_pulses={'on' if bs.white_pulse_enabled else 'off'}")
+            parts.append(f"sequencer={'on' if cfg.sequencer.enabled and cfg.rhythm.shared_clock else 'off'}")
+        parts.append(f"chase={cfg.chase.sync_mode if cfg.chase.enabled else 'off'}")
+        parts.append(f"group_switch={cfg.group_switch.sync_mode if cfg.group_switch.enabled else 'off'}")
+        parts.append(f"lamp_command_rate={cfg.network.lamp_command_rate_hz:g}/s")
+        parts.append(f"transitions={cfg.network.lamp_transitions}")
+        parts.append(f"min_change={cfg.color_mapping.smoothing.min_change_threshold:g}")
+        return "show: " + ", ".join(parts)
 
     def save_config(self, quiet: bool = False) -> None:
         self.config.devices = [d.config for d in self.lamp_manager.devices.values()]

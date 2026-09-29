@@ -1185,6 +1185,9 @@ class AudioConfig:
 # Network / lamp command pacing
 # ---------------------------------------------------------------------------
 
+LAMP_TRANSITIONS = ("direct", "gradient", "legacy")
+
+
 @dataclass
 class NetworkConfig:
     visual_update_hz: float = 30.0  # how often the color engine recomputes
@@ -1192,6 +1195,15 @@ class NetworkConfig:
     command_timeout_s: float = 0.3
     max_retries: int = 1
     auto_backoff: bool = True  # reduce rate automatically on repeated failures/latency
+    # How colors and white flashes are sent. "direct" (default): the bulb's
+    # real-time control datapoint (DP 28, control_data) in its "jump" mode -
+    # changes land instantly, and white flashes use the white LEDs without
+    # switching work_mode. "gradient": the same datapoint with the bulb's own
+    # short (~0.25 s) fade. "legacy": the persistent colour datapoint (DP 24)
+    # and work_mode switching for white, as in earlier builds - the bulb then
+    # fades every change over ~0.7 s. Measured on the Airam PAR16 bulbs; bulbs
+    # without the v2 datapoint layout always use "legacy".
+    lamp_transitions: str = "direct"  # "direct" | "gradient" | "legacy"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1204,6 +1216,7 @@ class NetworkConfig:
             command_timeout_s=float(d.get("command_timeout_s", 0.3)),
             max_retries=int(d.get("max_retries", 1)),
             auto_backoff=bool(d.get("auto_backoff", True)),
+            lamp_transitions=d.get("lamp_transitions") if d.get("lamp_transitions") in LAMP_TRANSITIONS else "direct",
         )
 
 

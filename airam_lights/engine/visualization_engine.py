@@ -248,6 +248,7 @@ class VisualizationEngine:
         self._seq_white_until: Dict[str, float] = {}
         self._seq_white_started: Dict[str, float] = {}
         self._seq_white_temp: Dict[str, float] = {}
+        self._seq_white_hold: Dict[str, float] = {}
         self._seq_continuous_since: Dict[str, float] = {}
         self._seq_last_active: Dict[str, float] = {}
         self._seq_forced_gap_until: Dict[str, float] = {}
@@ -849,9 +850,15 @@ class VisualizationEngine:
                     self._white_continuous_since = None
                     self._white_forced_gap_until = wall_now + _WHITE_FORCED_GAP_S
 
+        # With instant lamp transitions (DP 28) the flash's brightness follows
+        # the attack/release envelope - one command per step. With "legacy"
+        # every white brightness change costs several commands (work_mode +
+        # two DPs), so it stays one constant target there and the bulb's own
+        # ~0.7 s fade softens it instead (see NetworkConfig.lamp_transitions).
+        shaped = self.config.network.lamp_transitions != "legacy"
         shared_white_target = (
             WhiteTarget(
-                brightness=cfg.white_pulse_white_brightness,
+                brightness=cfg.white_pulse_white_brightness * (white_amount if shaped else 1.0),
                 temp=self._beat_white_pulse_temp,
             ).clamped()
             if use_true_white_now
@@ -869,7 +876,7 @@ class VisualizationEngine:
             mult = effect.sensitivity_mult if effect else 1.0
 
             if self._sequencing and self._seq_white_active(device_id, wall_now):
-                brightness = cfg.white_pulse_white_brightness
+                brightness = cfg.white_pulse_white_brightness * self._seq_white_envelope(device_id, wall_now, cfg)
                 if effect is not None:
                     brightness *= effect.white_pulse_brightness_mult
                 white_targets[device_id] = WhiteTarget(
@@ -920,7 +927,7 @@ class VisualizationEngine:
             lamps = spread_positions(groups, event.group % len(groups), cfg.white_pulse_rotators)
         else:
             lamps = selected_ids
-        length = (cfg.white_pulse_duration_ms + cfg.white_pulse_release_ms) / 1000.0 * event.length
+        length = (cfg.white_pulse_attack_ms + cfg.white_pulse_duration_ms * event.length + cfg.white_pulse_release_ms) / 1000.0
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = self._white_pulse_temp(cfg, self._clock_beat, event)
         for lamp in lamps:
@@ -930,6 +937,7 @@ class VisualizationEngine:
                 continue  # protect the bulb: not two flashes back to back
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
+            self._seq_white_hold[lamp] = cfg.white_pulse_duration_ms / 1000.0 * event.length
             self._seq_white_temp[lamp] = temp
 
     def _white_pulse_temp(self, cfg, clock: Optional[ClockBeat], event: Optional[PulseEvent] = None) -> float:
@@ -957,6 +965,24 @@ class VisualizationEngine:
                     return metric_weight(bar_step, steps_per_bar)
                 return phrase_progress(phrase_bar, phrase_bars, bar_step, steps_per_bar)
         return 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
+
+    def _seq_white_envelope(self, lamp: str, wall_now: float, cfg) -> float:
+        """0..1 brightness of a sequencer flash: ramps up over attack, holds,
+        ramps down over release (constant 1 with legacy transitions - see
+        the comment on shared_white_target in _tick_beat_sync_mode)."""
+        if self.config.network.lamp_transitions == "legacy":
+            return 1.0
+        t = wall_now - self._seq_white_started.get(lamp, wall_now)
+        attack = cfg.white_pulse_attack_ms / 1000.0
+        hold = self._seq_white_hold.get(lamp, cfg.white_pulse_duration_ms / 1000.0)
+        release = cfg.white_pulse_release_ms / 1000.0
+        if attack > 0.0 and t < attack:
+            return max(0.05, t / attack)
+        if t < attack + hold:
+            return 1.0
+        if release > 0.0:
+            return max(0.0, 1.0 - (t - attack - hold) / release)
+        return 0.0
 
     def _seq_white_active(self, lamp: str, wall_now: float) -> bool:
         """Is this lamp mid sequencer flash - with the per-lamp version of the

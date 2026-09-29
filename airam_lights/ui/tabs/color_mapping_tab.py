@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, WHITE_PATTERNS
 from ...config.schema import (
+    LAMP_TRANSITIONS,
     PULSE_TRIGGERS,
     WHITE_TEMP_MODES,
     ChaseEffectConfig,
@@ -440,12 +441,15 @@ class ColorMappingTab(QWidget):
         )
         self.beat_white_pulse_attack_slider = FloatSlider(
             "White pulse attack", 1.0, 300.0, bs.white_pulse_attack_ms, decimals=0, suffix=" ms",
-            tooltip="How quickly the white flash starts after the beat - low = right on the beat.",
+            tooltip="How long the white flash takes to rise to full brightness - low = a hard flash right "
+            "on the beat, higher = it swells in. (With 'legacy' Lamp transitions the bulb fades on its own "
+            "and this only sets the timing.)",
         )
         self.beat_white_pulse_release_slider = FloatSlider(
             "White pulse release", 10.0, 1000.0, bs.white_pulse_release_ms, decimals=0, suffix=" ms",
-            tooltip="How long after the hold the lamp switches back to color - together with the "
-            "duration this sets how long each white flash lasts.",
+            tooltip="How long the white flash takes to fade out after its hold, before the lamp is back on "
+            "color. Attack + duration + release is the whole flash. (With 'legacy' Lamp transitions the "
+            "bulb fades on its own and this only sets the timing.)",
         )
         self.beat_white_pulse_white_brightness_slider = FloatSlider(
             "White pulse brightness", 0.0, 1.0, bs.white_pulse_white_brightness, decimals=2,
@@ -732,6 +736,28 @@ class ColorMappingTab(QWidget):
         threshold_note.setWordWrap(True)
         global_layout.addWidget(threshold_note)
 
+        self.command_rate_slider = FloatSlider(
+            "Lamp command rate", 2.0, 60.0, controller.config.network.lamp_command_rate_hz, decimals=0, suffix=" /s",
+            tooltip="The most commands each lamp is sent per second (a newer color replaces a waiting one, "
+            "so nothing queues up). With instant Lamp transitions every command shows as a step, so "
+            "higher = smoother fades and glides; the color engine computes at least this often. Lower = "
+            "gentler on the bulbs and the Wi-Fi - worth trying if lamps get stuck (answering but not "
+            "following the show, see README).",
+        )
+        self.command_rate_slider.valueChanged.connect(self._on_command_rate_changed)
+        global_layout.addWidget(self.command_rate_slider)
+
+        self.transitions_combo = self._labeled_combo(
+            global_layout, "Lamp transitions:", LAMP_TRANSITIONS, controller.config.network.lamp_transitions,
+            "How colors and white flashes reach the bulbs. direct (default): the bulb's real-time control "
+            "channel - every change lands instantly (measured: under 33 ms), and a white flash lights the "
+            "white LEDs with one command, without switching the bulb's mode. gradient: the same channel "
+            "with the bulb's own short fade (~0.25 s). legacy: the old way - the bulb fades every change "
+            "over ~0.7 s, so fast beats blur together, and white flashes need 4-5 commands. If your bulbs "
+            "stop changing color with direct/gradient, choose legacy.",
+        )
+        self.transitions_combo.currentTextChanged.connect(self._on_transitions_changed)
+
         self.invert_checkbox = QCheckBox("Invert brightness (0 = bright, 1 = black)")
         self.invert_checkbox.setChecked(cm.invert_brightness)
         self.invert_checkbox.toggled.connect(self._on_invert_changed)
@@ -1000,6 +1026,14 @@ class ColorMappingTab(QWidget):
 
     def _on_invert_changed(self, checked: bool) -> None:
         self.controller.config.color_mapping.invert_brightness = checked
+        self.controller.apply_config_changes()
+
+    def _on_transitions_changed(self, text: str) -> None:
+        self.controller.config.network.lamp_transitions = text
+        self.controller.apply_config_changes()
+
+    def _on_command_rate_changed(self, value: float) -> None:
+        self.controller.config.network.lamp_command_rate_hz = round(value)
         self.controller.apply_config_changes()
 
     def _on_threshold_changed(self, value: float) -> None:
