@@ -102,3 +102,33 @@ def test_grid_jump_resyncs_without_a_burst():
     _run(seq, 1)
     assert seq.tick(40.0, 0.5, 5.0, 0.03, 3, 4) == []  # jumped ahead 36 beats: no flood of events
     assert seq.tick(None, 0.5, 5.1, 0.03, 3, 4) == []  # clock lost lock
+
+
+def test_metric_weight_follows_the_bar_hierarchy():
+    from airam_lights.effects.pulse_sequencer import metric_weight
+
+    w = [metric_weight(step, 16) for step in range(16)]
+    assert w[0] == 1.0  # downbeat
+    assert w[8] == 0.65  # beat 3, the bar's middle
+    assert w[4] == w[12] == 0.35  # beats 2 and 4
+    assert w[2] == w[6] == 0.15  # the "ands"
+    assert w[1] == w[3] == 0.0  # 16ths
+    assert metric_weight(4, 12) == metric_weight(8, 12) == 0.35  # 3/4: no middle beat
+
+
+def test_phrase_progress_builds_up_and_releases():
+    from airam_lights.effects.pulse_sequencer import phrase_progress
+
+    values = [phrase_progress(bar, 4, step, 16) for bar in range(4) for step in range(16)]
+    assert values[0] == 1.0  # the phrase's first step: the release
+    assert values[1] < 0.05 and all(a < b for a, b in zip(values[1:], values[2:]))
+    assert values[-1] > 0.95
+
+
+def test_events_carry_their_position_in_bar_and_phrase():
+    seq = PulseSequencer(_cfg(white_pattern="offbeats", phrase_bars=4), random.Random(1))
+    whites = [(p, e) for p, e in _run(seq, 3, start_beat=0.1) if e.kind == "white"]
+    assert whites
+    for p, e in whites:
+        assert e.bar_step == int(p * 4 + 1e-6) % 16
+        assert e.steps_per_bar == 16 and e.phrase_bars == 4

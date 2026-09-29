@@ -31,6 +31,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
             "hue_step_deg": 120.0,
             "hue_every_n_beats": 4,
@@ -71,6 +72,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
             "hue_step_deg": 60.0,
             "hue_every_n_beats": 8,
@@ -110,6 +112,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "rhythm": _CLOCK,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "loudness",
             "hue_mode": "step",
             "hue_step_deg": 137.5,
             "hue_every_n_beats": 2,
@@ -167,6 +170,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "rhythm": _CLOCK,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "phrase",
             "hue_mode": "step",
             "hue_step_deg": 120.0,
             "hue_every_n_beats": 4,
@@ -213,6 +217,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
             "hue_step_deg": 120.0,
             "hue_every_n_beats": 4,
@@ -242,6 +247,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
+            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
             "hue_step_deg": 120.0,
             "hue_every_n_beats": 4,

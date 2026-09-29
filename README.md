@@ -543,7 +543,14 @@ Each flash also independently rolls **warm vs. cool** white: `white_pulse_cool_r
 always warm, 1.0 = always cool, 0.5 = a roughly even, unpredictable mix) - the roll happens
 once per new flash, tied to the same beat trigger as everything else in Beat Sync mode, and
 holds for that flash's whole duration rather than flickering mid-flight, so consecutive
-white accents read as varied instead of visually identical every time. It then switches
+white accents read as varied instead of visually identical every time. **Warm/cool** chooses how that
+temperature is picked (anywhere between warm and cool, not just the two ends): `random`
+(the cool-ratio roll above), `bar` (by the weight of the beat - the downbeat coolest, the
+bar's middle beat half-cool, the other beats warmer, flashes between beats warmest, so the
+heavy beats stand out), `alternate` (cool, warm, cool...), `loudness` (warm in the quiet
+parts of a song, cool in the loud ones) or `phrase` (cooling down over each phrase toward
+its end; the new phrase's first flash is cool, then back to warm). `bar` and `phrase` need
+the shared beat clock to know where the bar is. It then switches
 back to RGB colour mode once the pulse ends and resumes
 wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
 show continues exactly where it left off, it's just been briefly interrupted by a real

@@ -63,6 +63,60 @@ class PulseEvent:
     group: Optional[int] = None  # index into the lamp groups; None = every lamp
     length: float = 1.0  # multiplier on the configured pulse duration
     reason: str = ""  # for diagnostics/tests: "pattern", "double", "fill", "phrase", "drop", ...
+    # Where in the music it happens (e.g. for the warm/cool choice of a white flash).
+    bar_step: int = 0  # 16th within the bar, 0 = the downbeat
+    steps_per_bar: int = 16
+    phrase_bar: int = 0  # bar within the phrase, 0 = the phrase's first bar
+    phrase_bars: int = 1
+
+
+def metric_weight(bar_step: int, steps_per_bar: int) -> float:
+    """How heavy a position in the bar is, 1.0 (the downbeat) .. 0.0 (a
+    16th between beats): the downbeat, then the bar's middle beat (beat 3 in
+    4/4), the other beats, the 8th-note "ands", the 16ths - the metric
+    hierarchy a drummer accents by."""
+    beats_per_bar = max(1, steps_per_bar // STEPS_PER_BEAT)
+    if bar_step == 0:
+        return 1.0
+    beat, sub = divmod(bar_step, STEPS_PER_BEAT)
+    if sub == 0:
+        return 0.65 if beats_per_bar % 2 == 0 and beat == beats_per_bar // 2 else 0.35
+    if sub == STEPS_PER_BEAT // 2:
+        return 0.15
+    return 0.0
+
+
+def phrase_progress(phrase_bar: int, phrase_bars: int, bar_step: int, steps_per_bar: int) -> float:
+    """0 at the start of a phrase .. ~1 at its very end - except the phrase's
+    first step itself, which counts as the peak (1.0): the release of the
+    tension the phrase built up."""
+    if bar_step == 0 and phrase_bar == 0:
+        return 1.0
+    total = max(1, phrase_bars) * max(1, steps_per_bar)
+    return (phrase_bar * steps_per_bar + bar_step) / total
+
+
+class LoudnessTracker:
+    """How loud the music is right now compared to the last ~30 s, as a
+    percentile (0 = the quietest it's been, 1 = the loudest) - so it works
+    at any playback volume. `level` names the range: calm/groove/high/peak."""
+
+    def __init__(self):
+        self._short: Optional[float] = None
+        self._history: Deque[tuple] = collections.deque()
+        self.intensity = 0.5
+        self.level = "groove"
+
+    def update(self, energy: float, now_s: float, dt: float) -> None:
+        alpha = 1.0 - math.exp(-max(dt, 0.0) / _SHORT_TIME_CONSTANT_S)
+        self._short = energy if self._short is None else self._short + alpha * (energy - self._short)
+        self._history.append((now_s, self._short))
+        while self._history and self._history[0][0] < now_s - _INTENSITY_WINDOW_S:
+            self._history.popleft()
+        if len(self._history) >= 10:
+            below = sum(1 for _, e in self._history if e < self._short)
+            self.intensity = below / len(self._history)
+        self.level = _intensity_level(self.intensity)
 
 
 def _intensity_level(intensity: float) -> str:
@@ -87,8 +141,7 @@ class PulseSequencer:
         self._group_direction = 1
         self._pending_doubles: Dict[int, int] = {}  # absolute step -> group
         self._phrase_origin_bar = 0
-        self._short_energy: Optional[float] = None
-        self._energy_history: Deque[tuple] = collections.deque()
+        self._loudness = LoudnessTracker()
         self._bar_intensities: List[float] = []  # this bar's intensity samples, for drop detection
         self.intensity = 0.5
         self.level = "groove"
@@ -118,22 +171,23 @@ class PulseSequencer:
             return []
         events: List[PulseEvent] = []
         for s in range(self._last_step + 1, step + 1):
-            events.extend(self._events_for_step(s, max(1, num_groups), max(1, beats_per_bar)))
+            step_events = self._events_for_step(s, max(1, num_groups), max(1, beats_per_bar))
+            steps_per_bar = max(1, beats_per_bar) * STEPS_PER_BEAT
+            for e in step_events:
+                e.bar_step = s % steps_per_bar
+                e.steps_per_bar = steps_per_bar
+                e.phrase_bar = self.phrase_bar
+                e.phrase_bars = max(1, int(self.config.phrase_bars))
+            events.extend(step_events)
         self._last_step = step
         return events
 
     # -- dynamics ------------------------------------------------------------------------------
 
     def _track_intensity(self, energy: float, now_s: float, dt: float) -> None:
-        alpha = 1.0 - math.exp(-max(dt, 0.0) / _SHORT_TIME_CONSTANT_S)
-        self._short_energy = energy if self._short_energy is None else self._short_energy + alpha * (energy - self._short_energy)
-        self._energy_history.append((now_s, self._short_energy))
-        while self._energy_history and self._energy_history[0][0] < now_s - _INTENSITY_WINDOW_S:
-            self._energy_history.popleft()
-        if len(self._energy_history) >= 10:
-            below = sum(1 for _, e in self._energy_history if e < self._short_energy)
-            self.intensity = below / len(self._energy_history)
-        self.level = _intensity_level(self.intensity)
+        self._loudness.update(energy, now_s, dt)
+        self.intensity = self._loudness.intensity
+        self.level = self._loudness.level
 
     # -- one 16th step -----------------------------------------------------------------------
 

@@ -234,6 +234,7 @@ class SpectrumModeConfig:
 
 
 PULSE_TRIGGERS = ("random", "accent", "downbeat")
+WHITE_TEMP_MODES = ("random", "bar", "alternate", "loudness", "phrase")
 SYNC_MODES = ("off", "beat", "intensity_peak", "clock")
 
 
@@ -362,6 +363,18 @@ class BeatSyncModeConfig:
     # VisualizationEngine._beat_white_pulse_temp. 0.0 = always warm, 1.0 =
     # always cool, same as before this became a ratio.
     white_pulse_cool_ratio: float = 0.5
+    # How each flash's warm/cool white is chosen (the color temperature can be
+    # anywhere between warm 0.0 and cool 1.0):
+    # "random": rolled per flash with white_pulse_cool_ratio (above).
+    # "bar": by the weight of the position in the bar - the downbeat coolest,
+    #   the bar's middle beat half-cool, other beats warmer, in-between flashes
+    #   warmest - so the heavy beats stand out from the light ones.
+    # "alternate": cool, warm, cool, warm...
+    # "loudness": warm in the quiet parts of a song, cool in the loud ones.
+    # "phrase": cools down over each phrase toward its fill, the new phrase's
+    #   first flash is cool, then back to warm.
+    # "bar"/"phrase" need the shared beat clock; without it they act as "random".
+    white_pulse_temp_mode: str = "random"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -406,6 +419,7 @@ class BeatSyncModeConfig:
             white_pulse_rotators=max(1, min(4, int(d.get("white_pulse_rotators", 1)))),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
             white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),
+            white_pulse_temp_mode=d.get("white_pulse_temp_mode") if d.get("white_pulse_temp_mode") in WHITE_TEMP_MODES else "random",
         )
 
 

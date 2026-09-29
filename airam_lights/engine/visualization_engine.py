@@ -49,7 +49,7 @@ from ..effects.chase import (
     spread_positions,
 )
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
-from ..effects.pulse_sequencer import PulseEvent, PulseSequencer
+from ..effects.pulse_sequencer import LoudnessTracker, PulseEvent, PulseSequencer, metric_weight, phrase_progress
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother, MultiSmoother
 from ..lamps.manager import LampManager
 
@@ -252,6 +252,9 @@ class VisualizationEngine:
         self._seq_last_active: Dict[str, float] = {}
         self._seq_forced_gap_until: Dict[str, float] = {}
         self._white_targets_preselected = False
+        # white_pulse_temp_mode "alternate" / "loudness" state.
+        self._white_temp_alternate = False
+        self._loudness = LoudnessTracker()
 
         self.running = False
         self._raw_lock = threading.Lock()
@@ -725,10 +728,12 @@ class VisualizationEngine:
                 self._beat_white_pulse_until = wall_now + cfg.white_pulse_duration_ms / 1000.0
                 # Warm vs cool for THIS flash, rolled once here (not per
                 # tick) so it stays constant for the flash's whole duration.
-                self._beat_white_pulse_temp = 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
+                self._beat_white_pulse_temp = self._white_pulse_temp(cfg, clock)
 
         if sequencer_on:
             self._run_sequencer(frame, dt, wall_now, selected_ids, cfg)
+        if cfg.white_pulse_temp_mode == "loudness":
+            self._loudness.update(band_energy(frame, 20.0, 16000.0), wall_now, dt)
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
@@ -917,7 +922,7 @@ class VisualizationEngine:
             lamps = selected_ids
         length = (cfg.white_pulse_duration_ms + cfg.white_pulse_release_ms) / 1000.0 * event.length
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
-        temp = 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
+        temp = self._white_pulse_temp(cfg, self._clock_beat, event)
         for lamp in lamps:
             if wall_now < self._seq_white_until.get(lamp, 0.0):
                 continue  # still mid-flash
@@ -926,6 +931,32 @@ class VisualizationEngine:
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
             self._seq_white_temp[lamp] = temp
+
+    def _white_pulse_temp(self, cfg, clock: Optional[ClockBeat], event: Optional[PulseEvent] = None) -> float:
+        """Warm (0.0) .. cool (1.0) for a new white flash - see
+        BeatSyncModeConfig.white_pulse_temp_mode. `event`: the sequencer's
+        flash (knows its 16th in the bar); otherwise the flash is on `clock`'s
+        beat."""
+        mode = cfg.white_pulse_temp_mode
+        if mode == "alternate":
+            self._white_temp_alternate = not self._white_temp_alternate
+            return 1.0 if self._white_temp_alternate else 0.0
+        if mode == "loudness":
+            return self._loudness.intensity
+        if mode in ("bar", "phrase"):
+            position = None
+            if event is not None:
+                position = (event.bar_step, event.steps_per_bar, event.phrase_bar, event.phrase_bars)
+            elif clock is not None and clock.is_beat:
+                bpb = max(1, self.config.rhythm.beats_per_bar)
+                phrase_bars = max(1, int(self.config.sequencer.phrase_bars))
+                position = (clock.bar_position * 4, bpb * 4, (clock.aligned_index // bpb) % phrase_bars, phrase_bars)
+            if position is not None:
+                bar_step, steps_per_bar, phrase_bar, phrase_bars = position
+                if mode == "bar":
+                    return metric_weight(bar_step, steps_per_bar)
+                return phrase_progress(phrase_bar, phrase_bars, bar_step, steps_per_bar)
+        return 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
 
     def _seq_white_active(self, lamp: str, wall_now: float) -> bool:
         """Is this lamp mid sequencer flash - with the per-lamp version of the

@@ -342,3 +342,61 @@ def test_sequencer_walks_the_chase_order_with_evenly_spaced_lamps(monkeypatch):
     starts = _white_starts(engine, clock, 6.0)
     assert len(starts) >= 8
     assert all(s in ({"a", "c"}, {"b", "d"}) for s in starts)
+
+
+def _temp_config(mode):
+    def configure(c):
+        bs = c.color_mapping.beat_sync
+        bs.white_pulse_enabled = True
+        bs.white_pulse_probability = 1.0
+        bs.white_pulse_trigger = "random"
+        bs.white_pulse_duration_ms = 40.0
+        bs.white_pulse_release_ms = 30.0
+        bs.white_pulse_temp_mode = mode
+
+    return configure
+
+
+def _flash_temps(engine, clock, seconds):
+    """(bar_position of the beat, temperature) for each new white flash."""
+    out, was_white = [], False
+
+    def on_tick():
+        nonlocal was_white
+        targets = engine.latest_lamp_white_targets
+        if targets and not was_white:
+            out.append((engine._clock_beat.bar_position, next(iter(targets.values())).temp))
+        was_white = bool(targets)
+
+    _run(engine, clock, seconds, on_tick)
+    return out
+
+
+def test_warm_cool_by_bar_weight(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _temp_config("bar"))
+    _run(engine, clock, 6.0, lambda: None)
+    flashes = _flash_temps(engine, clock, 6.0)
+    assert len(flashes) >= 8
+    expected = {0: 1.0, 1: 0.35, 2: 0.65, 3: 0.35}
+    assert all(abs(temp - expected[pos]) < 1e-9 for pos, temp in flashes)
+
+
+def test_warm_cool_alternates(monkeypatch):
+    engine, clock, _ = _make_engine(monkeypatch, _temp_config("alternate"))
+    _run(engine, clock, 6.0, lambda: None)
+    temps = [t for _, t in _flash_temps(engine, clock, 6.0)]
+    assert len(temps) >= 8 and all(a != b for a, b in zip(temps, temps[1:]))
+
+
+def test_warm_cool_phrase_cools_toward_the_phrase_end(monkeypatch):
+    def configure(c):
+        _temp_config("phrase")(c)
+        c.sequencer.phrase_bars = 2
+
+    engine, clock, _ = _make_engine(monkeypatch, configure)
+    _run(engine, clock, 6.0, lambda: None)
+    temps = [t for _, t in _flash_temps(engine, clock, 8.0)]
+    starts = [i for i, t in enumerate(temps) if t == 1.0]
+    assert len(starts) >= 2
+    one_phrase = temps[starts[0] + 1:starts[1]]
+    assert one_phrase and all(a < b for a, b in zip(one_phrase, one_phrase[1:]))

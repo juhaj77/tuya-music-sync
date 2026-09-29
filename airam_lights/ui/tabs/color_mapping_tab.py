@@ -24,6 +24,7 @@ from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, WHITE_PATTERNS
 from ...config.schema import (
     PULSE_TRIGGERS,
+    WHITE_TEMP_MODES,
     ChaseEffectConfig,
     ColorMappingConfig,
     GroupSwitchEffectConfig,
@@ -468,6 +469,18 @@ class ColorMappingTab(QWidget):
         ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
+        self.beat_white_temp_combo = self._labeled_combo(
+            beat_layout, "Warm/cool:", WHITE_TEMP_MODES, bs.white_pulse_temp_mode,
+            "How each flash's white is chosen between warm and cool. random: rolled per flash with the "
+            "cool ratio above. bar: by the weight of the beat - the downbeat coolest, the bar's middle "
+            "beat half-cool, other beats warmer, flashes between beats warmest - so heavy beats stand out "
+            "from light ones. alternate: cool, warm, cool, warm. loudness: warm in the quiet parts of the "
+            "song, cool in the loud ones. phrase: cools down over each phrase toward its end, the new "
+            "phrase's first flash is cool, then back to warm (phrase length: see the Pulse sequencer).",
+        )
+        self.beat_white_temp_combo.currentTextChanged.connect(self._on_beat_changed)
+        self.beat_white_temp_note = inactive_note()
+        beat_layout.addWidget(self.beat_white_temp_note)
 
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
@@ -813,7 +826,7 @@ class ColorMappingTab(QWidget):
             (bs.white_pulse_enabled, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo,
              [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
               self.beat_white_pulse_release_slider, self.beat_white_pulse_white_brightness_slider,
-              self.beat_white_pulse_cool_ratio_slider], self.beat_white_note, "White"),
+              self.beat_white_temp_combo], self.beat_white_note, "White"),
         ):
             off_reason = f"{name} pulses are switched off."
             set_active(others, enabled, off_reason)
@@ -837,6 +850,16 @@ class ColorMappingTab(QWidget):
             "White pulses are switched off." if not white else
             seq_reason.capitalize() + " Its group walk decides the lamps.",
         )
+        temp_mode = bs.white_pulse_temp_mode
+        set_active(
+            [self.beat_white_pulse_cool_ratio_slider], white and temp_mode == "random",
+            "White pulses are switched off." if not white else f"Warm/cool is '{temp_mode}', not random.",
+        )
+        if white and temp_mode in ("bar", "phrase") and not shared:
+            show_note(self.beat_white_temp_note, f"Warm/cool '{temp_mode}' needs the shared beat clock (Rhythm "
+                      "box) to know where the bar is - until then each flash is rolled with the cool ratio.")
+        else:
+            show_note(self.beat_white_temp_note, "")
         rotating = (bs.white_pulse_target == "rotate") if not sequencing else (sq.group_walk != "all")
         set_active(
             [self.beat_white_rotators_combo], white and rotating,
@@ -853,6 +876,8 @@ class ColorMappingTab(QWidget):
         ]
         set_active([self.seq_enabled_checkbox], shared, "The sequencer needs the shared beat clock.")
         set_active(seq_controls, sequencing, "The sequencer is off." if shared else "The sequencer needs the shared beat clock.")
+        if shared and white and temp_mode == "phrase":
+            set_active([self.seq_phrase_combo], True, "")  # warm/cool 'phrase' uses it too
         if not shared:
             show_note(self.seq_note, "The sequencer places pulses on the shared beat clock's grid - turn on "
                       "'Beat Sync follows the shared clock' in the Rhythm box at the top first.")
@@ -918,6 +943,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_rotators = self.beat_white_rotators_combo.currentData()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
+        bs.white_pulse_temp_mode = self.beat_white_temp_combo.currentText()
         self._update_beat_states()
         self.controller.apply_config_changes()
 
