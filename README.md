@@ -288,18 +288,24 @@ python tools\setup_wizard.py
 ```
 
 This launches `tinytuya`'s interactive setup wizard, which needs a **free** Tuya IoT
-Platform developer account linked to your Airam SmartHome app account:
+Platform developer account linked to a **Smart Life** app account:
+
+> **Important:** the bulbs must be paired with the **Smart Life** app (Tuya's own
+> app), not the Airam SmartHome app. Linking the Airam SmartHome app account to the
+> Tuya IoT Platform does not work, so the bulbs can't be added to the Cloud
+> Development project that way. Install Smart Life, create an account, and pair the
+> bulbs there (remove them from the Airam SmartHome app first if they are already
+> paired to it).
 
 1. Create an account at <https://iot.tuya.com> and create a **Cloud Development**
    project (any region close to Finland, e.g. Western Europe / Central Europe).
 2. In that project, subscribe to the **IoT Core** and **Authorization** APIs (under
    "Service API" - both are free-tier).
 3. Go to **Cloud -> \[your project\] -> Devices -> Link Tuya App Account**, and scan
-   the QR code shown there **using your Airam SmartHome app** (its own QR scanner,
-   usually under account/settings - the app itself doesn't need to know anything about
-   Tuya; this is purely the cloud platform's device-linking flow, which works
-   identically for any Tuya-based white-label app). Your bulbs should now be listed
-   as linked devices in the Tuya IoT Platform.
+   the QR code shown there **using the Smart Life app** (the scan icon in the top
+   corner of the Me / Home tab) with the account the bulbs are paired to. Scanning
+   with the Airam SmartHome app does not work. Your bulbs should now be listed as
+   linked devices in the Tuya IoT Platform.
 4. Run the wizard above; it asks for your **Access ID**, **Access Secret** (both shown
    on your Cloud project's Overview page), the **data center region**, and your
    account UID (shown next to the linked app account). It then downloads a
