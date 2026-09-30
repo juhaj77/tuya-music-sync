@@ -363,6 +363,7 @@ class VisualizationEngine:
         clock.lead_ms = rh.lead_ms
         clock.beats_per_bar = rh.beats_per_bar
         clock.accent_ratio = rh.accent_ratio
+        clock.coast_bars = rh.coast_bars
 
     @property
     def sequencer_status(self) -> Optional[dict]:

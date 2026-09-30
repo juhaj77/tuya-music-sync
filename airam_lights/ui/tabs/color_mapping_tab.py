@@ -21,14 +21,12 @@ from PySide6.QtWidgets import (
 )
 
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
+from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, WHITE_PATTERNS
 from ...config.schema import (
     LAMP_TRANSITIONS,
     PULSE_TRIGGERS,
     WHITE_TEMP_MODES,
-    ChaseEffectConfig,
-    ColorMappingConfig,
-    GroupSwitchEffectConfig,
     PulseSequencerConfig,
     RGBModeConfig,
     RhythmConfig,
@@ -1056,23 +1054,7 @@ class ColorMappingTab(QWidget):
         if not ok or not name.strip():
             return
         cfg = self.controller.config
-        # Presets capture the full visualization setup: the color mapping
-        # mode's own settings, the Chase overlay's global settings, AND which
-        # lamps are in the chase (and in what order) - all of it, so loading
-        # a preset later fully restores the look, not just the color mode.
-        snapshot = {
-            "color_mapping": cfg.color_mapping.to_dict(),
-            "chase": cfg.chase.to_dict(),
-            "group_switch": cfg.group_switch.to_dict(),
-            "rhythm": cfg.rhythm.to_dict(),
-            "sequencer": cfg.sequencer.to_dict(),
-            "per_lamp_chase_orders": {
-                device_id: effect.chase_order
-                for device_id, effect in cfg.per_lamp_effects.items()
-                if effect.chase_order is not None
-            },
-        }
-        cfg.presets[name.strip()] = snapshot
+        cfg.presets[name.strip()] = snapshot_preset(cfg)
         self._reload_presets()
         self.controller.save_config()
 
@@ -1085,23 +1067,7 @@ class ColorMappingTab(QWidget):
             QMessageBox.warning(self, "Not found", f"Preset '{name}' not found.")
             return
 
-        if "color_mapping" in data:
-            self.controller.config.color_mapping = ColorMappingConfig.from_dict(data["color_mapping"])
-            self.controller.config.chase = ChaseEffectConfig.from_dict(data.get("chase", {}))
-            # Presets saved before these existed keep the current settings.
-            if "group_switch" in data:
-                self.controller.config.group_switch = GroupSwitchEffectConfig.from_dict(data["group_switch"])
-            if "rhythm" in data:
-                self.controller.config.rhythm = RhythmConfig.from_dict(data["rhythm"])
-            if "sequencer" in data:
-                self.controller.config.sequencer = PulseSequencerConfig.from_dict(data["sequencer"])
-            for device_id, chase_order in data.get("per_lamp_chase_orders", {}).items():
-                self.controller.get_or_create_effect(device_id).chase_order = chase_order
-        else:
-            # Backward compatibility: presets saved before the Chase overlay
-            # existed stored a bare color_mapping dict directly.
-            self.controller.config.color_mapping = ColorMappingConfig.from_dict(data)
-
+        apply_preset(self.controller.config, data)
         self.controller.replace_config_settings()
 
     def _show_builtin_description(self, name: str) -> None:
@@ -1229,6 +1195,18 @@ class ColorMappingTab(QWidget):
         self.rhythm_bpb_spin.setToolTip("4 for almost all pop/dance music; 3 for waltz time.")
         self.rhythm_bpb_spin.valueChanged.connect(self._on_rhythm_changed)
         bar_row.addWidget(self.rhythm_bpb_spin)
+        bar_row.addSpacing(20)
+        bar_row.addWidget(QLabel("Keep going (bars):"))
+        self.rhythm_coast_spin = QSpinBox()
+        self.rhythm_coast_spin.setRange(0, 64)
+        self.rhythm_coast_spin.setValue(rh.coast_bars)
+        self.rhythm_coast_spin.setToolTip(
+            "When the beat gets lost while the music plays on (a breakdown, a fill), keep the lights "
+            "moving on the last tempo for up to this many bars instead of standing still until the beat "
+            "is found again. A clear beat takes over again at once; silence stops the clock. 0 = off."
+        )
+        self.rhythm_coast_spin.valueChanged.connect(self._on_rhythm_changed)
+        bar_row.addWidget(self.rhythm_coast_spin)
         bar_row.addStretch(1)
         layout.addLayout(bar_row)
 
@@ -1413,6 +1391,7 @@ class ColorMappingTab(QWidget):
         rh.lead_ms = self.rhythm_lead_slider.value()
         rh.accent_ratio = self.rhythm_accent_slider.value()
         rh.tempo_lock = self.rhythm_lock_checkbox.isChecked()
+        rh.coast_bars = self.rhythm_coast_spin.value()
         bar_changed = rh.beats_per_bar != self.rhythm_bpb_spin.value()
         rh.beats_per_bar = self.rhythm_bpb_spin.value()
         if bar_changed:
@@ -1429,7 +1408,7 @@ class ColorMappingTab(QWidget):
             return
         beat = engine.latest_clock_beat
         tempo = f"{beat.bpm:.0f} BPM" if beat.bpm else "finding tempo..."
-        lock = "locked" if beat.locked else "not locked"
+        lock = "coasting on last tempo" if beat.coasting else "locked" if beat.locked else "not locked"
         bar = self.controller.config.rhythm.beats_per_bar
         text = f"Clock: {tempo}, {lock}, beat {beat.bar_position + 1}/{bar}"
         seq = engine.sequencer_status

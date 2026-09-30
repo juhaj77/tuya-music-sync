@@ -1081,6 +1081,9 @@ class RhythmConfig:
     lead_ms: float = 100.0  # send locked beats this early, to cancel out network/bulb delay
     beats_per_bar: int = 4
     accent_ratio: float = 0.25  # the hardest this fraction of beats count as accents
+    # When the beat is lost while the music keeps playing, keep going on the
+    # last tempo for up to this many bars (0 = stop and wait for the beat).
+    coast_bars: int = 8
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1098,6 +1101,7 @@ class RhythmConfig:
             lead_ms=float(d.get("lead_ms", 100.0)),
             beats_per_bar=max(1, int(d.get("beats_per_bar", 4))),
             accent_ratio=float(d.get("accent_ratio", 0.25)),
+            coast_bars=max(0, int(d.get("coast_bars", 8))),
         )
 
 

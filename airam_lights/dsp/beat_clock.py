@@ -20,6 +20,12 @@ BeatDetector) it adds:
 - Fill-in: if the grid expects a beat and the music is still playing but no
   onset shows up (a quiet kick, a fill), a predicted beat is emitted anyway,
   so bar counting doesn't drift.
+- Coasting: when the tempo estimate loses the beat while the music keeps
+  playing (a breakdown, a fill, a vocal passage with no clear kick), the
+  grid keeps running on the last tempo for up to `coast_bars` bars instead
+  of dropping the lock - otherwise every layer following the clock would
+  stand still until the beat is found again. A clear tempo re-anchors as
+  usual; silence stops the clock straight away.
 - Lead: with `lead_ms` > 0, locked beats are emitted that much BEFORE the
   expected beat time, compensating for the network + bulb reaction delay so
   the light lands on the beat instead of just after it.
@@ -57,6 +63,10 @@ _LOCK_LOSS_UPDATES = 3
 # How strongly each tempo update's envelope-wide phase estimate steers the grid.
 _COMB_GAIN = 0.3
 _PHASE_STEPS = 32
+# The tempo is only estimated while the last _RECENT_ACTIVITY_S of the onset
+# envelope carries at least this share of the whole window's average.
+_RECENT_ACTIVITY_S = 1.5
+_RECENT_ACTIVITY_SHARE = 0.25
 # A new tempo estimate this far (relative) from the current one re-anchors.
 _RETEMPO_TOLERANCE = 0.06
 
@@ -75,6 +85,7 @@ class ClockBeat:
     predicted: bool = False  # emitted from the tempo grid rather than a detected onset
     period_s: Optional[float] = None
     locked: bool = False
+    coasting: bool = False  # running on the last known tempo, beat not currently detected
 
     @property
     def bpm(self) -> Optional[float]:
@@ -92,6 +103,7 @@ class BeatClock:
         lead_ms: float = 0.0,
         beats_per_bar: int = 4,
         accent_ratio: float = 0.25,
+        coast_bars: int = 8,
     ):
         self.sensitivity = sensitivity
         self.min_interval_ms = min_interval_ms
@@ -101,6 +113,7 @@ class BeatClock:
         self.lead_ms = lead_ms
         self.beats_per_bar = beats_per_bar
         self.accent_ratio = accent_ratio
+        self.coast_bars = coast_bars
         self.reset()
 
     def reset(self) -> None:
@@ -113,6 +126,8 @@ class BeatClock:
         self._period: Optional[float] = None
         self._grid_anchor: Optional[float] = None  # time of a (real, not lead-shifted) grid beat
         self._tempo_misses = 0
+        self._pending_period: Optional[float] = None  # a tempo change waiting for a second, agreeing estimate
+        self._coast_since: Optional[float] = None  # when the current run of tempo misses started
         self._last_beat_time: Optional[float] = None  # real (grid) time of the last emitted beat
         self._last_beat_aligned = 0
         self._emitted_grid_index: Optional[int] = None
@@ -131,6 +146,10 @@ class BeatClock:
     @property
     def locked(self) -> bool:
         return self.tempo_lock and self._period is not None and self._grid_anchor is not None
+
+    @property
+    def coasting(self) -> bool:
+        return self.locked and self._tempo_misses >= _LOCK_LOSS_UPDATES
 
     def position(self, now_s: float) -> Optional[float]:
         """Where in the music we are (lead included, i.e. where the lamps will
@@ -239,19 +258,35 @@ class BeatClock:
         period = self._estimate_period()
         music_playing = self._last_loud is not None and now_s - self._last_loud < 2.0
         if period is None or not music_playing:
+            if self._tempo_misses == 0:
+                self._coast_since = now_s
             self._tempo_misses += 1
             if self._tempo_misses >= _LOCK_LOSS_UPDATES:
-                self._grid_anchor = None  # lost the beat: fall back to reacting to raw onsets
                 if not music_playing:
+                    self._grid_anchor = None
                     self._period = None
+                elif not self._may_coast(now_s):
+                    self._grid_anchor = None  # lost the beat: fall back to reacting to raw onsets
             return
         self._tempo_misses = 0
+        self._coast_since = None
 
         relock = self._grid_anchor is None
         if self._period is None or abs(period - self._period) / self._period > _RETEMPO_TOLERANCE:
+            if self._grid_anchor is not None and not (
+                self._pending_period is not None
+                and abs(period - self._pending_period) / self._pending_period <= _RETEMPO_TOLERANCE
+            ):
+                # A running grid only moves to a new tempo that two estimates
+                # in a row agree on - one odd estimate (a fill, the window's
+                # edge) must not throw the beat off.
+                self._pending_period = period
+                return
+            self._pending_period = None
             self._period = period
             relock = True
         else:
+            self._pending_period = None
             self._period += 0.2 * (period - self._period)
 
         anchor = self._estimate_phase(now_s, self._period)
@@ -267,6 +302,14 @@ class BeatClock:
             # Gently steer the grid toward where the whole recent envelope says the beats are.
             k = round((anchor - self._grid_anchor) / self._period)
             self._grid_anchor += _COMB_GAIN * (anchor - (self._grid_anchor + k * self._period))
+
+    def _may_coast(self, now_s: float) -> bool:
+        """Whether the grid may keep running on the last tempo (see Coasting
+        in the module docstring)."""
+        if self._grid_anchor is None or self._period is None or self._coast_since is None:
+            return False
+        limit = max(0, int(self.coast_bars)) * max(1, int(self.beats_per_bar)) * self._period
+        return now_s - self._coast_since < limit
 
     def _estimate_phase(self, now_s: float, period: float) -> Optional[float]:
         """Where the beats fall, given the period: the phase whose comb of
@@ -304,6 +347,13 @@ class BeatClock:
         energy = float(np.dot(x, x))
         if energy <= 1e-12:
             return None
+        # Only a window that's still active at its recent end says anything
+        # about the current tempo: when the beat stops, the last few old
+        # kicks sliding out of the window produce junk periodicities.
+        raw = np.fromiter((v for _, v in self._envelope), float)
+        recent = raw[times >= times[-1] - _RECENT_ACTIVITY_S]
+        if recent.mean() < _RECENT_ACTIVITY_SHARE * raw.mean():
+            return None
         lo = max(1, int(_MIN_PERIOD_S / dt))
         hi = min(len(x) - 2, int(math.ceil(_MAX_PERIOD_S / dt)))
         if hi <= lo:
@@ -320,8 +370,10 @@ class BeatClock:
         if 0 < best < len(ac) - 1:  # parabolic interpolation for sub-sample precision
             a, b, c = ac[best - 1], ac[best], ac[best + 1]
             denom = a - 2 * b + c
-            if abs(denom) > 1e-12:
-                lag += 0.5 * (a - c) / denom
+            # Only around a real peak of the autocorrelation (the prior can
+            # pick a point on a slope, where the parabola shoots far off).
+            if b >= a and b >= c and denom < -1e-12:
+                lag += max(-0.5, min(0.5, 0.5 * (a - c) / denom))
         return lag * dt
 
     def _grid_index(self, t: float) -> int:
@@ -386,6 +438,7 @@ class BeatClock:
             predicted=predicted,
             period_s=self._period,
             locked=self.locked,
+            coasting=self.coasting,
         )
         return self.latest
 
@@ -397,6 +450,7 @@ class BeatClock:
             bar_position=self.latest.bar_position,
             period_s=self._period,
             locked=self.locked,
+            coasting=self.coasting,
         )
 
 

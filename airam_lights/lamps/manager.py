@@ -87,14 +87,12 @@ _STUCK_MIN_SENDS = 5  # fewer commands than this in the window = too idle to jud
 _SENT_LOG_S = 60.0  # how much send history to keep, for the diagnostics report
 
 # With lamp_transitions "direct"/"gradient", colors go to the real-time
-# control datapoint (DP 28), which the bulb doesn't report back in status -
-# its reported colour (DP 24) stays whatever DP 24 was last set to. So every
-# this many seconds the current color is also written to DP 24, and the stuck
-# check compares against those writes instead (few, so a wider window and a
-# lower minimum count apply).
-_DP24_SYNC_S = 5.0
-_STUCK_COMPARE_WINDOW_CONTROL_S = 7.0
-_STUCK_MIN_SENDS_CONTROL = 1
+# control datapoint (DP 28), which the bulb doesn't report back in status and
+# doesn't keep over a power cut. Nothing else is written then - not the
+# colour DP 24 nor work_mode - so the bulb's saved state stays what it was
+# before the show, and switching it off and on at the wall brings that back.
+# The stuck check can't see DP 28 sends, so in that mode it simply never
+# fires (no bulb has got stuck on DP 28 so far); it still runs for "legacy".
 
 
 @dataclass
@@ -153,8 +151,6 @@ class LampWorker(threading.Thread):
         # _SENT_LOG_S seconds - the last field is False for DP 28 sends,
         # which the bulb's status never reflects.
         self._sent_log: Deque[Tuple[float, str, Optional[tuple], bool]] = collections.deque()
-        self._control_mode = False  # last sends went to DP 28 (see NetworkConfig.lamp_transitions)
-        self._last_dp24_sync = 0.0
         self._sent_log_lock = threading.Lock()
         self._suspicious_checks = 0
         self._last_reported: Optional[tuple] = None
@@ -374,10 +370,8 @@ class LampWorker(threading.Thread):
         if reported is None:
             return
         now = time.perf_counter() if now is None else now
-        window = _STUCK_COMPARE_WINDOW_CONTROL_S if self._control_mode else _STUCK_COMPARE_WINDOW_S
-        min_sends = _STUCK_MIN_SENDS_CONTROL if self._control_mode else _STUCK_MIN_SENDS
         with self._sent_log_lock:
-            recent = [e for e in self._sent_log if e[3] and now - window <= e[0] <= now]
+            recent = [e for e in self._sent_log if e[3] and now - _STUCK_COMPARE_WINDOW_S <= e[0] <= now]
         previous, self._last_reported = self._last_reported, reported
         if previous is None:
             return  # first look (or first after a reconnect): nothing to compare with yet
@@ -391,7 +385,7 @@ class LampWorker(threading.Thread):
         # shows - a match can be a coincidence (a frozen lamp showing one of
         # the colors the show keeps coming back to), so it doesn't clear the
         # count either; only a change does.
-        if len(recent) < min_sends:
+        if len(recent) < _STUCK_MIN_SENDS:
             return  # too idle to tell
         if any(reported_matches(reported, kind, hsv) for _, kind, hsv, _ in recent):
             return
@@ -519,22 +513,16 @@ class LampWorker(threading.Thread):
 
     def _send_color(self, color: Color) -> None:
         try:
-            if not self._colour_mode_ensured:
-                self.device.ensure_colour_mode()
-                self._colour_mode_ensured = True
-                self._white_mode_ensured = False
             r, g, b = color.to_rgb255()
-            self._control_mode = self._uses_control_dp()
-            if self._control_mode:
+            if self._uses_control_dp():
+                # DP 28 only - see the DP 28 note next to _STUCK_CHECKS.
                 self.device.set_color(r, g, b, wait_for_ack=False, transition=self.network_cfg.lamp_transitions)
                 self._log_send("colour", color.to_hsv(), reported=False)
-                now = time.perf_counter()
-                if now - self._last_dp24_sync >= _DP24_SYNC_S:
-                    # See _DP24_SYNC_S: lets the stuck check see what we sent.
-                    self._last_dp24_sync = now
-                    self.device.set_color(r, g, b, wait_for_ack=False)
-                    self._log_send("colour", color.to_hsv())
             else:
+                if not self._colour_mode_ensured:
+                    self.device.ensure_colour_mode()
+                    self._colour_mode_ensured = True
+                    self._white_mode_ensured = False
                 self.device.set_color(r, g, b, wait_for_ack=False)
                 self._log_send("colour", color.to_hsv())
             self._last_sent_color = color
@@ -545,8 +533,7 @@ class LampWorker(threading.Thread):
 
     def _send_white(self, target: WhiteTarget) -> None:
         try:
-            self._control_mode = self._uses_control_dp()
-            if self._control_mode:
+            if self._uses_control_dp():
                 # DP 28 lights the white LEDs directly - no work_mode switch
                 # there and back, so one command per flash instead of 4-5.
                 self.device.set_white(
