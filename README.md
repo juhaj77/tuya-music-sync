@@ -69,6 +69,26 @@ report whether it worked!
 
 ## Demo videos
 
+### v1.6 - real-time control (DP 28)
+
+Two newer videos recorded with **v1.6**, which drives the lamps through the real-time
+control datapoint (**DP 28**, *Lamp transitions* `direct`). Earlier builds wrote the
+persistent colour datapoint (DP 24), where the bulb fades every change itself over about
+**0.7 s** - so with DP 28 the effects change far faster and crisper than in the older
+videos below. Both run at a **Lamp command rate of 45 commands/s** and both use the
+**pulse sequencer**.
+
+- [**v1.6 Chase + Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.6/v1_6_chase.mp4) -
+  Chase and Group Switch layered on top of each other: the chase rotates with a
+  **hue shift** while the groups switch to the **complementary color**. Admittedly
+  there's almost too much going on at once - it's a showcase of how fast the lamps now
+  react rather than a tasteful everyday setting.
+- [**v1.6 Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.6/v1_6_group.mp4) -
+  Group Switch effects only, used both for the **white pulses** and for the
+  **complementary color**.
+
+### Earlier videos (DP 24, ~0.7 s bulb fades)
+
 Three demo videos show the app running against real hardware: **8 Airam spots**, 4 in the
 ceiling and 4 along the walls. All are running in **Beat Sync** mode with **true white
 pulses** enabled.
