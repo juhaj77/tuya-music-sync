@@ -427,10 +427,13 @@ class GroupSwitchAnimator:
     ONE group is "active" at a time, shown at full target-color strength -
     every other group is left completely untouched. There is no width or
     falloff shaping here: the switch from one active group to the next is
-    instant, a hard on/off step rather than Chase's gradient - so unlike
-    ChaseAnimator.apply(), this never calls circular_lerp_deg()/lerp() at
-    all, it just assigns the target hue/saturation outright on the one
-    active group.
+    instant, a hard on/off step rather than Chase's gradient - the target
+    hue/saturation is assigned outright on the one active group.
+
+    With `fade_across_groups` the color is instead spread over all the
+    groups in equal steps (see apply()): the active group still gets the
+    full target color, each group before it one step less. The switch
+    itself stays a hard step - the whole ramp moves on by one group.
 
     Movement otherwise follows the exact same event-driven model as
     ChaseAnimator.tick() (see its docstring for the full rationale): "off"
@@ -519,22 +522,53 @@ class GroupSwitchAnimator:
         active_index = int(math.floor(self.position)) % n
 
         result = dict(colors)
-        for device_id in groups[active_index]:
-            base_color = result.get(device_id, Color.black())
-            h_base, s_base, v_base = base_color.to_hsv()
+        for index, group in enumerate(groups):
+            amount = self._group_amount(index, active_index, n)
+            if amount <= 0.0:
+                continue  # left completely untouched
+            for device_id in group:
+                base_color = result.get(device_id, Color.black())
+                h_base, s_base, v_base = base_color.to_hsv()
 
-            if cfg.color_mode == "complementary":
-                target_hue = (h_base + 180.0) % 360.0
-                target_sat = s_base
-            elif cfg.color_mode == "hue_shift":
-                # Each group shows a progressively different hue, so which
-                # color flashes on depends on which group is currently active.
-                target_hue = (cfg.custom_hue_deg + active_index * cfg.hue_shift_step_deg) % 360.0
-                target_sat = cfg.custom_saturation
-            else:  # "custom"
-                target_hue = cfg.custom_hue_deg
-                target_sat = cfg.custom_saturation
+                if cfg.color_mode == "complementary":
+                    target_hue = (h_base + 180.0) % 360.0
+                    target_sat = s_base
+                elif cfg.color_mode == "hue_shift":
+                    # Each group shows a progressively different hue, so which
+                    # color flashes on depends on which group is currently active.
+                    target_hue = (cfg.custom_hue_deg + active_index * cfg.hue_shift_step_deg) % 360.0
+                    target_sat = cfg.custom_saturation
+                else:  # "custom"
+                    target_hue = cfg.custom_hue_deg
+                    target_sat = cfg.custom_saturation
 
-            v_out = clip(v_base * (1.0 + cfg.intensity))
-            result[device_id] = Color.from_hsv(target_hue, target_sat, v_out)
+                if amount < 1.0:
+                    # Part of the way from the lamp's own color to the target,
+                    # around the hue circle (so the steps stay vivid instead of
+                    # greying out like an RGB blend would).
+                    if cfg.color_mode == "complementary":
+                        # Exactly opposite: both ways round are equally short,
+                        # so always go the same way instead of letting rounding
+                        # pick one tick by tick.
+                        target_hue = (h_base + 180.0 * amount) % 360.0
+                    else:
+                        target_hue = circular_lerp_deg(h_base, target_hue, amount)
+                    target_sat = lerp(s_base, target_sat, amount)
+
+                v_out = clip(v_base * (1.0 + cfg.intensity * amount))
+                result[device_id] = Color.from_hsv(target_hue, target_sat, v_out)
         return result
+
+    def _group_amount(self, index: int, active_index: int, n: int) -> float:
+        """How much of the group color the group at `index` shows, 0..1.
+        Normally all (the active group) or nothing (every other one). With
+        `fade_across_groups`: a ramp over all the groups - the active one
+        1.0, each group before it (where the active group just came from)
+        one equal step less, down to 0 for the one right ahead of it. E.g.
+        3 groups: 1.0, 0.5, 0."""
+        if index == active_index:
+            return 1.0
+        if not self.config.fade_across_groups or n < 3:
+            return 0.0
+        behind = (index - active_index) % n if self.config.reverse else (active_index - index) % n
+        return 1.0 - behind / (n - 1)

@@ -889,6 +889,15 @@ class GroupSwitchEffectConfig:
     # offset by this many degrees from the previous one (starting from
     # custom_hue_deg) - same slider/meaning as Chase's hue_shift_step_deg.
     hue_shift_step_deg: float = 45.0
+    # Off: only the active group shows the group color, every other group is
+    # left untouched. On: the color fades across the groups in equal steps,
+    # from the lamps' own color to the group color - the active group gets
+    # the full group color, the one before it a step less, and so on back to
+    # the untouched one right ahead of it. With 3 groups: own color ->
+    # halfway -> group color; with more groups, smaller steps. The whole
+    # ramp moves along as the active group advances. (With 2 groups there
+    # is nothing in between, so it looks the same as off.)
+    fade_across_groups: bool = False
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -920,6 +929,7 @@ class GroupSwitchEffectConfig:
             custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
             custom_saturation=float(d.get("custom_saturation", 1.0)),
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
+            fade_across_groups=bool(d.get("fade_across_groups", False)),
         )
 
 

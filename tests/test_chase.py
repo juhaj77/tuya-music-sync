@@ -1,6 +1,8 @@
 """Unit tests for the shared Chase overlay (effects/chase.py) - used by both
 the music visualizer and the standalone manual control app, so this is
 tested independently of both."""
+import pytest
+
 from airam_lights.color.models import Color, WhiteTarget
 from airam_lights.config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
 from airam_lights.effects.chase import (
@@ -569,3 +571,123 @@ def test_spread_positions_evenly_spaced():
     assert spread_positions(positions, 5, 3) == {"p5", "p1", "p3"}
     assert spread_positions(positions[:2], 0, 3) == {"p0", "p1"}  # never more rotators than positions
     assert spread_positions([], 0, 2) == set()
+
+
+# -- Group Switch: fade across groups ------------------------------------------------------
+
+
+def _hue(color: Color) -> float:
+    return color.to_hsv()[0]
+
+
+def _same_hue(a: float, b: float) -> bool:
+    return abs(((a - b + 180.0) % 360.0) - 180.0) < 1e-6
+
+
+def test_group_switch_fade_is_off_by_default_and_survives_save_and_load():
+    assert GroupSwitchEffectConfig().fade_across_groups is False
+    cfg = GroupSwitchEffectConfig(enabled=True, fade_across_groups=True)
+    assert GroupSwitchEffectConfig.from_dict(cfg.to_dict()).fade_across_groups is True
+    assert GroupSwitchEffectConfig.from_dict({}).fade_across_groups is False  # settings from an older version
+
+
+def test_group_switch_fade_spreads_complementary_over_three_groups():
+    """Own color -> halfway -> the opposite color, the full one on the active group."""
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0, fade_across_groups=True)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    red = Color.from_hsv(0.0, 1.0, 0.8)
+    base = {"a": red, "b": red, "c": red}
+
+    animator.position = 2.0  # active group = "c"
+    out = animator.apply(dict(base), groups)
+    assert out["a"] == red  # the group right ahead of the active one: untouched
+    assert _same_hue(_hue(out["b"]), 90.0)  # halfway to the opposite color
+    assert _same_hue(_hue(out["c"]), 180.0)  # the opposite color
+    for lamp in "abc":
+        assert out[lamp].to_hsv()[1] == pytest.approx(1.0) and out[lamp].to_hsv()[2] == pytest.approx(0.8)
+
+    # The whole ramp moves along with the active group.
+    animator.position = 0.0  # active group = "a"
+    out = animator.apply(dict(base), groups)
+    assert _same_hue(_hue(out["a"]), 180.0)
+    assert _same_hue(_hue(out["c"]), 90.0)  # the one it just came from
+    assert out["b"] == red
+
+    # Reversed, the active group arrives from the other side - so the trail is on that side.
+    cfg.reverse = True
+    out = animator.apply(dict(base), groups)
+    assert _same_hue(_hue(out["a"]), 180.0)
+    assert _same_hue(_hue(out["b"]), 90.0)
+    assert out["c"] == red
+
+
+def test_group_switch_fade_takes_smaller_steps_with_more_groups():
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0, fade_across_groups=True)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"], ["d"], ["e"]]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups}
+    animator.position = 4.0
+    out = animator.apply(dict(base), groups)
+    for lamp, expected in zip("abcde", (0.0, 45.0, 90.0, 135.0, 180.0)):
+        assert _same_hue(_hue(out[lamp]), expected), lamp
+    # Every lamp of a group gets that group's step.
+    animator.position = 1.0
+    out = animator.apply({"a": base["a"], "a2": base["a"], "b": base["b"], "c": base["c"]}, [["a", "a2"], ["b"], ["c"]])
+    assert _same_hue(_hue(out["a"]), 90.0) and _same_hue(_hue(out["a2"]), 90.0) and _same_hue(_hue(out["b"]), 180.0)
+
+
+def test_group_switch_fade_blends_hue_saturation_and_boost_toward_a_custom_color():
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="custom", custom_hue_deg=350.0, custom_saturation=0.2, intensity=1.0,
+        fade_across_groups=True,
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(30.0, 1.0, 0.4) for g in groups}
+    animator.position = 2.0
+    out = animator.apply(dict(base), groups)
+    h, s, v = out["c"].to_hsv()  # the active group: the full custom color, full boost
+    assert _same_hue(h, 350.0) and s == pytest.approx(0.2) and v == pytest.approx(0.8)
+    h, s, v = out["b"].to_hsv()  # halfway: the short way round the hue circle (30 -> 10 -> 350), half the boost
+    assert _same_hue(h, 10.0) and s == pytest.approx(0.6) and v == pytest.approx(0.6)
+    assert out["a"] == base["a"]
+
+
+def test_group_switch_fade_in_hue_shift_mode_heads_for_the_active_groups_hue():
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="hue_shift", custom_hue_deg=0.0, custom_saturation=1.0, hue_shift_step_deg=60.0,
+        intensity=0.0, fade_across_groups=True,
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(40.0, 1.0, 1.0) for g in groups}
+    animator.position = 2.0  # the active group's hue: 0 + 2 * 60 = 120
+    out = animator.apply(dict(base), groups)
+    assert _same_hue(_hue(out["c"]), 120.0) and _same_hue(_hue(out["b"]), 80.0) and out["a"] == base["a"]
+
+
+def test_group_switch_fade_changes_nothing_with_two_groups_or_when_off():
+    groups3 = [["a"], ["b"], ["c"]]
+    base3 = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups3}
+    off = GroupSwitchAnimator(GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0))
+    off.position = 2.0
+    out = off.apply(dict(base3), groups3)
+    assert out["a"] == base3["a"] and out["b"] == base3["b"] and _same_hue(_hue(out["c"]), 180.0)
+
+    groups2 = [["a"], ["b"]]
+    base2 = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups2}
+    for fade in (False, True):
+        animator = GroupSwitchAnimator(
+            GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0, fade_across_groups=fade)
+        )
+        animator.position = 1.0
+        out = animator.apply(dict(base2), groups2)
+        assert out["a"] == base2["a"] and _same_hue(_hue(out["b"]), 180.0)
+
+
+def test_group_switch_fade_does_not_widen_the_white_pulse_target():
+    cfg = GroupSwitchEffectConfig(enabled=True, fade_across_groups=True)
+    animator = GroupSwitchAnimator(cfg)
+    animator.position = 1.0
+    assert animator.active_device_ids([["a"], ["b"], ["c"]]) == {"b"}

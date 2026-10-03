@@ -45,6 +45,11 @@ report whether it worked!
 [Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest) - see
 [Installation](#3-installation).
 
+**Linux:** supported too, run from source - the music is captured from PulseAudio /
+PipeWire (the output's monitor, no extra setup), everything else is the same code as on
+Windows. See [Option C: run from source (Linux)](#option-c-run-from-source-linux). This
+part is new and hasn't been run on a real Linux desktop yet, so reports are very welcome.
+
 > **Beat Sync is the most interesting mode - and the default.** Of all the
 > color-mapping modes, it's the one that consistently feels the most visually alive in
 > practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
@@ -165,7 +170,8 @@ this API does not control.
 
 ## Suomeksi
 
-**Airam Music Lights** on Windows-sovellus, joka synkronoi **Airam SmartHome
+**Airam Music Lights** on Windows-sovellus (toimii lähdekoodista ajettuna myös
+Linuxilla), joka synkronoi **Airam SmartHome
 -älylamput** (Smart PAR16 RGB GU10 -kohdevalot) musiikkiin reaaliajassa: valot
 vaihtavat väriä ja välähtävät musiikin tahdissa. Sovellus ohjaa lamppuja suoraan
 kotiverkon kautta ilman pilvipalvelua, ja se ohjaa kaikkia lamppuja yhtä aikaa ja
@@ -835,6 +841,17 @@ custom/complementary/hue_shift color options, but deliberately without a width o
 falloff-curve concept, since there's nothing to blend. Can run at the same time as
 Chase - Chase applies first, then Group Switch's discrete switch applies on top of
 whatever color Chase already produced for that lamp.
+
+**Fade across groups** (off by default) spreads the group color over *all* the groups
+instead of showing it on the active one only: the active group still gets the full
+group color, the group before it one step less, and so on back to the lamps' own color
+- in equal steps around the hue circle, so the in-between groups stay vivid. With three
+groups and `complementary` that is own color -> halfway -> the opposite color; with
+more groups the steps get smaller (five groups: 0, 45, 90, 135, 180 degrees). The
+brightness boost fades the same way, and the whole ramp moves along as the active group
+advances - the switch itself is still a hard step. It needs at least three groups (with
+two there is nothing in between). White pulses that follow the group
+(*True white lamps: group*) still land on the active group only.
 
 ### Diagnostics tab
 Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /

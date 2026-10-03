@@ -497,7 +497,7 @@ class BandModeTab(QWidget):
         chase_root.addWidget(chase_box)
 
         # -- group switch: discrete alternative to the chase overlay above --------------------
-        gs_box = QGroupBox("Group Switch (discrete alternative to Chase - no gradient between groups)")
+        gs_box = QGroupBox("Group Switch (discrete alternative to Chase - one active group at a time)")
         gs_outer_layout = QVBoxLayout(gs_box)
         gs_intro_label = QLabel(
             "Set 'Effect group' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
@@ -505,7 +505,8 @@ class BandModeTab(QWidget):
             "lamp can be in the Chase, in a Group Switch group, both, or neither. Unlike Chase, "
             "exactly one group is 'active' at a time and shows the target color at full strength - "
             "every other group is left completely untouched. No width/falloff: switching from one "
-            "active group to the next is instant, a hard step rather than a gradient."
+            "active group to the next is instant, a hard step rather than a gradient. (With 'Fade "
+            "across groups' the color is spread over all the groups in steps instead.)"
         )
         gs_intro_label.setWordWrap(True)
         gs_outer_layout.addWidget(gs_intro_label)
@@ -712,6 +713,20 @@ class BandModeTab(QWidget):
         )
         gs_color_mode_label.setWordWrap(True)
         gs_appearance_col.addWidget(gs_color_mode_label)
+
+        self.gs_fade_checkbox = QCheckBox("Fade across groups (own color -> group color in steps)")
+        self.gs_fade_checkbox.setChecked(gs.fade_across_groups)
+        self.gs_fade_checkbox.setToolTip(
+            "Off: only the active group shows the group color, the others keep their own. On: the color "
+            "fades across all the groups in equal steps - the active group shows the full group color, "
+            "the group before it a step less, and so on back to the lamps' own color. With 3 groups and "
+            "'complementary': own color -> halfway there -> the opposite color; with more groups, "
+            "smaller steps. The ramp moves along with the active group. Needs at least 3 groups (with 2 "
+            "there is nothing in between). The brightness boost fades the same way. White pulses that "
+            "follow the group still land on the active group only."
+        )
+        self.gs_fade_checkbox.toggled.connect(self._on_group_switch_changed)
+        gs_appearance_col.addWidget(self.gs_fade_checkbox)
 
         self.gs_hue_slider = HueSlider("Custom hue", gs.custom_hue_deg)
         self.gs_hue_slider.setToolTip(
@@ -996,5 +1011,6 @@ class BandModeTab(QWidget):
         gs.custom_hue_deg = self.gs_hue_slider.value()
         gs.custom_saturation = self.gs_sat_slider.value()
         gs.hue_shift_step_deg = self.gs_hue_shift_slider.value()
+        gs.fade_across_groups = self.gs_fade_checkbox.isChecked()
         self._update_overlay_states()
         self.controller.apply_config_changes()
