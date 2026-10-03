@@ -34,7 +34,7 @@ import numpy as np
 
 from ..audio.capture import AudioCapture
 from ..color.mapping import ColorMappingEngine, apply_per_lamp_effect
-from ..color.models import Color, WhiteTarget, clip, lerp
+from ..color.models import Color, StrobeBurst, WhiteTarget, clip, lerp
 from ..config.schema import AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
@@ -49,7 +49,16 @@ from ..effects.chase import (
     spread_positions,
 )
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
-from ..effects.pulse_sequencer import LoudnessTracker, PulseEvent, PulseSequencer, metric_weight, phrase_progress
+from ..effects.pulse_sequencer import (
+    STEPS_PER_BEAT,
+    LoudnessTracker,
+    PulseEvent,
+    PulseSequencer,
+    metric_weight,
+    phrase_progress,
+    strobe_plan,
+    strobe_steps,
+)
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother, MultiSmoother
 from ..lamps.manager import LampManager
 
@@ -255,6 +264,13 @@ class VisualizationEngine:
         self._seq_continuous_since: Dict[str, float] = {}
         self._seq_last_active: Dict[str, float] = {}
         self._seq_forced_gap_until: Dict[str, float] = {}
+        # The sequencer's strobe (see _start_strobe): the clock position its
+        # events are timed against, the burst the lamps are playing (None
+        # once it's over) and the last one's rate, for display.
+        self._seq_position: Optional[float] = None
+        self._strobe_burst: Optional[StrobeBurst] = None
+        self.last_strobe: Optional[dict] = None
+        self._perf_now = 0.0  # time.perf_counter() of the current visual tick
         self._white_targets_preselected = False
         # white_pulse_temp_mode "alternate" / "loudness" state.
         self._white_temp_alternate = False
@@ -374,6 +390,7 @@ class VisualizationEngine:
             "phrase_bar": self._sequencer.phrase_bar,
             "phrase_bars": self.config.sequencer.phrase_bars,
             "level": self._sequencer.level,
+            "strobe": self.last_strobe if self.config.sequencer.strobe_enabled else None,
         }
 
     @property
@@ -416,6 +433,7 @@ class VisualizationEngine:
         now = time.perf_counter()
         dt = now - self._last_visual_time if self._last_visual_time else 1.0 / max(self.config.network.visual_update_hz, 1.0)
         self._last_visual_time = now
+        self._perf_now = now
         self.rate_counter_visual.tick()
         wall_now = time.time()
 
@@ -486,6 +504,7 @@ class VisualizationEngine:
             self.latest_lamp_white_targets = {}
             if colors:
                 self.lamp_manager.push_colors(colors)
+        self._preview_strobe(now)
 
     def _tick_beat_clock(self, frame: SpectrumFrame, wall_now: float, mode: str) -> None:
         rh = self.config.rhythm
@@ -899,6 +918,10 @@ class VisualizationEngine:
                     temp=shared_white_target.temp,
                     under=self._under_white(color, white_amount),
                 ).clamped()
+        if self._strobe_running():
+            # The strobe has the white LEDs to itself while it runs (see
+            # _start_strobe): no other white flash, nor its colour crossfade.
+            white_targets = {}
         self._beat_sync_white_targets = white_targets
         self._white_targets_preselected = self._sequencing
         return colors
@@ -918,6 +941,7 @@ class VisualizationEngine:
 
     def _run_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, cfg) -> None:
         position = self._beat_clock.position(wall_now) if self._sequencing else None
+        self._seq_position = position
         loudness = band_energy(frame, 20.0, 16000.0)
         if self.config.sequencer.walk_positions == "chase_order":
             self._seq_groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
@@ -934,6 +958,14 @@ class VisualizationEngine:
         if event.kind == "dark":
             if cfg.dark_pulse_enabled and self._beat_dark_until is None and cfg.dark_pulse_duration_ms > 0.0:
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0 * event.length
+            return
+        if event.kind == "strobe":
+            # Announced ahead of time (event.lead): it starts when the clock
+            # reaches that position, so the burst sits on the beat grid.
+            period = self._beat_clock.period_s
+            if period and self._seq_position is not None and not self._strobe_running():
+                delay = (event.step / STEPS_PER_BEAT + event.lead - self._seq_position) * period
+                self._start_strobe(event.length, delay, period, selected_ids)
             return
         if not cfg.white_pulse_enabled:
             return
@@ -962,6 +994,91 @@ class VisualizationEngine:
             self._seq_white_release[lamp] = release
             self._seq_white_brightness[lamp] = event.brightness
             self._seq_white_temp[lamp] = temp
+
+    # -- strobe -----------------------------------------------------------------------------
+
+    def _start_strobe(self, beats: float, delay_s: float, beat_period_s: float, selected_ids) -> Optional[StrobeBurst]:
+        """Hands every selected lamp the same burst of cool-white flashes,
+        starting `delay_s` from now and lasting `beats` beats, on top of the
+        show: the colours keep being computed and each flash carries the
+        current one underneath. The lamps' workers play it at the burst's
+        own times (LampWorker._run_strobe) - not through the per-tick
+        targets, which couldn't keep the lamps together or the rhythm even.
+
+        Only with lamp_transitions "direct" (white and colour at once, no
+        fade). The rate is a subdivision of the beat under the strobe's Max
+        rate and the lamp command rate (see pulse_sequencer.strobe_plan);
+        when none fits, nothing is played."""
+        net, sq = self.config.network, self.config.sequencer
+        if net.lamp_transitions != "direct" or not selected_ids:
+            return None
+        plan = strobe_plan(beat_period_s, beats, sq.strobe_max_hz, sq.strobe_duty, net.lamp_command_rate_hz)
+        if plan is None:
+            return None
+        flashes, flash_period, on_s = plan
+        start = time.perf_counter() + max(0.0, delay_s)
+        bursts: Dict[str, StrobeBurst] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+            bursts[device_id] = StrobeBurst(
+                start, flash_period, on_s, flashes, clip(sq.strobe_brightness * mult), wave=sq.strobe_wave
+            )
+        self.lamp_manager.start_strobe(bursts)
+        self._strobe_burst = StrobeBurst(
+            start, flash_period, on_s, flashes, clip(sq.strobe_brightness), wave=sq.strobe_wave
+        )
+        self.last_strobe = {"flashes": flashes, "hz": 1.0 / flash_period}
+        return self._strobe_burst
+
+    def trigger_strobe_test(self) -> str:
+        """Plays one strobe burst on the selected lamps right away (the Test
+        button next to the strobe settings), at the clock's tempo - or as if
+        at 120 BPM while it has none. Returns a line saying what happened."""
+        sq = self.config.sequencer
+        if self.config.network.lamp_transitions != "direct":
+            return "Not played: Lamp transitions (Global box) isn't 'direct'."
+        selected_ids = self.lamp_manager.selected_device_ids()
+        if not selected_ids:
+            return "Not played: no lamps are selected."
+        period = self._beat_clock.period_s if self.running and self.clock_active and self._beat_clock.locked else None
+        note = "" if period else " (no tempo yet, so as if at 120 BPM)"
+        period = period or 0.5
+        steps_per_bar = max(1, int(self.config.rhythm.beats_per_bar)) * STEPS_PER_BEAT
+        beats = strobe_steps(sq.strobe_beats, steps_per_bar) / STEPS_PER_BEAT
+        burst = self._start_strobe(beats, 0.15, period, selected_ids)
+        if burst is None:
+            return "Not played: no subdivision of the beat fits under Max rate and the Lamp command rate at this tempo."
+        message = f"Played {burst.flashes} flashes at {1.0 / burst.period_s:.1f} per second{note}."
+        # Say so when it's the command rate, not Max rate, that set the pace.
+        wanted = strobe_plan(period, beats, sq.strobe_max_hz, sq.strobe_duty)
+        if wanted is not None and wanted[1] < burst.period_s - 1e-9:
+            duty = max(0.2, min(0.8, sq.strobe_duty))
+            needed = math.ceil(1.0 / (wanted[1] * min(duty, 1.0 - duty)) - 1e-9)
+            message += (
+                f" Max rate would allow {1.0 / wanted[1]:.1f} per second, but that needs a Lamp command rate "
+                f"of at least {needed}/s (now {self.config.network.lamp_command_rate_hz:g}/s)."
+            )
+        return message
+
+    def _strobe_running(self) -> bool:
+        burst = self._strobe_burst
+        return burst is not None and burst.start <= self._perf_now < burst.end
+
+    def _preview_strobe(self, now: float) -> None:
+        """Shows the strobe in the UI's lamp colours too (the lamps' workers
+        play the real one - see _start_strobe)."""
+        burst = self._strobe_burst
+        if burst is None:
+            return
+        if now >= burst.end:
+            self._strobe_burst = None
+        elif burst.is_on(now):
+            brightness = burst.brightness_at(burst.index_at(now))
+            self.latest_lamp_colors = {
+                device_id: WhiteTarget(brightness, burst.temp, under=color).to_preview_color()
+                for device_id, color in self.latest_lamp_colors.items()
+            }
 
     def _white_pulse_temp(self, cfg, clock: Optional[ClockBeat], event: Optional[PulseEvent] = None) -> float:
         """Warm (0.0) .. cool (1.0) for a new white flash - see

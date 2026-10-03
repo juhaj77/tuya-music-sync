@@ -112,3 +112,73 @@ class WhiteTarget:
             return white
         u = self.under
         return Color(clip(white.r + u.r), clip(white.g + u.g), clip(white.b + u.b))
+
+
+# How a strobe burst's brightness moves from flash to flash - see strobe_wave_level().
+STROBE_WAVES = ("off", "linear", "bezier")
+
+
+def strobe_wave_level(index: int, flashes: int, wave: str) -> float:
+    """Brightness multiplier (0..1) of flash `index` in a burst of `flashes`
+    when the burst swells like a wave: it starts near dark, rises to full
+    brightness in the middle and falls back toward dark. "linear": a
+    straight rise and fall. "bezier": the same eased S-curve as Chase's
+    falloff (smoothstep) - it lingers near dark at the ends and near full
+    in the middle. Anything else ("off"): every flash at full brightness.
+
+    The brightest flash is always at exactly 1, however few flashes there
+    are; with fewer than three there's nothing to shape."""
+    if wave not in ("linear", "bezier") or flashes < 3:
+        return 1.0
+
+    def triangle(i: int) -> float:
+        return 1.0 - abs(2.0 * (i + 0.5) / flashes - 1.0)
+
+    level = clip(triangle(index) / triangle((flashes - 1) // 2))
+    if wave == "bezier":
+        level = level * level * (3.0 - 2.0 * level)
+    return level
+
+
+@dataclass(frozen=True)
+class StrobeBurst:
+    """A short run of white flashes on top of whatever colour a lamp is
+    showing (the pulse sequencer's strobe). The whole burst is handed to a
+    lamp's worker in advance as absolute times, and every lamp gets the same
+    ones - so the lamps flash together, each on/off sent the moment it's due
+    instead of waiting for the next engine tick or command-rate slot (see
+    LampWorker._run_strobe)."""
+
+    start: float  # time.perf_counter() at which the first flash turns on
+    period_s: float  # from one flash to the next
+    on_s: float  # how long the white stays on in each flash
+    flashes: int
+    brightness: float  # 0..1 white brightness (of the brightest flash)
+    temp: float = 1.0  # 0=warmest .. 1=coolest (cool white lights up fastest)
+    wave: str = "off"  # see STROBE_WAVES: the brightness swells and fades over the burst
+
+    def brightness_at(self, index: int) -> float:
+        """White brightness of flash `index`."""
+        return self.brightness * strobe_wave_level(index, self.flashes, self.wave)
+
+    def index_at(self, now: float) -> int:
+        """Which flash `now` falls in (clamped to the burst)."""
+        if self.period_s <= 0.0:
+            return 0
+        return max(0, min(self.flashes - 1, int((now - self.start) // self.period_s)))
+
+    def on_time(self, index: int) -> float:
+        return self.start + index * self.period_s
+
+    def off_time(self, index: int) -> float:
+        return self.on_time(index) + self.on_s
+
+    @property
+    def end(self) -> float:
+        """When the last flash turns off."""
+        return self.off_time(max(0, self.flashes - 1))
+
+    def is_on(self, now: float) -> bool:
+        if self.flashes <= 0 or self.period_s <= 0.0 or now < self.start or now >= self.end:
+            return False
+        return (now - self.start) % self.period_s < self.on_s

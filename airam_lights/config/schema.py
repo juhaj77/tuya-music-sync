@@ -1138,6 +1138,31 @@ class PulseSequencerConfig:
     # pulse_dynamics_amount: 0 = every flash identical, 1 = full variation.
     pulse_dynamics: bool = True
     pulse_dynamics_amount: float = 0.7
+    # Strobe: now and then a short burst of cool-white flashes on every lamp
+    # at once, on top of the show (the colours and the other pulses keep
+    # running underneath) - a roll into the next phrase or bar, the way a
+    # lighting operator uses a strobe: rarely by default, so it stays an
+    # event (placement, chance and gap make it as frequent as wanted). It
+    # fills the end of a bar - half a beat up to the whole bar - and stops
+    # at the bar line, so the downbeat lands clean (with placement
+    # "half_bars" also at the middle of the bar). Only with lamp_transitions "direct": the bulbs
+    # then show white and colour at once and take each change instantly.
+    # The flash rate follows the tempo (see pulse_sequencer.strobe_plan):
+    # the fastest subdivision of the beat that stays under strobe_max_hz and
+    # under what the lamp command rate allows (two commands per flash).
+    strobe_enabled: bool = False
+    strobe_placement: str = "phrase"  # see pulse_sequencer.STROBE_PLACEMENTS
+    strobe_chance: float = 0.5  # chance an eligible bar actually gets one
+    strobe_min_gap_bars: int = 8  # never two strobes closer than this many bars (0 = no minimum)
+    strobe_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
+    strobe_beats: float = 1.0  # length of the burst in beats: 0.5, 1, 2 or 4 (a bar at most)
+    strobe_max_hz: float = 10.0  # ceiling on flashes per second
+    strobe_duty: float = 0.5  # share of each flash's period the white is on
+    strobe_brightness: float = 0.6  # 0..1 white brightness of the flashes
+    # "off": every flash equally bright. "linear" / "bezier": the brightness
+    # swells over the burst - from dark up to strobe_brightness in the middle
+    # and back to dark - see color.models.strobe_wave_level.
+    strobe_wave: str = "off"
 
     def to_dict(self) -> dict:
         return asdict(self)

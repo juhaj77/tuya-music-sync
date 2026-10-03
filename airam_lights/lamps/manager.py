@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
-from ..color.models import Color, WhiteTarget
+from ..color.models import Color, StrobeBurst, WhiteTarget
 from ..config.schema import DeviceConfig, NetworkConfig
 from . import cloud_keys
 from .discovery import DiscoveredDevice, find_device_address, scan_network
@@ -116,6 +116,10 @@ class LampWorker(threading.Thread):
         # a stale target from the mode it just left.
         self._target_color: Optional[Color] = None
         self._target_white: Optional[WhiteTarget] = None
+        # A strobe burst waiting to be / being played (see _run_strobe). While
+        # it runs, the targets above are only read for the colour to keep
+        # showing under the flashes - nothing else is sent.
+        self._strobe: Optional[StrobeBurst] = None
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -175,6 +179,12 @@ class LampWorker(threading.Thread):
             self._target_color = None
         self._wake.set()
 
+    def start_strobe(self, burst: StrobeBurst) -> None:
+        """Hands this lamp a strobe burst to play at the burst's own times."""
+        with self._lock:
+            self._strobe = burst
+        self._wake.set()
+
     def update_network_config(self, network_cfg: NetworkConfig, min_change_threshold: float) -> None:
         self.network_cfg = network_cfg
         self.min_change_threshold = min_change_threshold
@@ -201,6 +211,8 @@ class LampWorker(threading.Thread):
                 self._handle_stuck()
             if self.dormant:
                 self._wake.clear()
+                with self._lock:
+                    self._strobe = None
                 if time.perf_counter() >= self._next_probe_at:
                     self._probe_and_recover()
                 continue
@@ -209,7 +221,11 @@ class LampWorker(threading.Thread):
             self._wake.clear()
 
             with self._lock:
-                color, white = self._target_color, self._target_white
+                color, white, strobe = self._target_color, self._target_white, self._strobe
+
+            if strobe is not None:
+                self._run_strobe(strobe)
+                continue
 
             if color is None and white is None:
                 continue
@@ -220,7 +236,12 @@ class LampWorker(threading.Thread):
                 time.sleep(interval - elapsed)
                 # Newer targets may have arrived while we slept - use them.
                 with self._lock:
-                    color, white = self._target_color, self._target_white
+                    color, white, strobe = self._target_color, self._target_white, self._strobe
+                if strobe is not None:
+                    # A strobe arrived meanwhile: it goes first - sending this
+                    # colour now could push the strobe's first flash late.
+                    self._run_strobe(strobe)
+                    continue
 
             if white is not None:
                 if self._white_unsupported and time.perf_counter() < self._white_retry_after:
@@ -234,6 +255,89 @@ class LampWorker(threading.Thread):
                     self.stats.commands_skipped_unchanged += 1
                     continue
                 self._send_color(color)
+
+    # -- strobe ------------------------------------------------------------------------
+
+    def _run_strobe(self, burst: StrobeBurst) -> None:
+        """Plays a strobe burst on this lamp: the white LEDs on and off at
+        the burst's own absolute times, the colour the show is on right now
+        kept underneath. Every lamp gets the same times and sends each
+        on/off the moment it's due (not at its next command-rate slot), so
+        the lamps flash together - which is the whole point of a strobe.
+        The command rate still holds: the engine only makes bursts whose on
+        and off parts are at least one command interval long (see
+        pulse_sequencer.strobe_plan), and nothing else is sent meanwhile.
+
+        A flash this lamp is too late for is skipped rather than played
+        late, so it falls back in step with the others. Only for bulbs on
+        the real-time control datapoint in its instant mode (see
+        NetworkConfig.lamp_transitions "direct") - others ignore the burst."""
+        try:
+            if not self._strobe_allowed():
+                return
+            for index in range(burst.flashes):
+                on_at, off_at = burst.on_time(index), burst.off_time(index)
+                if time.perf_counter() > on_at + 0.5 * burst.on_s:
+                    continue
+                if not self._sleep_until(on_at):
+                    return
+                if not self._send_strobe_edge(burst, True, index):
+                    return
+                self._sleep_until(off_at)  # even when stopping: never leave the white on
+                if not self._send_strobe_edge(burst, False, index) or self._stop.is_set():
+                    return
+        finally:
+            with self._lock:
+                if self._strobe is burst:
+                    self._strobe = None
+            self._wake.set()  # back to the normal show, with whatever the target is now
+
+    def _strobe_allowed(self) -> bool:
+        return (
+            self.network_cfg.lamp_transitions == "direct"
+            and not self.dormant
+            and self._consecutive_failures == 0
+            and self._uses_control_dp()
+        )
+
+    def _sleep_until(self, t: float) -> bool:
+        """False if the worker was stopped before `t` (perf_counter time)."""
+        while not self._stop.is_set():
+            remaining = t - time.perf_counter()
+            if remaining <= 0.0:
+                return True
+            time.sleep(min(remaining, 0.02))
+        return False
+
+    def _send_strobe_edge(self, burst: StrobeBurst, on: bool, index: int) -> bool:
+        with self._lock:
+            color, white = self._target_color, self._target_white
+        if color is None and white is not None:
+            color = white.under
+        if color is None:
+            color = self._last_sent_color or Color.black()
+        try:
+            rgb = color.to_rgb255()
+            if on:
+                self.device.set_white(
+                    burst.brightness_at(index) * 100.0, burst.temp * 100.0, wait_for_ack=False,
+                    transition="direct", under_rgb=rgb,
+                )
+                self._log_send("white", None, reported=False)
+            else:
+                self.device.set_color(*rgb, wait_for_ack=False, transition="direct")
+                self._log_send("colour", color.to_hsv(), reported=False)
+            self._last_sent_color = color
+            self._last_sent_white = None
+            self._on_send_success()
+            return True
+        except Exception as e:
+            # Whatever the lamp shows now is unknown - make sure the next
+            # normal colour is really sent (it also switches the white off).
+            self._last_sent_color = None
+            self._last_sent_white = None
+            self._on_send_failure(e)
+            return False
 
     def _on_send_success(self) -> None:
         self._last_send_time = time.perf_counter()
@@ -691,6 +795,15 @@ class LampManager:
             worker = self.workers.get(device_id)
             if worker is not None:
                 worker.set_white_target(target)
+
+    def start_strobe(self, bursts: Dict[str, StrobeBurst]) -> None:
+        """Starts a strobe burst (see LampWorker._run_strobe) on each given
+        device id. All bursts of one strobe share the same times, so the
+        lamps flash together; only the brightness may differ per lamp."""
+        for device_id, burst in bursts.items():
+            worker = self.workers.get(device_id)
+            if worker is not None:
+                worker.start_strobe(burst)
 
     def refresh_all_status(self, executor) -> None:
         """Submits a status() refresh for every device to the given

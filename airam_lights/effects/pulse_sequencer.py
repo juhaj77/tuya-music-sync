@@ -22,6 +22,13 @@ themselves. On top of that grid:
   so it works at any volume) picks the "auto" patterns - sparse in quiet
   parts, busy in the loud ones - and a sudden jump from quiet to loud (a
   drop) re-aligns the phrase to start right there, with the big flash.
+- Strobe (optional): now and then the end of a bar - half a beat up to the
+  whole bar - becomes a burst of fast cool-white flashes on every lamp at
+  once: a roll into the next phrase or bar. Rare by default: only on the
+  chosen bars, only when the music is loud enough, with a chance roll and a
+  minimum number of bars between two of them - all adjustable up to twice
+  per bar. The flash rate is a subdivision of the beat (see strobe_plan),
+  so the roll sits on the grid at any tempo.
 
 Pure logic: returns events, never touches lamps. The engine turns events
 into lamp commands (see VisualizationEngine._apply_sequencer_events).
@@ -43,6 +50,14 @@ STEPS_PER_BEAT = 4  # 16th notes
 WHITE_PATTERNS = ("off", "auto", "downbeats", "beats", "offbeats", "syncopated", "gallop", "sixteenths")
 DARK_PATTERNS = ("off", "auto", "before_downbeat", "before_phrase", "before_backbeats", "stutter")
 GROUP_WALKS = ("forward", "pingpong", "random", "all")
+# Where a strobe may end: on the bar line into a new phrase; also into the
+# phrase's second half; on any bar line; also at the middle of each bar.
+STROBE_PLACEMENTS = ("phrase", "half_phrase", "bars", "half_bars")
+# Loudness levels, quietest first (see LoudnessTracker.level).
+LEVELS = ("calm", "groove", "high", "peak")
+# Flashes per beat a strobe may use: 8ths, 8th triplets, 16ths, 16th
+# triplets, 32nds - the fastest that fits under the ceiling is picked.
+STROBE_SUBDIVISIONS = (2, 3, 4, 6, 8)
 
 # "auto" picks by how loud the music is right now compared to the last ~30 s.
 _AUTO_WHITE = {"calm": "downbeats", "groove": "beats", "high": "syncopated", "peak": "gallop"}
@@ -59,11 +74,18 @@ _SHORT_TIME_CONSTANT_S = 0.6
 
 @dataclass
 class PulseEvent:
-    kind: str  # "white" | "dark"
+    kind: str  # "white" | "dark" | "strobe"
     group: Optional[int] = None  # index into the lamp groups; None = every lamp
-    length: float = 1.0  # multiplier on the configured pulse duration
+    # White/dark: multiplier on the configured pulse duration. Strobe: the
+    # burst's length in beats.
+    length: float = 1.0
     reason: str = ""  # for diagnostics/tests: "pattern", "double", "fill", "phrase", "drop", ...
     # Where in the music it happens (e.g. for the warm/cool choice of a white flash).
+    step: int = 0  # 16th on the clock's grid (BeatClock.position() * STEPS_PER_BEAT)
+    # Beats from `step` until it actually starts. A strobe is announced one
+    # 16th early, so every lamp gets the whole burst in advance and they all
+    # start it at the same instant, on the grid.
+    lead: float = 0.0
     bar_step: int = 0  # 16th within the bar, 0 = the downbeat
     steps_per_bar: int = 16
     phrase_bar: int = 0  # bar within the phrase, 0 = the phrase's first bar
@@ -122,6 +144,43 @@ def flash_shape(reason: str, bar_step: int, steps_per_bar: int, intensity: float
     return brightness, attack, length, length
 
 
+def strobe_steps(beats: float, steps_per_bar: int) -> int:
+    """A strobe's length on the 16th grid: half a beat at least, the whole bar at most."""
+    return max(STEPS_PER_BEAT // 2, min(max(1, steps_per_bar), int(round(beats * STEPS_PER_BEAT))))
+
+
+def strobe_plan(
+    beat_period_s: Optional[float], beats: float, max_hz: float, duty: float = 0.5,
+    command_rate_hz: Optional[float] = None,
+) -> Optional[tuple]:
+    """How a strobe lasting `beats` beats is played at this tempo: (number of
+    flashes, seconds from one flash to the next, seconds the white is on in
+    each) - or None when no musical rate fits.
+
+    The rate is a subdivision of the beat (STROBE_SUBDIVISIONS) that fills
+    the burst with a whole number of flashes: the fastest one not above
+    `max_hz`, nor above what the lamp command rate allows - a flash is two
+    commands (on, off), and neither the on nor the off part may be shorter
+    than one command interval. At 128 BPM with the defaults that's 16ths:
+    4 flashes in a beat, 8.5 per second."""
+    if not beat_period_s or beat_period_s <= 0.0 or beats <= 0.0:
+        return None
+    duty = max(0.2, min(0.8, duty))
+    ceiling = max_hz
+    if command_rate_hz:
+        ceiling = min(ceiling, command_rate_hz * min(duty, 1.0 - duty))
+    best = None
+    for per_beat in STROBE_SUBDIVISIONS:
+        flashes = beats * per_beat
+        whole = abs(flashes - round(flashes)) < 1e-6 and round(flashes) >= 2
+        if whole and per_beat / beat_period_s <= ceiling + 1e-9:
+            best = per_beat
+    if best is None:
+        return None
+    period = beat_period_s / best
+    return int(round(beats * best)), period, period * duty
+
+
 def phrase_progress(phrase_bar: int, phrase_bars: int, bar_step: int, steps_per_bar: int) -> float:
     """0 at the start of a phrase .. ~1 at its very end - except the phrase's
     first step itself, which counts as the peak (1.0): the release of the
@@ -176,6 +235,10 @@ class PulseSequencer:
         self._group_index = -1
         self._group_direction = 1
         self._pending_doubles: Dict[int, int] = {}  # absolute step -> group
+        # The 16ths [from, until) a strobe covers - no white flashes there.
+        self._strobe_from_step = 0
+        self._strobe_until_step = 0
+        self._last_strobe_start: Optional[int] = None  # the 16th the previous strobe started on
         self._phrase_origin_bar = 0
         self._loudness = LoudnessTracker()
         self._bar_intensities: List[float] = []  # this bar's intensity samples, for drop detection
@@ -204,12 +267,14 @@ class PulseSequencer:
             # First tick, or the grid jumped (re-lock, bar start re-estimated): resync silently.
             self._last_step = step
             self._pending_doubles.clear()
+            self._strobe_from_step = self._strobe_until_step = 0
             return []
         events: List[PulseEvent] = []
         for s in range(self._last_step + 1, step + 1):
             step_events = self._events_for_step(s, max(1, num_groups), max(1, beats_per_bar))
             steps_per_bar = max(1, beats_per_bar) * STEPS_PER_BEAT
             for e in step_events:
+                e.step = s
                 e.bar_step = s % steps_per_bar
                 e.steps_per_bar = steps_per_bar
                 e.phrase_bar = self.phrase_bar
@@ -242,10 +307,16 @@ class PulseSequencer:
         phrase_start = self.phrase_bar == 0 and bar_step == 0
         in_fill = cfg.fills and last_bar_of_phrase and phrase_bars > 1 and bar_step >= steps_per_bar // 2
 
-        # -- white ------------------------------------------------------------------
+        # -- strobe (announced one 16th before it starts) ----------------------------
+        strobe = self._strobe_for_step(step, steps_per_bar, phrase_bars)
+        if strobe is not None:
+            events.append(strobe)
+        strobing = self._strobe_from_step <= step < self._strobe_until_step
+
+        # -- white (the strobe has the white LEDs to itself while it runs) -------------
         white_group: Optional[int] = None
         white_reason = ""
-        if cfg.white_pattern != "off":
+        if cfg.white_pattern != "off" and not strobing:
             if phrase_start and cfg.phrase_accent:
                 white_reason = "phrase"
             elif in_fill and self._fill_step(bar_step, steps_per_bar):
@@ -285,6 +356,60 @@ class PulseSequencer:
         if self.config.drop_detection and ended is not None and ended < 0.35 and self.intensity > 0.8:
             self._phrase_origin_bar = bar
         self._bar_intensities = []
+
+    def _strobe_for_step(self, step: int, steps_per_bar: int, phrase_bars: int) -> Optional[PulseEvent]:
+        """A strobe starting on the next 16th (it's decided one 16th early)
+        and running up to a bar line - or, with placement "half_bars", up to
+        the middle of the bar. Every condition has to hold: the spot is one
+        the placement allows, the previous strobe is over and far enough
+        back, the music is loud enough, and the chance roll comes up.
+
+        A strobe as long as the bar starts on the downbeat, so it's decided
+        on the last 16th of the bar before."""
+        cfg = self.config
+        if not cfg.strobe_enabled:
+            return None
+        length_steps = strobe_steps(cfg.strobe_beats, steps_per_bar)
+        start = step + 1
+        end = start + length_steps
+        placement = cfg.strobe_placement
+        half_bar = steps_per_bar // 2
+        if end % steps_per_bar == 0:
+            # Ends on a bar line - of which bar of the phrase?
+            phrase_bar = (end // steps_per_bar - 1 - self._phrase_origin_bar) % phrase_bars
+            if phrase_bar == phrase_bars - 1:
+                spot = "phrase"
+            elif placement == "half_phrase" and phrase_bars >= 2 and phrase_bar == phrase_bars // 2 - 1:
+                spot = "half_phrase"
+            elif placement in ("bars", "half_bars"):
+                spot = "bar"
+            else:
+                return None
+        elif (
+            placement == "half_bars"
+            and half_bar % STEPS_PER_BEAT == 0  # the middle of the bar is on a beat (not in 3/4)
+            and end % steps_per_bar == half_bar
+            and length_steps <= half_bar
+        ):
+            spot = "half_bar"
+        else:
+            return None
+        if start < self._strobe_until_step:
+            return None  # the previous one is still running
+        last = self._last_strobe_start
+        if last is not None and 0 <= start - last < max(0, int(cfg.strobe_min_gap_bars)) * steps_per_bar:
+            return None
+        min_level = cfg.strobe_min_level if cfg.strobe_min_level in LEVELS else LEVELS[0]
+        if LEVELS.index(self.level) < LEVELS.index(min_level):
+            return None
+        if self._rng.random() >= cfg.strobe_chance:
+            return None
+        self._last_strobe_start = start
+        self._strobe_from_step = start
+        self._strobe_until_step = end
+        return PulseEvent(
+            "strobe", None, length_steps / STEPS_PER_BEAT, spot, lead=1.0 / STEPS_PER_BEAT
+        )
 
     def _white_steps(self, steps_per_bar: int) -> Set[int]:
         pattern = self.config.white_pattern

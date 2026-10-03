@@ -20,9 +20,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...color.models import STROBE_WAVES
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...config.user_presets import apply_preset, snapshot_preset
-from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, WHITE_PATTERNS
+from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, LEVELS, STROBE_PLACEMENTS, WHITE_PATTERNS
 from ...config.schema import (
     LAMP_TRANSITIONS,
     PULSE_TRIGGERS,
@@ -913,6 +914,29 @@ class ColorMappingTab(QWidget):
         else:
             show_note(self.seq_note, "")
 
+        # Strobe: placed by the sequencer, and only with instant lamp transitions.
+        direct = cfg.network.lamp_transitions == "direct"
+        not_direct = "The strobe needs Lamp transitions 'direct' (Global box)."
+        seq_off = "The sequencer is off." if shared else "The sequencer needs the shared beat clock."
+        set_active([self.seq_strobe_checkbox], sequencing and direct, seq_off if not sequencing else not_direct)
+        set_active(
+            [self.seq_strobe_placement_combo, self.seq_strobe_level_combo, self.seq_strobe_chance_slider,
+             self.seq_strobe_gap_slider],
+            sequencing and direct and sq.strobe_enabled,
+            seq_off if not sequencing else not_direct if not direct else "The strobe is off.",
+        )
+        # These shape the Test button's burst too, so they stay usable without the sequencer.
+        set_active(
+            [self.seq_strobe_length_combo, self.seq_strobe_wave_combo, self.seq_strobe_rate_slider,
+             self.seq_strobe_duty_slider, self.seq_strobe_brightness_slider, self.seq_strobe_test_button],
+            direct, not_direct,
+        )
+        if sequencing and not direct:
+            show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' (Global box): only then "
+                      "do the bulbs take a change instantly and show white and colour at the same time.")
+        else:
+            show_note(self.seq_strobe_note, "")
+
     # -- handlers -----------------------------------------------------------------------
 
     def _on_rgb_changed(self, cfg: RGBModeConfig) -> None:
@@ -1033,6 +1057,7 @@ class ColorMappingTab(QWidget):
 
     def _on_transitions_changed(self, text: str) -> None:
         self.controller.config.network.lamp_transitions = text
+        self._update_beat_states()  # the strobe is only available with 'direct'
         self.controller.apply_config_changes()
 
     def _on_command_rate_changed(self, value: float) -> None:
@@ -1344,7 +1369,117 @@ class ColorMappingTab(QWidget):
         for cb in (self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox):
             cb.toggled.connect(self._on_sequencer_changed)
             layout.addWidget(cb)
+        self._build_strobe_controls(layout, sq)
         return box
+
+    def _build_strobe_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        self.seq_strobe_checkbox = QCheckBox("Strobe (now and then a short cool-white burst on every lamp at once)")
+        self.seq_strobe_checkbox.setChecked(sq.strobe_enabled)
+        self.seq_strobe_checkbox.setToolTip(
+            "A roll into the next phrase or bar: the end of a bar becomes a burst of fast cool-white "
+            "flashes on every selected lamp at the same instant, on top of the show - the colours and the "
+            "other pulses keep running underneath. Rare by default, so it stays an event; placement, "
+            "loudness, chance and minimum gap below make it as frequent as you like, and Strobe length as "
+            "long as a whole bar. The flash rate follows the tempo: the fastest subdivision of the beat "
+            "under Max rate. Needs Lamp transitions 'direct' (Global box).\n\n"
+            "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy - "
+            "the usual recommendation for venues is at most 4 flashes per second."
+        )
+        self.seq_strobe_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_strobe_checkbox)
+        self.seq_strobe_note = inactive_note()
+        layout.addWidget(self.seq_strobe_note)
+
+        self.seq_strobe_placement_combo = self._labeled_combo(
+            layout, "Strobe placement:", STROBE_PLACEMENTS, sq.strobe_placement,
+            "Where a strobe may happen, from rarest to most frequent. phrase: only at the end of a phrase's "
+            "last bar - the roll into the new phrase. half_phrase: also into the phrase's second half. "
+            "bars: at the end of any bar. half_bars: also in the middle of each bar (up to twice per bar - "
+            "set Strobe min gap to 0 for that; only with a Strobe length of half a bar or less).",
+        )
+        self.seq_strobe_level_combo = self._labeled_combo(
+            layout, "Strobe from loudness:", LEVELS, sq.strobe_min_level,
+            "Only when the music is at least this loud compared to the last half minute (the loudness "
+            "shown in the Rhythm box's status line). calm: always. groove: not in the quiet parts. "
+            "high / peak: only in the loudest ones.",
+        )
+        length_row = QHBoxLayout()
+        length_row.addWidget(QLabel("Strobe length:"))
+        self.seq_strobe_length_combo = choice_combo(
+            [(0.5, "half a beat"), (1.0, "1 beat"), (2.0, "2 beats"), (4.0, "4 beats")], sq.strobe_beats,
+            "How much of the end of the bar the burst fills (at most the whole bar: 4 beats in 4/4). It "
+            "stops at the bar line, so the downbeat that follows lands clean. Half a beat needs at least "
+            "two flashes in it - at fast tempos that may not fit under Max rate, and then nothing is played.",
+        )
+        length_row.addWidget(self.seq_strobe_length_combo)
+        length_row.addStretch(1)
+        layout.addLayout(length_row)
+        self.seq_strobe_wave_combo = self._labeled_combo(
+            layout, "Strobe brightness wave:", STROBE_WAVES, sq.strobe_wave,
+            "How the brightness moves over one burst. off: every flash at Strobe brightness. linear: the "
+            "burst swells - the first flashes are nearly dark, each one brighter up to Strobe brightness "
+            "in the middle, then back down to dark. bezier: the same with an eased S-curve (as in Chase's "
+            "falloff) - it lingers near dark at the ends and near full in the middle. Shows best on longer "
+            "bursts (2 or 4 beats): a 1-beat burst has only a few flashes to shape.",
+        )
+        for combo in (self.seq_strobe_placement_combo, self.seq_strobe_level_combo, self.seq_strobe_wave_combo):
+            combo.currentTextChanged.connect(self._on_sequencer_changed)
+        self.seq_strobe_length_combo.currentIndexChanged.connect(self._on_sequencer_changed)
+
+        self.seq_strobe_chance_slider = FloatSlider(
+            "Strobe chance", 0.0, 1.0, sq.strobe_chance, decimals=2,
+            tooltip="Chance a bar that qualifies actually gets the strobe. 1 = every time (handy while "
+            "trying it out), lower = rarer and less predictable.",
+        )
+        self.seq_strobe_gap_slider = FloatSlider(
+            "Strobe min gap", 0.0, 32.0, float(sq.strobe_min_gap_bars), decimals=0, suffix=" bars",
+            tooltip="Never two strobes closer than this many bars, whatever the chance says. 1 = at most "
+            "one per bar; 0 = no minimum (with placement 'half_bars': two per bar).",
+        )
+        self.seq_strobe_rate_slider = FloatSlider(
+            "Strobe max rate", 4.0, 15.0, sq.strobe_max_hz, decimals=1, suffix=" /s",
+            tooltip="Ceiling on flashes per second. The actual rate is the fastest subdivision of the beat "
+            "under this (8ths, triplets, 16ths, 16th triplets...): at 128 BPM 8.5 per second, or 12.8 once "
+            "the ceiling is above that. The Lamp command rate limits it too: a flash is two commands, so "
+            "20 commands/s allow at most 10 flashes/s and 15 flashes/s need 30 commands/s - the Test "
+            "button says when that is what's holding the rate down.",
+        )
+        self.seq_strobe_duty_slider = FloatSlider(
+            "Strobe on-time", 0.2, 0.8, sq.strobe_duty, decimals=2,
+            tooltip="Share of each flash's period the white is on: 0.5 = on and off equally long, lower = "
+            "shorter, sharper flashes. Away from 0.5 the shorter part needs a higher Lamp command rate "
+            "(otherwise a slower subdivision is used).",
+        )
+        self.seq_strobe_brightness_slider = FloatSlider(
+            "Strobe brightness", 0.05, 1.0, sq.strobe_brightness, decimals=2,
+            tooltip="White brightness of the flashes (cool white - it lights up fastest). The per-lamp "
+            "white pulse brightness multiplier applies here too.",
+        )
+        for w in (
+            self.seq_strobe_chance_slider,
+            self.seq_strobe_gap_slider,
+            self.seq_strobe_rate_slider,
+            self.seq_strobe_duty_slider,
+            self.seq_strobe_brightness_slider,
+        ):
+            w.valueChanged.connect(self._on_sequencer_changed)
+            layout.addWidget(w)
+
+        test_row = QHBoxLayout()
+        self.seq_strobe_test_button = QPushButton("Test strobe now")
+        self.seq_strobe_test_button.setToolTip(
+            "Plays one burst on the selected lamps right away with the length, max rate, on-time and "
+            "brightness above - to see how it looks without waiting for the music to call for one."
+        )
+        self.seq_strobe_test_button.clicked.connect(self._on_strobe_test)
+        test_row.addWidget(self.seq_strobe_test_button)
+        self.seq_strobe_test_label = QLabel()
+        self.seq_strobe_test_label.setWordWrap(True)
+        test_row.addWidget(self.seq_strobe_test_label, stretch=1)
+        layout.addLayout(test_row)
+
+    def _on_strobe_test(self) -> None:
+        self.seq_strobe_test_label.setText(self.controller.engine.trigger_strobe_test())
 
     @staticmethod
     def _labeled_combo(layout: QVBoxLayout, label: str, items, value: str, tooltip: str) -> QComboBox:
@@ -1377,6 +1512,16 @@ class ColorMappingTab(QWidget):
         sq.drop_detection = self.seq_drop_checkbox.isChecked()
         sq.pulse_dynamics = self.seq_dynamics_checkbox.isChecked()
         sq.pulse_dynamics_amount = self.seq_dynamics_slider.value()
+        sq.strobe_enabled = self.seq_strobe_checkbox.isChecked()
+        sq.strobe_placement = self.seq_strobe_placement_combo.currentText()
+        sq.strobe_min_level = self.seq_strobe_level_combo.currentText()
+        sq.strobe_beats = self.seq_strobe_length_combo.currentData()
+        sq.strobe_chance = self.seq_strobe_chance_slider.value()
+        sq.strobe_min_gap_bars = int(round(self.seq_strobe_gap_slider.value()))
+        sq.strobe_max_hz = self.seq_strobe_rate_slider.value()
+        sq.strobe_duty = self.seq_strobe_duty_slider.value()
+        sq.strobe_brightness = self.seq_strobe_brightness_slider.value()
+        sq.strobe_wave = self.seq_strobe_wave_combo.currentText()
         self._update_beat_states()
         self.controller.apply_config_changes()
 
@@ -1414,4 +1559,6 @@ class ColorMappingTab(QWidget):
         seq = engine.sequencer_status
         if seq is not None:
             text += f"  |  phrase bar {seq['phrase_bar'] + 1}/{seq['phrase_bars']}, loudness: {seq['level']}"
+            if seq.get("strobe"):
+                text += f"  |  last strobe: {seq['strobe']['flashes']} flashes at {seq['strobe']['hz']:.1f}/s"
         self.rhythm_status_label.setText(text)
