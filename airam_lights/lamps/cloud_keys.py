@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
+
+from ..config.store import default_config_dir
 
 logger = logging.getLogger("airam_lights.lamps")
 
@@ -34,9 +35,7 @@ def credential_paths() -> List[Path]:
     if getattr(sys, "frozen", False):
         paths.append(Path(sys.executable).resolve().parent / CREDENTIALS_FILE)
     paths.append(Path(__file__).resolve().parents[2] / CREDENTIALS_FILE)
-    appdata = os.environ.get("APPDATA")
-    if appdata:
-        paths.append(Path(appdata) / "AiramMusicLights" / CREDENTIALS_FILE)
+    paths.append(default_config_dir() / CREDENTIALS_FILE)
     return paths
 
 

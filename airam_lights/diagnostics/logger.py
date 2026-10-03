@@ -1,6 +1,8 @@
 """Application-wide logging setup.
 
-Writes to a rotating log file under %APPDATA%\\AiramMusicLights\\logs, echoes
+Writes to a rotating log file in the app's settings folder (`logs` under
+config.store.default_config_dir(): %APPDATA%\\AiramMusicLights on Windows,
+~/.config/AiramMusicLights on Linux), echoes
 to the console, and keeps a small in-memory ring buffer that the
 Diagnostics tab polls to show recent events without re-reading the file.
 
@@ -12,9 +14,10 @@ from __future__ import annotations
 import collections
 import logging
 import logging.handlers
-import os
 from pathlib import Path
 from typing import Deque, List
+
+from ..config.store import default_config_dir
 
 
 class LogBuffer(logging.Handler):
@@ -49,8 +52,7 @@ def get_log_buffer() -> LogBuffer:
 
 def setup_logging(log_dir: "Path | None" = None, level: int = logging.INFO) -> LogBuffer:
     if log_dir is None:
-        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-        log_dir = Path(base) / "AiramMusicLights" / "logs"
+        log_dir = default_config_dir() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     root = logging.getLogger("airam_lights")

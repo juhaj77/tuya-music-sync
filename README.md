@@ -7,7 +7,7 @@
 - [Demo videos](#demo-videos)
 - [1. How this works (architecture)](#1-how-this-works-architecture)
 - [2. Local control of the Airam bulbs - what's confirmed vs. assumed](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
-- [3. Installation](#3-installation) (prebuilt Windows exe or from source)
+- [3. Installation](#3-installation) (prebuilt Windows exe, or from source on Windows or Linux)
 - [4. Phase 1: prove local control works on ONE bulb](#4-phase-1-prove-local-control-works-on-one-bulb-do-this-first)
 - [5. Running the full application](#5-running-the-full-application)
 - [6. Manual (no-music) control app](#6-manual-no-music-control-app)
@@ -18,14 +18,16 @@
 - [11. Known limitations / honest caveats](#11-known-limitations--honest-caveats)
 - [License](#license) (MIT)
     
-A Windows desktop application that turns **Airam SmartHome Smart PAR16 RGB GU10**
+A desktop application - for Windows, and run from source also on Linux - that turns **Airam SmartHome Smart PAR16 RGB GU10**
 Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
 entirely over your **local network**, with no cloud dependency at runtime and no
 Android phone required. Works with any number of lamps, from one to as many as your
 Wi-Fi network and Tuya account can handle - the author's own setup runs 8, but nothing
-in the app assumes that specific number anywhere. Audio normally comes from WASAPI
-loopback (no microphone needed), but a real microphone can be selected instead if you
-want to test how the lights react to actual room/ambient sound.
+in the app assumes that specific number anywhere. Audio normally comes from loopback
+capture of whatever the PC is playing (WASAPI loopback on Windows, the output's monitor
+source on PulseAudio / PipeWire on Linux - no microphone needed), but a real microphone
+can be selected instead if you want to test how the lights react to actual room/ambient
+sound.
 
 It replaces the Airam SmartHome app's built-in "Music Sync" (which is limited to one
 bulb at a time and changes colors abruptly) with your own local FFT-based analysis,
@@ -149,8 +151,8 @@ to preview video files past a few MB, so they aren't committed directly into the
 - **Keeps the PC awake** while either app is open, without blocking manual sleep.
 
 Both apps (`main.py` and `manual_control.py`) prevent the PC from **automatically**
-going to sleep while they're open (`airam_lights/keep_awake.py`, Windows'
-`SetThreadExecutionState` API) - a full system sleep pauses every process at the
+going to sleep while they're open (`airam_lights/keep_awake.py`: Windows'
+`SetThreadExecutionState` API, or on Linux a `systemd-inhibit` sleep lock) - a full system sleep pauses every process at the
 hardware level (CPU, network, everything), so there is no way to "keep working through"
 one; the only real fix is asking Windows not to idle-sleep in the first place. The
 display can still turn off / the session can still lock (that doesn't stop the app),
@@ -260,7 +262,7 @@ choose **More info -> Run anyway**. The wizard writes tinytuya's `devices.json` 
 contains your local keys) into the folder you run it from - delete it afterwards if you
 don't want the keys lying around.
 
-### Option B: run from source
+### Option B: run from source (Windows)
 
 Requires **Python 3.10+** on Windows (tested with recent CPython 3.x; PySide6 and
 PyAudioWPatch both ship Windows wheels).
@@ -285,6 +287,44 @@ To build the Option A exes yourself (output goes to `dist\AiramMusicLights\`):
 pip install pyinstaller
 pyinstaller airam_lights.spec
 ```
+
+### Option C: run from source (Linux)
+
+Requires **Python 3.10+** and a desktop with **PulseAudio**, or **PipeWire** with its
+PulseAudio server (`pipewire-pulse`) - which is what current Ubuntu, Fedora, Debian and
+similar distributions run out of the box. There is no prebuilt Linux build.
+
+```bash
+git clone https://github.com/juhaj77/tuya-music-sync.git
+cd tuya-music-sync
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python main.py
+```
+
+The same `requirements.txt` works on both systems: pip installs the audio library that
+fits the operating system (PyAudioWPatch on Windows, `soundcard` on Linux), and the app
+picks the matching one at runtime (`airam_lights/audio/devices.py`, `audio_backend()`).
+Everything else - lamp control, the effects, the UI - is the same code on both.
+
+What differs on Linux:
+
+- **Audio source.** *Loopback* lists each output's **monitor** source ("Monitor of
+  ..."), the default being the monitor of your default output - the Linux counterpart
+  of WASAPI loopback. *Microphone* lists the real recording devices.
+- **Settings and logs** live in `~/.config/AiramMusicLights/` (or under
+  `$XDG_CONFIG_HOME`) instead of `%APPDATA%\AiramMusicLights\` - wherever this README
+  mentions the `%APPDATA%` path.
+- **Commands** in this README are written for PowerShell; on Linux use `python3` and
+  forward slashes (`python3 tools/setup_wizard.py`).
+- **Keep-awake** uses a `systemd-inhibit` sleep lock; without systemd-logind the app
+  still runs, it just can't stop the PC from auto-suspending.
+
+Linux support is newer and less proven than the Windows side: audio capture has been
+verified against a PulseAudio server (monitor capture, device selection, latency around
+10-20 ms), but not yet on PipeWire or with real sound hardware, and the keep-awake lock
+is untested on a real desktop. If something doesn't work, please open an issue.
 
 ---
 
@@ -373,8 +413,9 @@ python main.py
 ```
 
 ### Visualizer tab
-Pick your audio **Source**: WASAPI loopback (default - your current default playback
-device, no microphone involved) or **Microphone** (a real recording device, for testing
+Pick your audio **Source**: loopback (default - your current default playback
+device, no microphone involved; WASAPI loopback on Windows, the output's monitor on
+Linux) or **Microphone** (a real recording device, for testing
 how the lights react to actual room/ambient sound - has its own sensitivity/gain
 control, since mics are usually much quieter than a loopback tap). Watch the level
 meter and spectrum to confirm audio capture works, choose a mode, tweak

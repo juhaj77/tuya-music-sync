@@ -122,7 +122,9 @@ class LampWorker(threading.Thread):
         self._strobe: Optional[StrobeBurst] = None
         self._lock = threading.Lock()
         self._wake = threading.Event()
-        self._stop = threading.Event()
+        # Not named _stop: that would hide threading.Thread's own _stop()
+        # method, which Python < 3.13 calls when a finished thread is joined.
+        self._stop_event = threading.Event()
         self._last_sent_color: Optional[Color] = None
         self._last_sent_white: Optional[WhiteTarget] = None
         self._last_send_time = 0.0
@@ -190,7 +192,7 @@ class LampWorker(threading.Thread):
         self.min_change_threshold = min_change_threshold
 
     def stop(self) -> None:
-        self._stop.set()
+        self._stop_event.set()
         self._wake.set()
 
     def _effective_interval(self) -> float:
@@ -203,9 +205,9 @@ class LampWorker(threading.Thread):
         return base
 
     def run(self) -> None:
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             got_signal = self._wake.wait(timeout=0.5)
-            if self._stop.is_set():
+            if self._stop_event.is_set():
                 break
             if self._stuck_pending:
                 self._handle_stuck()
@@ -284,7 +286,7 @@ class LampWorker(threading.Thread):
                 if not self._send_strobe_edge(burst, True, index):
                     return
                 self._sleep_until(off_at)  # even when stopping: never leave the white on
-                if not self._send_strobe_edge(burst, False, index) or self._stop.is_set():
+                if not self._send_strobe_edge(burst, False, index) or self._stop_event.is_set():
                     return
         finally:
             with self._lock:
@@ -302,7 +304,7 @@ class LampWorker(threading.Thread):
 
     def _sleep_until(self, t: float) -> bool:
         """False if the worker was stopped before `t` (perf_counter time)."""
-        while not self._stop.is_set():
+        while not self._stop_event.is_set():
             remaining = t - time.perf_counter()
             if remaining <= 0.0:
                 return True

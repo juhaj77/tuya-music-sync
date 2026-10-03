@@ -1,6 +1,7 @@
 """JSON persistence for AppConfig.
 
-Config lives in the user's AppData folder by default (not inside the repo),
+Config lives in the user's own settings folder by default (not inside the
+repo) - AppData on Windows, ~/.config on Linux, see default_config_dir() -
 so it survives updates and keeps local Tuya keys out of the project
 directory. The file is plain, indented JSON - human-readable and editable
 by hand if needed.
@@ -11,6 +12,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +24,12 @@ APP_DIR_NAME = "AiramMusicLights"
 
 
 def default_config_dir() -> Path:
+    """The app's settings folder (config.json, logs, optionally tinytuya.json):
+    %APPDATA%\\AiramMusicLights on Windows; elsewhere the XDG location,
+    $XDG_CONFIG_HOME/AiramMusicLights - normally ~/.config/AiramMusicLights."""
+    if sys.platform != "win32":
+        base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+        return Path(base) / APP_DIR_NAME
     base = os.environ.get("APPDATA")
     if not base:
         base = str(Path.home() / "AppData" / "Roaming")

@@ -60,7 +60,7 @@ class VisualizerTab(QWidget):
         audio_layout.addWidget(
             QLabel(
                 "Microphone reacts to real room/ambient sound (e.g. talking, clapping, playing an "
-                "instrument nearby) instead of only whatever's playing through Windows - handy for "
+                "instrument nearby) instead of only whatever's playing on this computer - handy for "
                 "testing without routing any specific playback source."
             )
         )

@@ -1,9 +1,12 @@
-"""WASAPI loopback audio capture.
+"""Loopback ("what you hear") and microphone audio capture.
 
-Runs entirely on a PyAudioWPatch callback thread (never on the Qt UI thread).
-Captured samples are down-mixed to mono and written into a small ring buffer
-that the DSP engine reads from at its own pace - this decouples the audio
-capture rate from the FFT/visual update rate, as required.
+Runs entirely on the audio library's own thread (never on the Qt UI thread):
+on Windows a PyAudioWPatch (WASAPI) callback thread, on Linux a reader
+thread on a PulseAudio / PipeWire recording through the `soundcard` package
+- see devices.audio_backend() for which one a system gets. Captured samples
+are down-mixed to mono and written into a small ring buffer that the DSP
+engine reads from at its own pace - this decouples the audio capture rate
+from the FFT/visual update rate, as required.
 """
 from __future__ import annotations
 
@@ -14,7 +17,13 @@ from typing import Optional
 
 import numpy as np
 
-from .devices import InputDeviceInfo, LoopbackDeviceInfo, list_loopback_devices, list_microphone_devices
+from .devices import (
+    InputDeviceInfo,
+    LoopbackDeviceInfo,
+    audio_backend,
+    list_loopback_devices,
+    list_microphone_devices,
+)
 
 logger = logging.getLogger("airam_lights.audio")
 
@@ -24,7 +33,8 @@ class AudioCaptureError(RuntimeError):
 
 
 class AudioCapture:
-    """Captures audio - either WASAPI loopback ("what you hear") or a real
+    """Captures audio - either loopback ("what you hear": WASAPI loopback on
+    Windows, an output's monitor source on Linux) or a real
     microphone/recording device - into a ring buffer.
 
     Usage:
@@ -59,6 +69,9 @@ class AudioCapture:
 
         self._pa = None
         self._stream = None
+        # "soundcard" backend only: the thread reading the recording, and the event that ends it.
+        self._reader_thread: Optional[threading.Thread] = None
+        self._reader_stop: Optional[threading.Event] = None
         self._buffer: Optional[np.ndarray] = None
         self._write_pos = 0
         self._filled = False
@@ -81,6 +94,12 @@ class AudioCapture:
     def _resolve_loopback(self) -> LoopbackDeviceInfo:
         devices = list_loopback_devices()
         if not devices:
+            if audio_backend() != "wasapi":
+                raise AudioCaptureError(
+                    "No loopback (monitor) device found. Make sure PulseAudio, or PipeWire with "
+                    "pipewire-pulse, is running with an output device, and that the 'soundcard' "
+                    "package is installed (pip install soundcard)."
+                )
             raise AudioCaptureError(
                 "No WASAPI loopback device found. Make sure Windows has an active "
                 "playback device and PyAudioWPatch is installed correctly."
@@ -101,6 +120,11 @@ class AudioCapture:
     def _resolve_microphone(self) -> InputDeviceInfo:
         devices = list_microphone_devices()
         if not devices:
+            if audio_backend() != "wasapi":
+                raise AudioCaptureError(
+                    "No microphone/recording device found. Check the system's sound settings for an "
+                    "enabled, connected recording device (and that PulseAudio / PipeWire is running)."
+                )
             raise AudioCaptureError(
                 "No microphone/recording device found. Check Windows' Sound settings "
                 "for an enabled, connected recording device."
@@ -122,6 +146,9 @@ class AudioCapture:
 
     def start(self) -> None:
         if self._running:
+            return
+        if audio_backend() != "wasapi":
+            self._start_soundcard()
             return
         try:
             import pyaudiowpatch as pyaudio
@@ -167,10 +194,103 @@ class AudioCapture:
             self.block_size,
         )
 
+    # -- Linux: PulseAudio / PipeWire through `soundcard` ------------------------
+
+    def _start_soundcard(self) -> None:
+        """start() for the "soundcard" backend. That library has no callback
+        API - a recording is read block by block - so a small reader thread
+        does what PortAudio's callback thread does on Windows, and feeds the
+        same ring buffer."""
+        from . import soundcard_backend
+
+        try:
+            soundcard_backend.load()
+        except soundcard_backend.SoundcardUnavailable as e:
+            raise AudioCaptureError(str(e)) from e
+
+        info = self._resolve_device()
+        self.samplerate = info.samplerate
+        self.channels = max(1, info.channels)
+        self.device_name = info.name
+
+        buf_len = int(self.samplerate * self.history_seconds)
+        self._buffer = np.zeros(buf_len, dtype=np.float32)
+        self._write_pos = 0
+        self._filled = False
+
+        stop = threading.Event()
+        opened = threading.Event()
+        failure: list = []
+        thread = threading.Thread(
+            target=self._soundcard_reader, args=(info.device_id, stop, opened, failure),
+            name="audio-capture", daemon=True,
+        )
+        thread.start()
+        if not opened.wait(timeout=5.0) or failure:
+            stop.set()
+            reason = failure[0] if failure else "the sound server did not answer"
+            raise AudioCaptureError(f"Failed to open {self.source} stream on '{info.name}': {reason}")
+
+        self._reader_thread = thread
+        self._reader_stop = stop
+        self._running = True
+        logger.info(
+            "Audio capture started (source=%s): device='%s' rate=%d ch=%d block=%d",
+            self.source,
+            self.device_name,
+            self.samplerate,
+            self.channels,
+            self.block_size,
+        )
+
+    def _soundcard_reader(self, device_id: str, stop: threading.Event, opened: threading.Event, failure: list) -> None:
+        try:
+            import warnings
+
+            from . import soundcard_backend
+
+            source = soundcard_backend.open_source(device_id)
+            # A late read is reported as a "data discontinuity" warning on
+            # every block - harmless for a visualizer, endless in the log.
+            warnings.filterwarnings("ignore", message=".*data discontinuity.*")
+            with source.recorder(
+                samplerate=self.samplerate, channels=self.channels, blocksize=self.block_size
+            ) as recorder:
+                opened.set()
+                while not stop.is_set():
+                    # Blocks until a whole block has arrived - which, while
+                    # nothing at all is playing, can be until the music
+                    # starts again (an idle output delivers no data, same as
+                    # WASAPI loopback). Hence the second stop check: a
+                    # recording that was stopped during the wait must not
+                    # write into the buffer of whatever was started since.
+                    block = recorder.record(numframes=self.block_size)  # float32, frames x channels
+                    if stop.is_set():
+                        break
+                    self._process_block(np.ascontiguousarray(block, dtype=np.float32).reshape(-1))
+        except Exception as e:
+            if not opened.is_set():
+                failure.append(e)
+                opened.set()
+            elif not stop.is_set():
+                logger.exception("Audio capture stopped unexpectedly")
+                self._last_error = f"Audio capture stopped: {e}"
+                self._running = False
+
     def stop(self) -> None:
         if not self._running:
             return
         self._running = False
+        if self._reader_stop is not None:
+            # Not waited for longer than this: during silence the reader sits
+            # in a blocking read (see _soundcard_reader) and only notices the
+            # stop once sound arrives again - it then closes its recording
+            # and ends by itself, without touching the buffer.
+            self._reader_stop.set()
+            if self._reader_thread is not None:
+                self._reader_thread.join(timeout=0.3)
+            self._reader_thread = None
+            self._reader_stop = None
         try:
             if self._stream is not None:
                 self._stream.stop_stream()
@@ -195,6 +315,13 @@ class AudioCapture:
     def _on_audio(self, in_data, frame_count, time_info, status):
         import pyaudiowpatch as pyaudio
 
+        self._process_block(in_data)
+        return (None, pyaudio.paContinue)
+
+    def _process_block(self, in_data) -> None:
+        """One block of interleaved float32 samples, from either backend
+        (PortAudio's raw bytes, or an array): down-mix to mono, write it to
+        the ring buffer, update the level meter."""
         try:
             samples = np.frombuffer(in_data, dtype=np.float32)
             if self.channels > 1:
@@ -234,8 +361,6 @@ class AudioCapture:
         except Exception:
             logger.exception("Error in audio callback")
             self._last_error = "Audio callback error - see log"
-
-        return (None, pyaudio.paContinue)
 
     # -- consumer API (called from the DSP/engine thread) -----------------------
 

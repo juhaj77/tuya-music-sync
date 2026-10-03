@@ -1,6 +1,7 @@
 """One-time setup helper: obtain each bulb's local_key from the Tuya cloud
 via tinytuya's built-in wizard, then import the results into this app's
-config file (%APPDATA%\\AiramMusicLights\\config.json).
+config file (%APPDATA%\\AiramMusicLights\\config.json on Windows,
+~/.config/AiramMusicLights/config.json on Linux).
 
 The local_key is required for local LAN control but is deliberately not
 broadcast on the network for security reasons - Tuya's own tooling always

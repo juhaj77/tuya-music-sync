@@ -1,18 +1,35 @@
-"""Enumeration of Windows WASAPI loopback ("what you hear") devices.
+"""Enumeration of loopback ("what you hear") and microphone devices.
 
-Plain PortAudio/sounddevice does not expose WASAPI loopback endpoints. We use
-PyAudioWPatch, a maintained PortAudio fork that adds them: every WASAPI
-render (output) device gets a matching loopback *input* device that yields
-whatever is being played on it. See DEVICE_NOTES.md for why this library was
-chosen over the alternatives.
+Which audio library is used depends on the operating system - see
+audio_backend():
+
+- Windows: WASAPI. Plain PortAudio/sounddevice does not expose WASAPI
+  loopback endpoints. We use PyAudioWPatch, a maintained PortAudio fork that
+  adds them: every WASAPI render (output) device gets a matching loopback
+  *input* device that yields whatever is being played on it. See
+  DEVICE_NOTES.md for why this library was chosen over the alternatives.
+- Linux (and anything else): PulseAudio / PipeWire through the `soundcard`
+  package, where every output has a "monitor" source that does the same job
+  - see soundcard_backend.py.
+
+Each library is imported only inside the functions that use it, and only on
+the system it belongs to - so neither has to be installed (or even exist)
+on the other one.
 """
 from __future__ import annotations
 
 import logging
+import sys
 from dataclasses import dataclass
 from typing import List, Optional
 
 logger = logging.getLogger("airam_lights.audio")
+
+
+def audio_backend() -> str:
+    """Which audio library this system uses: "wasapi" (PyAudioWPatch) on
+    Windows, "soundcard" (PulseAudio / PipeWire) everywhere else."""
+    return "wasapi" if sys.platform == "win32" else "soundcard"
 
 
 @dataclass
@@ -22,6 +39,7 @@ class LoopbackDeviceInfo:
     samplerate: int
     channels: int
     is_default: bool = False
+    device_id: Optional[str] = None  # the sound server's own name for it ("soundcard" backend only)
 
 
 @dataclass
@@ -31,15 +49,21 @@ class InputDeviceInfo:
     samplerate: int
     channels: int
     is_default: bool = False
+    device_id: Optional[str] = None  # see LoopbackDeviceInfo.device_id
 
 
 def list_loopback_devices() -> List[LoopbackDeviceInfo]:
-    """Return all WASAPI loopback-capable devices currently available.
+    """Return all loopback-capable devices currently available (Windows:
+    WASAPI loopback devices; Linux: the outputs' monitor sources).
 
     Safe to call even if no audio backend is available (e.g. missing driver) -
     returns an empty list and logs the reason instead of raising, so the UI
     can show "no loopback device found" instead of crashing on startup.
     """
+    if audio_backend() != "wasapi":
+        from . import soundcard_backend
+
+        return soundcard_backend.list_loopback_devices()
     try:
         import pyaudiowpatch as pyaudio
     except ImportError:
@@ -87,6 +111,10 @@ def list_microphone_devices() -> List[InputDeviceInfo]:
 
     Same safe-on-missing-driver behavior as list_loopback_devices(): returns
     an empty list and logs the reason instead of raising."""
+    if audio_backend() != "wasapi":
+        from . import soundcard_backend
+
+        return soundcard_backend.list_microphone_devices()
     try:
         import pyaudiowpatch as pyaudio
     except ImportError:

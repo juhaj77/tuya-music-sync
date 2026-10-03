@@ -311,11 +311,11 @@ def _start_worker(device, transitions="direct"):
 
 
 def _stop(*workers):
-    # Daemon threads, given a moment to wind down - not join()ed: LampWorker's
-    # own _stop event hides threading.Thread's internal _stop() on Python < 3.13.
     for w in workers:
         w.stop()
-    time.sleep(0.1)
+    for w in workers:
+        w.join(timeout=2.0)
+        assert not w.is_alive()
 
 
 def test_workers_play_a_burst_together_at_its_own_times():
