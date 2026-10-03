@@ -25,6 +25,7 @@ def _cfg(**kw):
     base = dict(
         enabled=True, white_pattern="beats", white_density=1.0, group_walk="forward", double_chance=0.0,
         dark_pattern="off", phrase_bars=1, fills=False, phrase_accent=False, drop_detection=False,
+        white_accent_focus=0.0, white_build=0.0, white_repeat=False,
     )
     base.update(kw)
     return PulseSequencerConfig(**base)
@@ -164,3 +165,74 @@ def test_events_carry_their_shape_only_with_dynamics_on():
         whites = [e for _, e in _run(seq, 2, start_beat=0.1) if e.kind == "white"]
         holds = {round(e.hold, 6) for e in whites}
         assert (len(holds) > 1) == dynamics
+
+
+# -- thinning: accent focus, phrase build, repeated groove ------------------------------------
+
+
+def test_white_chance_thins_from_the_light_end_of_the_bar():
+    from airam_lights.effects.pulse_sequencer import metric_weight, white_chance
+
+    chances = [white_chance(1.0, metric_weight(s, 16), 1.0, 0.0, 0, 1) for s in range(16)]
+    assert chances[0] == 1.0  # the downbeat stays
+    assert chances[1] == 0.0  # a 16th between beats goes
+    assert chances[8] > chances[4] > chances[2] > chances[1]  # beat 3 > beat 2 > "and" > 16th
+    # No focus: every step just the density.
+    assert all(white_chance(0.7, metric_weight(s, 16), 0.0, 0.0, 0, 1) == 0.7 for s in range(16))
+
+
+def test_white_chance_builds_up_through_the_phrase():
+    from airam_lights.effects.pulse_sequencer import white_chance
+
+    by_bar = [white_chance(1.0, 0.0, 0.0, 1.0, bar, 8) for bar in range(8)]
+    assert by_bar[0] == 0.0  # the phrase starts sparse
+    assert by_bar == sorted(by_bar)  # and fills in
+    assert by_bar[-1] == 1.0  # the last bar at full density
+    assert white_chance(1.0, 0.0, 0.0, 1.0, 0, 1) == 1.0  # a 1-bar phrase has nothing to build
+
+
+def test_accent_focus_flashes_fewer_sixteenths_but_keeps_the_beats():
+    def counts(focus):
+        seq = PulseSequencer(_cfg(white_pattern="sixteenths", white_accent_focus=focus), random.Random(3))
+        whites = [p for p, e in _run(seq, 16) if e.kind == "white"]
+        on_beat = sum(1 for p in whites if int(p * 4 + 1e-6) % 4 == 0)
+        return len(whites), on_beat
+
+    total_free, beats_free = counts(0.0)
+    total_focused, beats_focused = counts(1.0)
+    assert total_focused < total_free * 0.4
+    assert beats_focused > total_focused * 0.5  # mostly on the beats now
+
+
+def test_repeated_groove_is_the_same_in_every_bar_of_a_phrase():
+    seq = PulseSequencer(
+        _cfg(white_pattern="sixteenths", white_density=0.5, phrase_bars=4, white_repeat=True,
+             double_chance=0.3),
+        random.Random(5),
+    )
+    bars = {}
+    for p, e in _run(seq, 12):
+        if e.kind == "white":
+            step = int(p * 4 + 1e-6)
+            bars.setdefault(step // 16, set()).add((step % 16, e.reason))
+    # Bars 4..7 are one whole phrase: the same steps flash in each of them.
+    assert bars[4] and bars[4] == bars[5] == bars[6] == bars[7]
+    # The next phrase is a new variation.
+    assert bars[8] != bars[4]
+
+
+def test_repeated_groove_with_build_only_adds_flashes():
+    seq = PulseSequencer(
+        _cfg(white_pattern="sixteenths", white_density=1.0, phrase_bars=8, white_repeat=True,
+             white_accent_focus=0.0, white_build=1.0),
+        random.Random(2),
+    )
+    bars = {}
+    for p, e in _run(seq, 16):
+        if e.kind == "white":
+            step = int(p * 4 + 1e-6)
+            bars.setdefault(step // 16, set()).add(step % 16)
+    phrase = [bars.get(b, set()) for b in range(8, 16)]
+    for earlier, later in zip(phrase, phrase[1:]):
+        assert earlier <= later
+    assert len(phrase[0]) < len(phrase[-1])

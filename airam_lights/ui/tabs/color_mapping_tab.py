@@ -134,7 +134,7 @@ class ColorMappingTab(QWidget):
         )
         hsv_desc_label.setWordWrap(True)
         hsv_layout.addWidget(hsv_desc_label)
-        sub_tabs.addTab(hsv_widget, "HSV Music")
+        sub_tabs.insertTab(1, hsv_widget, "HSV Music")  # before Custom, as in the Visualizer tab
 
         # -- Beat Sync mode -----------------------------------------------------------
         beat_widget = QWidget()
@@ -490,7 +490,8 @@ class ColorMappingTab(QWidget):
 
         beat_layout.addWidget(self._build_sequencer_box(controller.config.sequencer))
 
-        sub_tabs.addTab(beat_widget, "Beat Sync")
+        # The beat modes are built after the others but shown first - Beat Sync is the main mode.
+        sub_tabs.insertTab(0, beat_widget, "Beat Sync")
 
         # -- Beat Sync White mode -------------------------------------------------------
         bsw_widget = QWidget()
@@ -579,7 +580,7 @@ class ColorMappingTab(QWidget):
         self.bsw_low_spin.valueChanged.connect(self._on_beat_white_changed)
         self.bsw_high_spin.valueChanged.connect(self._on_beat_white_changed)
 
-        sub_tabs.addTab(bsw_widget, "Beat Sync White")
+        sub_tabs.insertTab(1, bsw_widget, "Beat Sync White")
 
         # -- Peak Flash mode ------------------------------------------------------------
         peak_widget = QWidget()
@@ -696,7 +697,8 @@ class ColorMappingTab(QWidget):
         for spin in (self.peak_low_spin, self.peak_high_spin, self.peak_treble_low_spin, self.peak_treble_high_spin):
             spin.valueChanged.connect(self._on_peak_changed)
 
-        sub_tabs.addTab(peak_widget, "Peak Flash")
+        sub_tabs.insertTab(2, peak_widget, "Peak Flash")
+        sub_tabs.setCurrentIndex(0)
 
         # -- global ---------------------------------------------------------------------
         global_box = QGroupBox("Global")
@@ -896,7 +898,7 @@ class ColorMappingTab(QWidget):
 
         seq_controls = [
             self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo, self.seq_white_density_slider, self.seq_double_slider,
-            self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
+            self.seq_focus_slider, self.seq_build_slider, self.seq_repeat_checkbox, self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
             self.seq_phrase_combo, self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
             self.seq_dynamics_checkbox,
         ]
@@ -1289,6 +1291,21 @@ class ColorMappingTab(QWidget):
             tooltip="Chance a flash repeats in the same group an 8th later - a quick 'da-dam' in one "
             "spot among the walking flashes.",
         )
+        self.seq_focus_slider = FloatSlider(
+            "Accent focus", 0.0, 1.0, sq.white_accent_focus, decimals=2,
+            tooltip="Thins the white flashes the way a drummer accents: the lightest positions go first - "
+            "the 16ths between beats, then the 'ands', then beats 2 and 4, then beat 3 - and the downbeat "
+            "stays. 0 = every pattern step equally likely (only White density), 1 = a step keeps only "
+            "its weight's share: a 16th never flashes, an 'and' rarely, the downbeat always as often as "
+            "White density says. Calms busy patterns (sixteenths, gallop) without losing the pulse.",
+        )
+        self.seq_build_slider = FloatSlider(
+            "Phrase build", 0.0, 1.0, sq.white_build, decimals=2,
+            tooltip="The phrase starts sparse and fills in bar by bar toward its end - tension building "
+            "up to the fill and the phrase-start flash, like an arrangement does. Adds to Accent focus at "
+            "the phrase's first bar, fading out by its last bar. 0 = the same density all through the "
+            "phrase. Needs a phrase length of 2 bars or more.",
+        )
         self.seq_gap_slider = FloatSlider(
             "Min gap per lamp", 100.0, 1000.0, sq.min_group_gap_ms, decimals=0, suffix=" ms",
             tooltip="A lamp never starts two white flashes closer than this. Switching to white and "
@@ -1321,6 +1338,8 @@ class ColorMappingTab(QWidget):
         self.seq_dark_combo.currentTextChanged.connect(self._on_sequencer_changed)
         for w in (
             self.seq_white_density_slider,
+            self.seq_focus_slider,
+            self.seq_build_slider,
             self.seq_double_slider,
             self.seq_gap_slider,
             self.seq_dark_density_slider,
@@ -1328,6 +1347,18 @@ class ColorMappingTab(QWidget):
         ):
             w.valueChanged.connect(self._on_sequencer_changed)
             layout.addWidget(w)
+
+        self.seq_repeat_checkbox = QCheckBox("Repeat the groove (the same flashes in every bar of a phrase)")
+        self.seq_repeat_checkbox.setChecked(sq.white_repeat)
+        self.seq_repeat_checkbox.setToolTip(
+            "Which pattern steps flash (and which get a double) is decided once per phrase and repeated "
+            "in every bar, the way a drummer keeps a groove - so the eye can follow it. A new variation "
+            "comes with the next phrase. Off: every step is rolled anew, so the gaps jump around from "
+            "bar to bar - livelier, but restless. With Phrase build the groove grows bar by bar: "
+            "flashes are added, none taken away."
+        )
+        self.seq_repeat_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_repeat_checkbox)
 
         phrase_row = QHBoxLayout()
         phrase_row.addWidget(QLabel("Phrase length:"))
@@ -1502,6 +1533,9 @@ class ColorMappingTab(QWidget):
         sq.walk_positions = self.seq_walk_positions_combo.currentText()
         sq.white_density = self.seq_white_density_slider.value()
         sq.double_chance = self.seq_double_slider.value()
+        sq.white_accent_focus = self.seq_focus_slider.value()
+        sq.white_build = self.seq_build_slider.value()
+        sq.white_repeat = self.seq_repeat_checkbox.isChecked()
         sq.min_group_gap_ms = self.seq_gap_slider.value()
         sq.dark_pattern = self.seq_dark_combo.currentText()
         sq.dark_density = self.seq_dark_density_slider.value()

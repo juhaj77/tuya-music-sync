@@ -1123,6 +1123,20 @@ class PulseSequencerConfig:
     # position by position. Beat Sync's white_pulse_rotators applies here too.
     walk_positions: str = "groups"
     double_chance: float = 0.25  # chance a flash repeats in the same group an 8th later
+    # Thinning the white flashes the way a drummer would, from the light end
+    # of the metric hierarchy (see pulse_sequencer.metric_weight):
+    # white_accent_focus: 0 = every pattern step equally likely (just
+    # white_density), 1 = only the heavy ones stay - the 16ths go first, then
+    # the "ands", the other beats, the bar's middle beat; the downbeat stays.
+    # white_build: the phrase starts sparse and fills in toward its end (on
+    # top of white_accent_focus) - the tension builds up to the fill and the
+    # phrase-start flash. 0 = the same density all through the phrase.
+    # white_repeat: which steps flash (and which double) is decided once per
+    # phrase and repeated in every bar, like a groove, instead of rolled anew
+    # on every step - the variation comes with the next phrase.
+    white_accent_focus: float = 0.5
+    white_build: float = 0.5
+    white_repeat: bool = True
     min_group_gap_ms: float = 180.0  # a lamp never starts two white flashes closer than this
     dark_pattern: str = "auto"  # see pulse_sequencer.DARK_PATTERNS
     dark_density: float = 0.7  # chance each dark step actually happens

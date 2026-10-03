@@ -11,6 +11,11 @@ themselves. On top of that grid:
   off-beats, a 3-3-2 syncopation, a gallop, straight 16ths) and which get a
   dark pulse (a breath right before the downbeat, before the phrase, before
   the backbeats).
+- Thinning: the white flashes can be thinned out the way a drummer
+  would - the light 16ths first, the downbeat last (white_accent_focus),
+  sparser at the start of a phrase and filling in toward its end
+  (white_build), and with the choice of steps repeated bar after bar like
+  a groove instead of rolled anew every time (white_repeat).
 - Group walk: every white flash goes to the next lamp group (forward,
   ping-pong or random), so the white "dances" around the room; with
   `double_chance` a group sometimes gets a second flash an 8th later.
@@ -144,6 +149,23 @@ def flash_shape(reason: str, bar_step: int, steps_per_bar: int, intensity: float
     return brightness, attack, length, length
 
 
+def white_chance(
+    density: float, weight: float, focus: float, build: float, phrase_bar: int, phrase_bars: int
+) -> float:
+    """Chance a white pattern step at metric `weight` (see metric_weight)
+    actually flashes. `focus` 0..1 thins from the light end of the metric
+    hierarchy: at 1 a step keeps only its weight's share of `density`, so the
+    16ths drop out first and the downbeat stays. `build` 0..1 adds focus at
+    the start of a phrase, fading out bar by bar toward its last bar - the
+    phrase starts sparse and fills in, building up to the fill."""
+    focus = max(0.0, min(1.0, focus))
+    build = max(0.0, min(1.0, build))
+    if build > 0.0 and phrase_bars > 1:
+        remaining = 1.0 - phrase_bar / (phrase_bars - 1)
+        focus += build * (1.0 - focus) * remaining
+    return density * (1.0 - focus * (1.0 - weight))
+
+
 def strobe_steps(beats: float, steps_per_bar: int) -> int:
     """A strobe's length on the 16th grid: half a beat at least, the whole bar at most."""
     return max(STEPS_PER_BEAT // 2, min(max(1, steps_per_bar), int(round(beats * STEPS_PER_BEAT))))
@@ -235,6 +257,8 @@ class PulseSequencer:
         self._group_index = -1
         self._group_direction = 1
         self._pending_doubles: Dict[int, int] = {}  # absolute step -> group
+        # With white_repeat: this phrase's rolls, kept so every bar repeats them.
+        self._rolls: Dict[tuple, float] = {}
         # The 16ths [from, until) a strobe covers - no white flashes there.
         self._strobe_from_step = 0
         self._strobe_until_step = 0
@@ -306,6 +330,8 @@ class PulseSequencer:
         last_bar_of_phrase = self.phrase_bar == phrase_bars - 1
         phrase_start = self.phrase_bar == 0 and bar_step == 0
         in_fill = cfg.fills and last_bar_of_phrase and phrase_bars > 1 and bar_step >= steps_per_bar // 2
+        if phrase_start:
+            self._rolls.clear()  # a new phrase, a new variation of the groove
 
         # -- strobe (announced one 16th before it starts) ----------------------------
         strobe = self._strobe_for_step(step, steps_per_bar, phrase_bars)
@@ -321,7 +347,10 @@ class PulseSequencer:
                 white_reason = "phrase"
             elif in_fill and self._fill_step(bar_step, steps_per_bar):
                 white_reason = "fill"
-            elif bar_step in self._white_steps(steps_per_bar) and self._rng.random() < cfg.white_density:
+            elif bar_step in self._white_steps(steps_per_bar) and self._roll("white", bar_step) < white_chance(
+                cfg.white_density, metric_weight(bar_step, steps_per_bar), cfg.white_accent_focus,
+                cfg.white_build, self.phrase_bar, phrase_bars,
+            ):
                 white_reason = "pattern"
             if not white_reason and step in self._pending_doubles:
                 white_group = self._pending_doubles[step]
@@ -332,7 +361,7 @@ class PulseSequencer:
                 white_group = None
             elif white_reason != "double":
                 white_group = self._next_group(num_groups)
-                if white_reason == "pattern" and self._rng.random() < cfg.double_chance:
+                if white_reason == "pattern" and self._roll("double", bar_step) < cfg.double_chance:
                     self._pending_doubles[step + STEPS_PER_BEAT // 2] = white_group
             event = PulseEvent("white", white_group, 1.0, white_reason)
             if cfg.pulse_dynamics:
@@ -347,6 +376,16 @@ class PulseSequencer:
             if dark is not None and (dark.reason == "phrase" or self._rng.random() < cfg.dark_density):
                 events.append(dark)
         return events
+
+    def _roll(self, kind: str, bar_step: int) -> float:
+        """A random 0..1 for a decision at this step of the bar - with
+        white_repeat the same one in every bar of the phrase."""
+        if not self.config.white_repeat:
+            return self._rng.random()
+        key = (kind, bar_step)
+        if key not in self._rolls:
+            self._rolls[key] = self._rng.random()
+        return self._rolls[key]
 
     def _on_bar_start(self, bar: int) -> None:
         # A drop: the bar that just ended was clearly quiet, now it's clearly

@@ -176,6 +176,8 @@ def test_sequencer_walks_true_white_between_groups(monkeypatch):
         c.sequencer.enabled = True
         c.sequencer.white_pattern = "offbeats"
         c.sequencer.white_density = 1.0
+        c.sequencer.white_accent_focus = 0.0  # every pattern step
+        c.sequencer.white_build = 0.0
         c.sequencer.double_chance = 0.0
         c.sequencer.dark_pattern = "off"
         c.sequencer.phrase_accent = False
@@ -331,6 +333,8 @@ def test_sequencer_walks_the_chase_order_with_evenly_spaced_lamps(monkeypatch):
         c.sequencer.enabled = True
         c.sequencer.white_pattern = "beats"
         c.sequencer.white_density = 1.0
+        c.sequencer.white_accent_focus = 0.0  # every pattern step
+        c.sequencer.white_build = 0.0
         c.sequencer.double_chance = 0.0
         c.sequencer.dark_pattern = "off"
         c.sequencer.phrase_accent = False
@@ -412,6 +416,8 @@ def test_sequencer_white_flash_follows_attack_and_release(monkeypatch):
         c.sequencer.enabled = True
         c.sequencer.white_pattern = "downbeats"
         c.sequencer.white_density = 1.0
+        c.sequencer.white_accent_focus = 0.0  # every pattern step
+        c.sequencer.white_build = 0.0
         c.sequencer.double_chance = 0.0
         c.sequencer.dark_pattern = "off"
         c.sequencer.phrase_accent = False
@@ -446,6 +452,8 @@ def test_sequencer_downbeat_flash_outlasts_offbeat_flash(monkeypatch):
         c.sequencer.enabled = True
         c.sequencer.white_pattern = "beats"
         c.sequencer.white_density = 1.0
+        c.sequencer.white_accent_focus = 0.0  # every pattern step
+        c.sequencer.white_build = 0.0
         c.sequencer.double_chance = 0.0
         c.sequencer.dark_pattern = "off"
         c.sequencer.phrase_accent = False

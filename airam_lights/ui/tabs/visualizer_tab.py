@@ -22,13 +22,14 @@ from ..widgets.level_meter import LevelMeter
 from ..widgets.param_slider import FloatSlider
 from ..widgets.spectrum_widget import SpectrumWidget
 
+# Beat Sync first - it's the main mode - with the other beat-driven modes next to it.
 _MODES = [
+    ("beat_sync", "Beat Sync"),
+    ("beat_sync_white", "Beat Sync White"),
+    ("peak_flash", "Peak Flash"),
     ("rgb_freq", "RGB Frequency"),
     ("hsv_music", "HSV Music"),
     ("8band_spectrum", "8-Band Spectrum"),
-    ("beat_sync", "Beat Sync"),
-    ("peak_flash", "Peak Flash"),
-    ("beat_sync_white", "Beat Sync White"),
     ("custom", "Custom"),
 ]
 

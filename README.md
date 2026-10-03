@@ -124,9 +124,10 @@ to preview video files past a few MB, so they aren't committed directly into the
 - **100% local control** - WASAPI loopback audio (or a real microphone, if you want
   to test with room sound) + local Tuya LAN protocol, no cloud round-trip and no
   companion app needed once set up.
-- **Six color-mapping modes**: RGB Frequency, HSV Music, 8-Band Spectrum, Beat Sync
-  (see above - now with optional **dark pulses** and **white pulses**), Peak Flash, and
-  Beat Sync White - plus a Custom mode for arbitrary frequency ranges.
+- **Six color-mapping modes**: **Beat Sync** - the main mode, with the shared beat clock,
+  the pulse sequencer, optional **dark pulses** and **white pulses** - then Beat Sync
+  White, Peak Flash, RGB Frequency, HSV Music and 8-Band Spectrum, plus a Custom mode for
+  arbitrary frequency ranges.
 - **Per-lamp control**: band assignment, phase offset, and independent
   brightness/saturation/hue/sensitivity multipliers for every lamp.
 - **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
@@ -556,6 +557,16 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
 - **Group walk** - each white flash goes to the next lamp group (the Group Switch
   groups), so the white travels around the room; *Double chance* sometimes repeats a
   flash in the same group an 8th later.
+- **Thinning** - three ways to calm the white flashes down, the way a drummer would
+  rather than by random gaps:
+  - *Accent focus* drops the light positions first: the 16ths between beats, then the
+    "ands", then beats 2 and 4, then beat 3 - the downbeat stays. Busy patterns
+    (sixteenths, gallop) calm down without losing the pulse.
+  - *Phrase build* starts each phrase sparse and fills it in bar by bar toward the end,
+    so the tension builds up to the fill and the phrase-start flash.
+  - *Repeat the groove* decides which steps flash (and which double) once per phrase and
+    repeats it in every bar, so the eye can follow it; a new variation comes with the
+    next phrase. Off, every step is rolled anew and the gaps jump around from bar to bar.
 - **Dark pulses** - a breath on the last 16th before the downbeat (and before the
   backbeats, and fast stutters in fills when it's loud), with their own density and
   length.

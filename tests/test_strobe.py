@@ -156,6 +156,7 @@ def _seq_cfg(**kw):
     base = dict(
         enabled=True, white_pattern="sixteenths", white_density=1.0, group_walk="forward", double_chance=0.0,
         dark_pattern="off", phrase_bars=4, fills=False, phrase_accent=False, drop_detection=False,
+        white_accent_focus=0.0, white_build=0.0, white_repeat=False,
         strobe_enabled=True, strobe_placement="phrase", strobe_chance=1.0, strobe_min_gap_bars=1,
         strobe_min_level="calm", strobe_beats=1.0,
     )
