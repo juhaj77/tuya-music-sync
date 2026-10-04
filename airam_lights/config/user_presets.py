@@ -1,9 +1,11 @@
 """User-saved presets: snapshots of the full visualization setup.
 
 A preset captures the color mapping, the Chase and Group Switch overlays'
-global settings, the rhythm/sequencer settings AND each lamp's place in
-those overlays (chase order, chase dwell, Group Switch group) - all of it,
-so loading a preset later fully restores the look, not just the color mode.
+global settings, the rhythm/sequencer settings, the lamp command rate and
+transitions (how smooth fades and hue glides can look depends on them) AND
+each lamp's place in those overlays (chase order, chase dwell, Group Switch
+group) - all of it, so loading a preset later fully restores the look, not
+just the color mode.
 """
 from __future__ import annotations
 
@@ -12,10 +14,15 @@ from .schema import (
     ChaseEffectConfig,
     ColorMappingConfig,
     GroupSwitchEffectConfig,
+    NetworkConfig,
     PerLampEffect,
     PulseSequencerConfig,
     RhythmConfig,
 )
+
+# The network settings that shape the look; the rest of NetworkConfig is
+# about the connection, not the show.
+_NETWORK_KEYS = ("lamp_command_rate_hz", "lamp_transitions")
 
 # The per-lamp fields that define a lamp's place in Chase / Group Switch.
 _LAYOUT_DEFAULTS = {"chase_order": None, "chase_dwell_mult": 1.0, "effect_group": None}
@@ -28,6 +35,7 @@ def snapshot_preset(cfg: AppConfig) -> dict:
         "group_switch": cfg.group_switch.to_dict(),
         "rhythm": cfg.rhythm.to_dict(),
         "sequencer": cfg.sequencer.to_dict(),
+        "network": {key: getattr(cfg.network, key) for key in _NETWORK_KEYS},
         "per_lamp_layout": {
             device_id: {key: getattr(effect, key) for key in _LAYOUT_DEFAULTS}
             for device_id, effect in cfg.per_lamp_effects.items()
@@ -61,6 +69,10 @@ def apply_preset(cfg: AppConfig, data: dict) -> None:
         cfg.rhythm = RhythmConfig.from_dict(data["rhythm"])
     if "sequencer" in data:
         cfg.sequencer = PulseSequencerConfig.from_dict(data["sequencer"])
+    if "network" in data:
+        network = NetworkConfig.from_dict({**cfg.network.to_dict(), **data["network"]})
+        for key in _NETWORK_KEYS:
+            setattr(cfg.network, key, getattr(network, key))
 
     if "per_lamp_layout" in data:
         # The preset holds the whole layout: lamps it doesn't list were in

@@ -59,3 +59,29 @@ def test_old_preset_with_chase_orders_only_still_loads():
     apply_preset(cfg, old)
     assert cfg.per_lamp_effects["c"].chase_order == 4
     assert cfg.per_lamp_effects["b"].effect_group == 0  # untouched
+
+
+def test_preset_restores_command_rate_and_transitions_only():
+    cfg = _config()
+    cfg.network.lamp_command_rate_hz = 44.0
+    cfg.network.lamp_transitions = "smooth"
+    preset = snapshot_preset(cfg)
+
+    cfg.network.lamp_command_rate_hz = 10.0
+    cfg.network.lamp_transitions = "legacy"
+    cfg.network.command_timeout_s = 0.9
+    apply_preset(cfg, preset)
+
+    assert cfg.network.lamp_command_rate_hz == 44.0
+    assert cfg.network.lamp_transitions == "smooth"
+    # Connection settings aren't part of the look.
+    assert cfg.network.command_timeout_s == 0.9
+
+
+def test_preset_without_network_keeps_current_rate():
+    cfg = _config()
+    preset = snapshot_preset(cfg)
+    del preset["network"]
+    cfg.network.lamp_command_rate_hz = 33.0
+    apply_preset(cfg, preset)
+    assert cfg.network.lamp_command_rate_hz == 33.0
