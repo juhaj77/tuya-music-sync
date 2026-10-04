@@ -138,4 +138,5 @@ def test_white_with_colour_underneath_goes_out_in_one_command():
     worker = LampWorker(dev, NetworkConfig(lamp_transitions="direct"), 0.0)
     worker._send_white(WhiteTarget(brightness=0.5, temp=0.0, under=Color(0.0, 0.0, 0.5)))
     dp28 = [v for dp, v in dev._bulb.writes if dp == 28]
-    assert dp28 == ["000f003e801f601f40000"]  # blue at ~half (128/255) + white 500, warm
+    # Blue at exactly half (value 500 - not rounded through 8-bit RGB to 128/255 = 502) + white 500, warm.
+    assert dp28 == ["000f003e801f401f40000"]

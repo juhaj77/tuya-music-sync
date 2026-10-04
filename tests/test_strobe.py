@@ -594,3 +594,20 @@ def test_engine_hands_over_the_brightness_wave(monkeypatch):
         # The per-lamp white multiplier scales the whole wave.
         assert bursts["d"].brightness_at(3) == pytest.approx(0.5 * bursts["a"].brightness_at(3))
     assert AppConfig().sequencer.strobe_wave == "off"  # an option, not the default
+
+
+def test_strobe_also_plays_with_smooth_transitions(monkeypatch):
+    """"smooth" only softens small steps; a strobe's flashes still jump."""
+    device = _FakeDevice()
+    worker = _start_worker(device, "smooth")
+    try:
+        worker.start_strobe(StrobeBurst(time.perf_counter() + 0.03, 0.06, 0.03, 2, 0.5))
+        time.sleep(0.25)
+    finally:
+        _stop(worker)
+    assert [kind for _, kind, _ in device.sent] == ["white", "colour", "white", "colour"]
+
+    engine, clock, lamps = _make_engine(monkeypatch, transitions="smooth")
+    _run_engine(engine, clock, 12.0)
+    assert lamps.strobes
+    assert engine.trigger_strobe_test().startswith("Played")

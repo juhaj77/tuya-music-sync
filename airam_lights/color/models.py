@@ -39,6 +39,14 @@ class Color:
         c = self.clamped()
         return (round(c.r * 255), round(c.g * 255), round(c.b * 255))
 
+    def to_rgb255_exact(self) -> "tuple[float, float, float]":
+        """Like to_rgb255(), but not rounded to whole numbers - for the
+        bulbs' real-time control datapoint, which takes hue, saturation and
+        value in finer steps than 8-bit RGB can carry (rounding to 0..255
+        first makes the hue wobble by a degree or two at low brightness)."""
+        c = self.clamped()
+        return (c.r * 255.0, c.g * 255.0, c.b * 255.0)
+
     def to_hsv(self) -> "tuple[float, float, float]":
         """Returns (hue_deg 0..360, saturation 0..1, value 0..1)."""
         c = self.clamped()

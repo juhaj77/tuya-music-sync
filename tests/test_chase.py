@@ -691,3 +691,253 @@ def test_group_switch_fade_does_not_widen_the_white_pulse_target():
     animator = GroupSwitchAnimator(cfg)
     animator.position = 1.0
     assert animator.active_device_ids([["a"], ["b"], ["c"]]) == {"b"}
+
+
+# -- Group Switch: soft switch (switch_fade_ms) ---------------------------------------------
+
+
+def _switch_and_run(animator, groups, base, ticks, dt=0.02):
+    """Moves the active group on by one, then lets `ticks` frames pass; returns each frame's colors."""
+    animator.position = (animator.position + 1.0) % len(groups)
+    frames = []
+    for _ in range(ticks):
+        animator.tick(dt, len(groups), now_s=None)  # speed 0: the position stays where we put it
+        frames.append(animator.apply(dict(base), groups))
+    return frames
+
+
+def test_group_switch_soft_switch_is_off_by_default_and_survives_save_and_load():
+    assert GroupSwitchEffectConfig().switch_fade_ms == 0.0
+    cfg = GroupSwitchEffectConfig(enabled=True, switch_fade_ms=250.0)
+    assert GroupSwitchEffectConfig.from_dict(cfg.to_dict()).switch_fade_ms == 250.0
+    assert GroupSwitchEffectConfig.from_dict({}).switch_fade_ms == 0.0
+    assert GroupSwitchEffectConfig.from_dict({"switch_fade_ms": -5}).switch_fade_ms == 0.0
+
+
+def test_group_switch_without_soft_switch_still_jumps():
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0, speed_rotations_per_s=0.0)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups}
+    animator.tick(0.02, 3, now_s=None)
+    frames = _switch_and_run(animator, groups, base, 3)
+    for frame in frames:  # already there on the very first frame
+        assert frame["a"] == base["a"] and _same_hue(_hue(frame["b"]), 180.0) and frame["c"] == base["c"]
+
+
+def test_group_switch_soft_switch_glides_both_groups_instead_of_jumping():
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="complementary", intensity=1.0, speed_rotations_per_s=0.0, switch_fade_ms=200.0
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 0.4) for g in groups}
+    animator.tick(0.02, 3, now_s=None)  # settled: "a" is the active group
+    start = animator.apply(dict(base), groups)
+    assert _same_hue(_hue(start["a"]), 180.0) and start["b"] == base["b"]
+
+    frames = _switch_and_run(animator, groups, base, 100)  # 2 s: ten time constants
+    a_hues = [(_hue(f["a"]) - 0.0) % 360.0 for f in frames]  # the old group, on its way back to its own color
+    b_hues = [_hue(f["b"]) for f in frames]  # the new one, on its way to the opposite color
+    assert 150.0 < a_hues[0] < 180.0 and 0.0 < b_hues[0] < 30.0  # a small first step, not the whole way
+    assert all(x >= y - 1e-9 for x, y in zip(a_hues, a_hues[1:]))  # steadily back...
+    assert all(x <= y + 1e-9 for x, y in zip(b_hues, b_hues[1:]))  # ...and steadily there
+    assert max(abs(x - y) for x, y in zip(b_hues, b_hues[1:])) < 20.0  # no jump anywhere
+    # About two thirds of the way after one time constant (200 ms = 10 frames).
+    assert 100.0 < b_hues[9] < 125.0
+    # The brightness boost fades along with it.
+    assert 0.4 < frames[0]["b"].to_hsv()[2] < 0.5 and frames[-1]["b"].to_hsv()[2] == pytest.approx(0.8, abs=0.01)
+    # In the end exactly where a hard switch would have put them.
+    assert frames[-1]["a"] == base["a"] and _same_hue(_hue(frames[-1]["b"]), 180.0) and frames[-1]["c"] == base["c"]
+
+
+def test_group_switch_soft_switch_moves_the_whole_ramp_smoothly():
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="complementary", intensity=0.0, speed_rotations_per_s=0.0,
+        fade_across_groups=True, switch_fade_ms=150.0,
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups}
+    animator.position = 2.0
+    animator.tick(0.02, 3, now_s=None)  # settled: a 0, b 90, c 180
+    frames = _switch_and_run(animator, groups, base, 120)  # active group -> "a": a 180, b 0, c 90
+    for lamp in "abc":
+        hues = [(_hue(f[lamp]) + 1e-6) % 360.0 for f in frames]
+        assert max(abs(x - y) for x, y in zip(hues, hues[1:])) < 25.0, lamp
+    assert _hue(frames[-1]["a"]) == pytest.approx(180.0, abs=0.01)
+    assert _hue(frames[-1]["c"]) == pytest.approx(90.0, abs=0.01)
+    assert frames[-1]["b"] == base["b"]
+
+
+def test_group_switch_soft_switch_glides_the_hue_in_hue_shift_mode():
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="hue_shift", custom_hue_deg=0.0, custom_saturation=1.0, hue_shift_step_deg=90.0,
+        intensity=0.0, speed_rotations_per_s=0.0, fade_across_groups=True, switch_fade_ms=150.0,
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    base = {g[0]: Color.from_hsv(300.0, 1.0, 1.0) for g in groups}
+    animator.position = 1.0
+    animator.tick(0.02, 3, now_s=None)
+    assert _same_hue(_hue(animator.apply(dict(base), groups)["b"]), 90.0)  # the active group's hue: 0 + 1 * 90
+    frames = _switch_and_run(animator, groups, base, 120)  # active group -> "c", whose hue is 180
+    c_hues = [_hue(f["c"]) for f in frames]
+    assert max(abs(((x - y + 180.0) % 360.0) - 180.0) for x, y in zip(c_hues, c_hues[1:])) < 25.0
+    assert c_hues[-1] == pytest.approx(180.0, abs=0.01)
+
+
+def test_group_switch_in_between_color_does_not_flip_sides_as_the_lamps_own_hue_glides():
+    """A group halfway to a fixed custom color: when the lamp's own hue glides
+    past the point exactly opposite that color, the short way round changes
+    sides - the in-between color must keep going the way it was, not jump."""
+    cfg = GroupSwitchEffectConfig(
+        enabled=True, color_mode="custom", custom_hue_deg=0.0, custom_saturation=1.0, intensity=0.0,
+        fade_across_groups=True,
+    )
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a"], ["b"], ["c"]]
+    animator.position = 2.0  # "b" is the group halfway
+    hues = []
+    for step in range(120):  # the lamps' own hue glides from 120 to 240 degrees, through 180
+        own = 120.0 + step
+        out = animator.apply({g[0]: Color.from_hsv(own, 1.0, 1.0) for g in groups}, groups)
+        hues.append(_hue(out["b"]))
+    assert max(abs(((x - y + 180.0) % 360.0) - 180.0) for x, y in zip(hues, hues[1:])) < 2.0
+    # Once it has been the active group (or untouched), it starts from the short way again.
+    animator.position = 1.0
+    animator.apply({g[0]: Color.from_hsv(240.0, 1.0, 1.0) for g in groups}, groups)
+    animator.position = 2.0
+    out = animator.apply({g[0]: Color.from_hsv(240.0, 1.0, 1.0) for g in groups}, groups)
+    assert _same_hue(_hue(out["b"]), 300.0)  # halfway from 240 to 0, the short way (through 300)
+
+
+def test_group_switch_soft_switch_starts_clean_when_the_groups_change():
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0, switch_fade_ms=500.0,
+                                  speed_rotations_per_s=0.0)
+    animator = GroupSwitchAnimator(cfg)
+    base = {x: Color.from_hsv(0.0, 1.0, 1.0) for x in "abcd"}
+    animator.tick(0.02, 3, now_s=None)
+    animator.tick(0.02, 4, now_s=None)  # a lamp got a new group: 4 groups now
+    out = animator.apply(dict(base), [["a"], ["b"], ["c"], ["d"]])
+    assert _same_hue(_hue(out["a"]), 180.0) and out["b"] == base["b"]
+    animator.reset()
+    assert animator._amounts == [] and animator._shift_hue is None
+
+
+# -- Chase: in-between colors must not flip sides; soft steps -------------------------------
+
+
+def _max_hue_step(hues):
+    return max(abs(((b - a + 180.0) % 360.0) - 180.0) for a, b in zip(hues, hues[1:]))
+
+
+def test_chase_complementary_does_not_flicker_between_the_two_ways_round():
+    """A lamp near the highlight is part of the way to the opposite color.
+    Both ways round the hue circle are exactly as short there, and which one
+    floating-point rounding picked used to change from tick to tick - the
+    lamp flickered between two colors far apart whenever its own hue moved."""
+    cfg = ChaseEffectConfig(enabled=True, color_mode="complementary", width=3.5, intensity=0.0, falloff_curve="linear")
+    animator = ChaseAnimator(cfg)
+    groups = [[c] for c in "abcdefgh"]
+    animator.position = 0.0
+    hues = {lamp: [] for lamp in "abc"}
+    for step in range(2000):  # the lamps' own hue glides slowly
+        own = 100.0 + step * 0.05
+        out = animator.apply({g[0]: Color.from_hsv(own, 1.0, 1.0) for g in groups}, groups)
+        for lamp in hues:
+            hues[lamp].append(out[lamp].to_hsv()[0])
+    for lamp, series in hues.items():
+        assert _max_hue_step(series) < 1.0, lamp
+    # The highlight itself is still exactly the opposite color.
+    assert _same_hue(hues["a"][0], 280.0)
+
+
+def test_chase_in_between_color_does_not_flip_sides_at_the_opposite_point():
+    cfg = ChaseEffectConfig(
+        enabled=True, color_mode="custom", custom_hue_deg=0.0, custom_saturation=1.0, width=3.5, intensity=0.0
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [[c] for c in "abcdefgh"]
+    animator.position = 0.0
+    series = []
+    for step in range(120):  # own hue glides from 120 to 240, through the point opposite the custom hue
+        out = animator.apply({g[0]: Color.from_hsv(120.0 + step, 1.0, 1.0) for g in groups}, groups)
+        series.append(out["c"].to_hsv()[0])
+    assert _max_hue_step(series) < 2.0
+
+
+def test_chase_soft_steps_are_off_by_default_and_survive_save_and_load():
+    assert ChaseEffectConfig().switch_fade is False and ChaseEffectConfig().switch_fade_ms == 200.0
+    cfg = ChaseEffectConfig(enabled=True, switch_fade=True, switch_fade_ms=350.0)
+    loaded = ChaseEffectConfig.from_dict(cfg.to_dict())
+    assert loaded.switch_fade is True and loaded.switch_fade_ms == 350.0
+    assert ChaseEffectConfig.from_dict({}).switch_fade is False  # settings from an older version
+
+
+def _step_highlight_and_run(animator, groups, base, to_position, ticks, dt=0.02):
+    animator.position = to_position  # the highlight steps on (as it does on a beat)
+    frames = []
+    for _ in range(ticks):
+        animator.tick(dt, len(groups))  # speed 0: it stays where it stepped to
+        frames.append(animator.apply(dict(base), groups))
+    return frames
+
+
+def test_chase_without_soft_steps_still_jumps():
+    cfg = ChaseEffectConfig(enabled=True, color_mode="complementary", width=1.0, intensity=0.0, speed_rotations_per_s=0.0)
+    animator = ChaseAnimator(cfg)
+    groups = [[c] for c in "abcd"]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 1.0) for g in groups}
+    animator.tick(0.02, 4)
+    frames = _step_highlight_and_run(animator, groups, base, 1.0, 3)
+    for frame in frames:  # there on the very first frame
+        assert frame["a"] == base["a"] and _same_hue(_hue(frame["b"]), 180.0)
+
+
+def test_chase_soft_steps_fade_each_lamp_to_its_new_color():
+    cfg = ChaseEffectConfig(
+        enabled=True, color_mode="complementary", width=1.0, intensity=1.0, speed_rotations_per_s=0.0,
+        switch_fade=True, switch_fade_ms=200.0,
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [[c] for c in "abcd"]
+    base = {g[0]: Color.from_hsv(0.0, 1.0, 0.4) for g in groups}
+    animator.tick(0.02, 4)  # settled with the highlight on "a"
+    assert _same_hue(_hue(animator.apply(dict(base), groups)["a"]), 180.0)
+
+    frames = _step_highlight_and_run(animator, groups, base, 1.0, 100)  # 2 s: ten time constants
+    a_hues = [_hue(f["a"]) for f in frames]  # the lamp the highlight left
+    b_hues = [_hue(f["b"]) for f in frames]  # the lamp it arrived on
+    assert 150.0 < a_hues[0] < 180.0 and 0.0 < b_hues[0] < 30.0  # a small first step each
+    assert _max_hue_step(a_hues) < 20.0 and _max_hue_step(b_hues) < 20.0  # no jump anywhere
+    assert all(x <= y + 1e-9 for x, y in zip(b_hues, b_hues[1:]))
+    assert 100.0 < b_hues[9] < 125.0  # about two thirds of the way after one time constant
+    # The brightness boost fades along, and it ends exactly where a hard step would have put it.
+    assert 0.4 < frames[0]["b"].to_hsv()[2] < 0.5 and frames[-1]["b"].to_hsv()[2] == pytest.approx(0.8, abs=0.01)
+    assert frames[-1]["a"] == base["a"] and _hue(frames[-1]["b"]) == pytest.approx(180.0, abs=0.01)
+    assert frames[-1]["c"] == base["c"] and frames[-1]["d"] == base["d"]
+
+
+def test_chase_soft_steps_work_with_a_fixed_color_and_start_clean():
+    cfg = ChaseEffectConfig(
+        enabled=True, color_mode="custom", custom_hue_deg=200.0, custom_saturation=0.5, width=1.0, intensity=0.0,
+        speed_rotations_per_s=0.0, switch_fade=True, switch_fade_ms=100.0,
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [[c] for c in "abcd"]
+    base = {g[0]: Color.from_hsv(40.0, 1.0, 1.0) for g in groups}
+    animator.tick(0.02, 4)
+    frames = _step_highlight_and_run(animator, groups, base, 2.0, 80)
+    c_hues = [_hue(f["c"]) for f in frames]
+    assert _max_hue_step(c_hues) < 35.0
+    assert c_hues[-1] == pytest.approx(200.0, abs=0.01) and frames[-1]["c"].to_hsv()[1] == pytest.approx(0.5, abs=0.01)
+    # A different number of positions (a lamp got a chase order) starts from scratch, not from stale state.
+    animator.tick(0.02, 3)
+    assert len(animator._weights) == 3
+    animator.reset()
+    assert animator._weights == [] and animator._hue_deltas == {}
+    # Switched off again: no state is kept, and apply() goes back to the plain weights.
+    cfg.switch_fade = False
+    animator.tick(0.02, 4)
+    assert animator._weights == []

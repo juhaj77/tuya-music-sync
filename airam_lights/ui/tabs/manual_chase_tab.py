@@ -130,6 +130,24 @@ class ManualChaseTab(QWidget):
             )
         )
 
+        self.switch_fade_checkbox = QCheckBox("Soft steps (fade each lamp's color change as the highlight moves)")
+        self.switch_fade_checkbox.setChecked(ch.switch_fade)
+        self.switch_fade_checkbox.setToolTip(
+            "With only a handful of lamps each lamp's color changes in visible jumps as the highlight "
+            "moves on, whatever the width and falloff curve. On: every lamp's color fades to its new "
+            "value over the Switch fade time below instead."
+        )
+        self.switch_fade_checkbox.toggled.connect(self._on_changed)
+        layout.addWidget(self.switch_fade_checkbox)
+        self.switch_fade_slider = FloatSlider(
+            "Switch fade", 20.0, 1000.0, ch.switch_fade_ms, decimals=0, suffix=" ms",
+            tooltip="How long each lamp takes to fade to its new color when the highlight moves (with Soft "
+            "steps on). Longer = softer, with a longer trail.",
+        )
+        self.switch_fade_slider.setEnabled(ch.switch_fade)
+        self.switch_fade_slider.valueChanged.connect(self._on_changed)
+        layout.addWidget(self.switch_fade_slider)
+
         color_row = QHBoxLayout()
         color_row.addWidget(QLabel("Chase color:"))
         self.color_mode_combo = QComboBox()
@@ -218,6 +236,9 @@ class ManualChaseTab(QWidget):
         ch.intensity = self.intensity_slider.value()
         ch.reverse = self.reverse_checkbox.isChecked()
         ch.falloff_curve = self.falloff_curve_combo.currentText()
+        ch.switch_fade = self.switch_fade_checkbox.isChecked()
+        ch.switch_fade_ms = self.switch_fade_slider.value()
+        self.switch_fade_slider.setEnabled(ch.switch_fade)
         ch.color_mode = self.color_mode_combo.currentText()
         ch.custom_hue_deg = self.hue_slider.value()
         ch.custom_saturation = self.sat_slider.value()

@@ -790,6 +790,14 @@ class ChaseEffectConfig:
     # from custom_hue_deg), so the traveling light's own color gradually
     # cycles through the spectrum as it moves around the loop.
     hue_shift_step_deg: float = 45.0
+    # Soft steps: with only a handful of lamps the highlight can't really
+    # glide - whatever the width and falloff curve, each lamp's color changes
+    # in visible jumps as the highlight moves on (and outright jumps when it
+    # steps on a beat). On: every lamp's share of the highlight color fades
+    # to its new value over about `switch_fade_ms` (a time constant, like
+    # Group Switch's switch fade and Beat Sync's hue snap speed) instead.
+    switch_fade: bool = False
+    switch_fade_ms: float = 200.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -830,6 +838,8 @@ class ChaseEffectConfig:
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
             custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
             custom_saturation=float(d.get("custom_saturation", 1.0)),
+            switch_fade=bool(d.get("switch_fade", False)),
+            switch_fade_ms=max(0.0, float(d.get("switch_fade_ms", 200.0))),
         )
 
 
@@ -898,6 +908,11 @@ class GroupSwitchEffectConfig:
     # ramp moves along as the active group advances. (With 2 groups there
     # is nothing in between, so it looks the same as off.)
     fade_across_groups: bool = False
+    # 0: the switch from one active group to the next is a hard step. Above
+    # 0: a soft one - when the active group moves on, every group's color
+    # glides to its new place over about this long (a time constant, like
+    # Beat Sync's hue snap speed) instead of jumping.
+    switch_fade_ms: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -930,6 +945,7 @@ class GroupSwitchEffectConfig:
             custom_saturation=float(d.get("custom_saturation", 1.0)),
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
             fade_across_groups=bool(d.get("fade_across_groups", False)),
+            switch_fade_ms=max(0.0, float(d.get("switch_fade_ms", 0.0))),
         )
 
 
@@ -1245,7 +1261,9 @@ class AudioConfig:
 # Network / lamp command pacing
 # ---------------------------------------------------------------------------
 
-LAMP_TRANSITIONS = ("direct", "gradient", "legacy")
+LAMP_TRANSITIONS = ("direct", "smooth", "gradient", "legacy")
+# The ones where a change can land instantly (what e.g. the strobe needs).
+INSTANT_TRANSITIONS = ("direct", "smooth")
 
 
 @dataclass
@@ -1259,11 +1277,16 @@ class NetworkConfig:
     # real-time control datapoint (DP 28, control_data) in its "jump" mode -
     # changes land instantly, and white flashes use the white LEDs without
     # switching work_mode. "gradient": the same datapoint with the bulb's own
-    # short (~0.25 s) fade. "legacy": the persistent colour datapoint (DP 24)
+    # short (~0.25 s) fade. "smooth": both, chosen per command - a big change
+    # (a beat's flash, a white flash lighting up, a strobe) jumps like
+    # "direct", a small one (a step of a fade or a hue glide) uses the bulb's
+    # own fade, so the bulb itself fills in between the steps the command
+    # rate can deliver (see LampWorker._step_transition). "legacy": the
+    # persistent colour datapoint (DP 24)
     # and work_mode switching for white, as in earlier builds - the bulb then
     # fades every change over ~0.7 s. Measured on the Airam PAR16 bulbs; bulbs
     # without the v2 datapoint layout always use "legacy".
-    lamp_transitions: str = "direct"  # "direct" | "gradient" | "legacy"
+    lamp_transitions: str = "direct"  # "direct" | "smooth" | "gradient" | "legacy"
 
     def to_dict(self) -> dict:
         return asdict(self)

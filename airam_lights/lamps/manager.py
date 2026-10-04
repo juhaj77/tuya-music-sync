@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from typing import Callable, Deque, Dict, List, Optional, Tuple
 
 from ..color.models import Color, StrobeBurst, WhiteTarget
-from ..config.schema import DeviceConfig, NetworkConfig
+from ..config.schema import INSTANT_TRANSITIONS, DeviceConfig, NetworkConfig
 from . import cloud_keys
 from .discovery import DiscoveredDevice, find_device_address, scan_network
 from .tuya_device import KEY_CODES, UNREACHABLE_CODES, LampDevice, parse_reported_state, reported_matches
@@ -93,6 +93,13 @@ _SENT_LOG_S = 60.0  # how much send history to keep, for the diagnostics report
 # before the show, and switching it off and on at the wall brings that back.
 # The stuck check can't see DP 28 sends, so in that mode it simply never
 # fires (no bulb has got stuck on DP 28 so far); it still runs for "legacy".
+
+
+# lamp_transitions "smooth": a command that changes the lamp by at most this
+# much (the largest step of any colour channel or of the white brightness,
+# 0..1) is sent with the bulb's own short fade instead of as a jump - see
+# LampWorker._step_transition().
+_SMOOTH_MAX_STEP = 0.2
 
 
 @dataclass
@@ -296,7 +303,7 @@ class LampWorker(threading.Thread):
 
     def _strobe_allowed(self) -> bool:
         return (
-            self.network_cfg.lamp_transitions == "direct"
+            self.network_cfg.lamp_transitions in INSTANT_TRANSITIONS
             and not self.dormant
             and self._consecutive_failures == 0
             and self._uses_control_dp()
@@ -319,7 +326,7 @@ class LampWorker(threading.Thread):
         if color is None:
             color = self._last_sent_color or Color.black()
         try:
-            rgb = color.to_rgb255()
+            rgb = color.to_rgb255_exact()
             if on:
                 self.device.set_white(
                     burst.brightness_at(index) * 100.0, burst.temp * 100.0, wait_for_ack=False,
@@ -617,12 +624,49 @@ class LampWorker(threading.Thread):
         check = getattr(self.device, "uses_control_dp", None)
         return bool(check and check(self.network_cfg.lamp_transitions))
 
+    def _step_transition(self, color: Optional[Color], white_brightness: float) -> str:
+        """Which way the next command on the real-time control datapoint
+        changes the lamp. Normally just the lamp_transitions setting. With
+        "smooth" it's chosen per command, by how far the command moves the
+        lamp from what it was last sent:
+
+        - a big step (a beat's flash, a dark pulse cutting in), the white
+          LEDs getting brighter (a white flash lighting up), or the first
+          command at all: "direct" - it lands at once, so hits stay crisp;
+        - a small step (one step of a brightness fade, a hue snap or glide,
+          a white flash fading out): "gradient" - the bulb's own short fade.
+          The next small step arrives long before that fade is over, so the
+          bulb keeps gliding from step to step and fills in between what
+          the command rate can deliver, instead of showing each command as
+          a visible jump.
+
+        `color`: the colour about to be shown (None = the RGB LEDs off);
+        `white_brightness`: the white LEDs' level, 0 for a plain colour."""
+        mode = self.network_cfg.lamp_transitions
+        if mode != "smooth":
+            return mode
+        if self._last_sent_white is not None:
+            previous_color, previous_white = self._last_sent_white.under, self._last_sent_white.brightness
+        elif self._last_sent_color is not None:
+            previous_color, previous_white = self._last_sent_color, 0.0
+        else:
+            return "direct"
+        if white_brightness > previous_white + 1e-6:
+            return "direct"
+        step = max(
+            (color or Color.black()).distance(previous_color or Color.black()),
+            previous_white - white_brightness,
+        )
+        return "gradient" if step <= _SMOOTH_MAX_STEP else "direct"
+
     def _send_color(self, color: Color) -> None:
         try:
             r, g, b = color.to_rgb255()
             if self._uses_control_dp():
-                # DP 28 only - see the DP 28 note next to _STUCK_CHECKS.
-                self.device.set_color(r, g, b, wait_for_ack=False, transition=self.network_cfg.lamp_transitions)
+                # DP 28 only - see the DP 28 note next to _STUCK_CHECKS. Unrounded:
+                # it takes finer steps than 8-bit RGB (see Color.to_rgb255_exact).
+                r, g, b = color.to_rgb255_exact()
+                self.device.set_color(r, g, b, wait_for_ack=False, transition=self._step_transition(color, 0.0))
                 self._log_send("colour", color.to_hsv(), reported=False)
             else:
                 if not self._colour_mode_ensured:
@@ -644,8 +688,8 @@ class LampWorker(threading.Thread):
                 # there and back, so one command per flash instead of 4-5.
                 self.device.set_white(
                     target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False,
-                    transition=self.network_cfg.lamp_transitions,
-                    under_rgb=target.under.to_rgb255() if target.under is not None else None,
+                    transition=self._step_transition(target.under, target.brightness),
+                    under_rgb=target.under.to_rgb255_exact() if target.under is not None else None,
                 )
                 self._log_send("white", None, reported=False)
             else:

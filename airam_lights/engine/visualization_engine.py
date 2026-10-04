@@ -34,8 +34,8 @@ import numpy as np
 
 from ..audio.capture import AudioCapture
 from ..color.mapping import ColorMappingEngine, apply_per_lamp_effect
-from ..color.models import Color, StrobeBurst, WhiteTarget, clip, lerp
-from ..config.schema import AppConfig
+from ..color.models import Color, StrobeBurst, WhiteTarget, circular_lerp_deg, clip, lerp
+from ..config.schema import INSTANT_TRANSITIONS, AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energies, band_energy, spectral_centroid_hz, spectral_contrast
 from ..dsp.beat_clock import BeatClock, ClockBeat, beat_divides
@@ -105,10 +105,17 @@ _SEQ_WHITE_GAP_TOLERANCE_S = 0.15
 
 class TimeSeriesBuffer:
     """Small history of (timestamp, vector) samples, used to implement the
-    optional per-lamp temporal/phase offset via linear interpolation."""
+    optional per-lamp temporal/phase offset via linear interpolation.
 
-    def __init__(self, max_age_s: float = 2.0):
+    `circular_index`: the element of the vector that is a hue (degrees,
+    wrapping at 360), if any. It's interpolated the short way round - a
+    plain linear blend between 358 and 2 would give 180, a flash of the
+    opposite colour whenever a hue fade crosses red on a lamp with a phase
+    offset."""
+
+    def __init__(self, max_age_s: float = 2.0, circular_index: Optional[int] = None):
         self.max_age_s = max_age_s
+        self.circular_index = circular_index
         self._entries: Deque[Tuple[float, np.ndarray]] = collections.deque()
 
     def push(self, t: float, values: np.ndarray) -> None:
@@ -132,7 +139,11 @@ class TimeSeriesBuffer:
                 if t2 <= t1:
                     return v2
                 frac = (t - t1) / (t2 - t1)
-                return v1 + (v2 - v1) * frac
+                value = v1 + (v2 - v1) * frac
+                if self.circular_index is not None:
+                    i = self.circular_index
+                    value[i] = circular_lerp_deg(float(v1[i]), float(v2[i]), frac)
+                return value
             prev = entry
         return self._entries[-1][1]
 
@@ -157,8 +168,8 @@ class VisualizationEngine:
 
         self._history_3 = TimeSeriesBuffer()
         self._history_8 = TimeSeriesBuffer()
-        self._history_beat = TimeSeriesBuffer()
-        self._history_peak = TimeSeriesBuffer()
+        self._history_beat = TimeSeriesBuffer(circular_index=0)  # [hue, value, saturation]
+        self._history_peak = TimeSeriesBuffer(circular_index=0)  # [hue, value, saturation]
 
         bs = config.color_mapping.beat_sync
         self._beat_detector = BeatDetector(
@@ -268,6 +279,8 @@ class VisualizationEngine:
         # events are timed against, the burst the lamps are playing (None
         # once it's over) and the last one's rate, for display.
         self._seq_position: Optional[float] = None
+        # Per lamp mid white flash: how far into it (see _under_white).
+        self._under_white_fraction: Dict[str, float] = {}
         self._strobe_burst: Optional[StrobeBurst] = None
         self.last_strobe: Optional[dict] = None
         self._perf_now = 0.0  # time.perf_counter() of the current visual tick
@@ -444,6 +457,7 @@ class VisualizationEngine:
 
         mode = self.config.color_mapping.mode
         self._beat_sync_white_targets = {}  # only _tick_beat_sync_mode ever (re-)populates this
+        self._under_white_fraction = {}
         self._white_targets_preselected = False
         self._tick_beat_clock(frame, wall_now, mode)
 
@@ -483,6 +497,8 @@ class VisualizationEngine:
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
+        if self._beat_sync_white_targets and (self.config.chase.enabled or self.config.group_switch.enabled):
+            self._recolor_under_white(colors)
         self._restrict_white_targets_to_moving_lamps(selected_ids)
 
         if self._beat_sync_white_targets:
@@ -910,13 +926,13 @@ class VisualizationEngine:
                 white_targets[device_id] = WhiteTarget(
                     brightness=cfg.white_pulse_white_brightness * level * white_mult,
                     temp=self._seq_white_temp.get(device_id, 1.0),
-                    under=self._under_white(color, level / peak if peak > 0.0 else 1.0),
+                    under=self._under_white(color, level / peak if peak > 0.0 else 1.0, device_id),
                 ).clamped()
             elif shared_white_target is not None:
                 white_targets[device_id] = WhiteTarget(
                     brightness=shared_white_target.brightness * white_mult,
                     temp=shared_white_target.temp,
-                    under=self._under_white(color, white_amount),
+                    under=self._under_white(color, white_amount, device_id),
                 ).clamped()
         if self._strobe_running():
             # The strobe has the white LEDs to itself while it runs (see
@@ -926,16 +942,37 @@ class VisualizationEngine:
         self._white_targets_preselected = self._sequencing
         return colors
 
-    def _under_white(self, color: Color, fraction: float) -> Optional[Color]:
+    def _under_white(self, color: Color, fraction: float, device_id: Optional[str] = None) -> Optional[Color]:
         """The colour kept under a white flash `fraction` (0..1) of the way in:
         a crossfade - the colour dims as the white swells and comes back as it
         fades, so the lamp never drops to dark in between. Only with instant
         transitions (DP 28 shows colour and white at once); with "legacy" the
-        bulb's WHITE work_mode shows no colour at all."""
+        bulb's WHITE work_mode shows no colour at all.
+
+        `device_id`: remembers the fraction for that lamp, so the colour can
+        be redone once the overlays have had their say (_recolor_under_white)."""
         if self.config.network.lamp_transitions == "legacy":
             return None
         keep = 1.0 - clip(fraction)
+        if device_id is not None:
+            self._under_white_fraction[device_id] = fraction
         return Color(color.r * keep, color.g * keep, color.b * keep)
+
+    def _recolor_under_white(self, colors: Dict[str, Color]) -> None:
+        """The colour under each white flash, taken from the lamp's FINAL
+        colour. The flashes are set up before the Chase / Group Switch
+        overlays run, from the colour the mode itself computed - so a lamp an
+        overlay had recoloured (say, to the opposite hue) showed its
+        un-overlaid colour for as long as a white flash lasted, and jumped
+        back when it ended: a hue flicker on every flash, most visible in the
+        long, dim tail of a phrase-start flash."""
+        for device_id, target in list(self._beat_sync_white_targets.items()):
+            fraction = self._under_white_fraction.get(device_id)
+            if target.under is None or fraction is None or device_id not in colors:
+                continue
+            self._beat_sync_white_targets[device_id] = WhiteTarget(
+                target.brightness, target.temp, self._under_white(colors[device_id], fraction)
+            )
 
     # -- pulse sequencer ------------------------------------------------------------------
 
@@ -1005,12 +1042,12 @@ class VisualizationEngine:
         own times (LampWorker._run_strobe) - not through the per-tick
         targets, which couldn't keep the lamps together or the rhythm even.
 
-        Only with lamp_transitions "direct" (white and colour at once, no
-        fade). The rate is a subdivision of the beat under the strobe's Max
+        Only with lamp_transitions "direct" or "smooth" (white and colour at
+        once, landing instantly). The rate is a subdivision of the beat under the strobe's Max
         rate and the lamp command rate (see pulse_sequencer.strobe_plan);
         when none fits, nothing is played."""
         net, sq = self.config.network, self.config.sequencer
-        if net.lamp_transitions != "direct" or not selected_ids:
+        if net.lamp_transitions not in INSTANT_TRANSITIONS or not selected_ids:
             return None
         plan = strobe_plan(beat_period_s, beats, sq.strobe_max_hz, sq.strobe_duty, net.lamp_command_rate_hz)
         if plan is None:
@@ -1036,8 +1073,8 @@ class VisualizationEngine:
         button next to the strobe settings), at the clock's tempo - or as if
         at 120 BPM while it has none. Returns a line saying what happened."""
         sq = self.config.sequencer
-        if self.config.network.lamp_transitions != "direct":
-            return "Not played: Lamp transitions (Global box) isn't 'direct'."
+        if self.config.network.lamp_transitions not in INSTANT_TRANSITIONS:
+            return "Not played: Lamp transitions (Global box) isn't 'direct' or 'smooth'."
         selected_ids = self.lamp_manager.selected_device_ids()
         if not selected_ids:
             return "Not played: no lamps are selected."

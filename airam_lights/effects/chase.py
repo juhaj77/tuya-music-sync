@@ -14,6 +14,7 @@ from ..color.models import Color, WhiteTarget, circular_lerp_deg, clip, lerp
 from ..config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
 from ..dsp.beat_clock import ClockBeat, beat_divides
 from ..dsp.beat_detector import BeatDetector
+from ..dsp.smoothing import _alpha_for
 
 
 def _smoothstep(t: float) -> float:
@@ -35,6 +36,27 @@ def _falloff_weight(dist: float, width: float, curve: str) -> float:
     if curve == "bezier":
         return _smoothstep(linear_weight)
     return linear_weight
+
+
+def _hue_part_way(h_base: float, target_hue: float, amount: float, deltas: Dict[str, float], key: str) -> float:
+    """The hue `amount` (0..1) of the way from a lamp's own hue to a target
+    hue: the short way round the circle - but once on its way, the same way
+    round for as long as this lamp stays in between (`deltas` remembers it
+    per lamp; drop the entry when the lamp is back at 0 or at the full
+    target). Otherwise its color would jump to the other side of the circle
+    the moment its own hue and the target (both can be moving: a hue glide,
+    a hue snap, a soft switch) pass through being exactly opposite.
+
+    NOT for a target that is by definition exactly opposite
+    ("complementary": own hue + 180): there both ways round are equally
+    short and floating-point rounding picks one at random, tick by tick -
+    use `(h_base + 180 * amount) % 360` for that instead."""
+    delta = ((target_hue - h_base + 180.0) % 360.0) - 180.0
+    previous = deltas.get(key)
+    if previous is not None:
+        delta += 360.0 * round((previous - delta) / 360.0)
+    deltas[key] = delta
+    return (h_base + delta * amount) % 360.0
 
 
 def _swept_min_distance(target: float, start: float, end: float, n: float) -> float:
@@ -172,6 +194,13 @@ class ChaseAnimator:
             min_interval_ms=config.peak_min_interval_ms,
             min_energy=config.peak_min_energy,
         )
+        # Soft steps (config.switch_fade): each position's current share of
+        # the highlight, on its way to where the highlight now puts it (see
+        # _smooth()). Empty = nothing to continue from.
+        self._weights: List[float] = []
+        # Per lamp, while it is part of the way to the highlight color: which
+        # way round the hue circle that way goes - see _hue_part_way().
+        self._hue_deltas: Dict[str, float] = {}
 
     @property
     def position(self) -> float:
@@ -202,6 +231,43 @@ class ChaseAnimator:
         self.position = 0.0
         self._beat_detector.reset()
         self._peak_detector.reset()
+        self._weights = []
+        self._hue_deltas = {}
+
+    def _target_weights(self, n: int) -> List[float]:
+        """How much of the highlight each of the `n` positions gets right
+        now, 0..1: the falloff around each rotator, measured against the arc
+        it swept during the last tick (so a fast highlight can't jump over a
+        lamp without touching it)."""
+        cfg = self.config
+        num_rotators = max(1, int(cfg.num_rotators))
+        spacing = n / num_rotators
+        sweeps = [(self._sweep_start + k * spacing, self._sweep_end + k * spacing) for k in range(num_rotators)]
+        weights = []
+        for i in range(n):
+            weight = 0.0
+            for start, end in sweeps:
+                w = _falloff_weight(_swept_min_distance(float(i), start, end, n), cfg.width, cfg.falloff_curve)
+                if w > weight:
+                    weight = w
+            weights.append(weight)
+        return weights
+
+    def _smooth(self, dt: float, n: int) -> None:
+        """Soft steps: instead of taking its new share of the highlight at
+        once, each position moves a fraction of the way there every tick -
+        the same exponential approach as Group Switch's switch fade. With it
+        off (or nothing to continue from) there is no state to keep."""
+        cfg = self.config
+        if not cfg.switch_fade or cfg.switch_fade_ms <= 0.0:
+            self._weights = []
+            return
+        targets = self._target_weights(n)
+        if len(self._weights) != n:
+            self._weights = targets
+            return
+        alpha = _alpha_for(cfg.switch_fade_ms, dt)
+        self._weights = [weight + (target - weight) * alpha for weight, target in zip(self._weights, targets)]
 
     def tick(
         self,
@@ -273,6 +339,7 @@ class ChaseAnimator:
         self._sweep_start = self._position
         self._sweep_end = self._position + delta
         self._position = self._sweep_end % n  # bypass the setter: keep the sweep just computed
+        self._smooth(dt, n)
 
     def active_device_ids(self, groups: List[List[str]]) -> Set[str]:
         """The lamps the highlight is currently on: for each rotator, the
@@ -301,21 +368,18 @@ class ChaseAnimator:
             return colors
 
         cfg = self.config
-        num_rotators = max(1, int(cfg.num_rotators))
-        spacing = n / num_rotators
-        rotator_sweeps = [
-            (self._sweep_start + k * spacing, self._sweep_end + k * spacing) for k in range(num_rotators)
-        ]
+        # Mid soft step (see _smooth()) the positions are between two places.
+        soft = cfg.switch_fade and cfg.switch_fade_ms > 0.0 and len(self._weights) == n
+        weights = self._weights if soft else self._target_weights(n)
 
         result = dict(colors)
         for i, group in enumerate(groups):
-            weight = 0.0
-            for start, end in rotator_sweeps:
-                dist = _swept_min_distance(float(i), start, end, n)
-                w = _falloff_weight(dist, cfg.width, cfg.falloff_curve)
-                if w > weight:
-                    weight = w
-            if weight <= 0.0:
+            weight = weights[i]
+            if weight >= 0.999:
+                weight = 1.0
+            if weight <= (0.001 if soft else 0.0):
+                for device_id in group:
+                    self._hue_deltas.pop(device_id, None)
                 continue
 
             for device_id in group:
@@ -335,7 +399,15 @@ class ChaseAnimator:
                     target_hue = cfg.custom_hue_deg
                     target_sat = cfg.custom_saturation
 
-                h_out = circular_lerp_deg(h_base, target_hue, weight)
+                if cfg.color_mode == "complementary":
+                    # Exactly opposite: both ways round are equally short, so
+                    # always go the same way - see _hue_part_way().
+                    h_out = (h_base + 180.0 * weight) % 360.0
+                elif weight == 1.0:
+                    self._hue_deltas.pop(device_id, None)
+                    h_out = target_hue
+                else:
+                    h_out = _hue_part_way(h_base, target_hue, weight, self._hue_deltas, device_id)
                 s_out = lerp(s_base, target_sat, weight)
                 v_out = clip(v_base * (1.0 + weight * cfg.intensity))
 
@@ -433,7 +505,10 @@ class GroupSwitchAnimator:
     With `fade_across_groups` the color is instead spread over all the
     groups in equal steps (see apply()): the active group still gets the
     full target color, each group before it one step less. The switch
-    itself stays a hard step - the whole ramp moves on by one group.
+    itself stays a hard step - the whole ramp moves on by one group -
+    unless `switch_fade_ms` is set: then every group's share of the color
+    (and in hue_shift mode the hue itself) glides to its new value over
+    that time constant instead of jumping (see _smooth()).
 
     Movement otherwise follows the exact same event-driven model as
     ChaseAnimator.tick() (see its docstring for the full rationale): "off"
@@ -460,6 +535,15 @@ class GroupSwitchAnimator:
             min_interval_ms=config.peak_min_interval_ms,
             min_energy=config.peak_min_energy,
         )
+        # switch_fade_ms: each group's current share of the group color and
+        # the current hue_shift hue, moving toward where the active group
+        # puts them (see _smooth()). Empty/None = nothing to continue from.
+        self._amounts: List[float] = []
+        self._shift_hue: Optional[float] = None
+        # Per lamp, while it shows a color part of the way to the group
+        # color: which way round the hue circle (and how far) that way goes -
+        # see apply().
+        self._hue_deltas: Dict[str, float] = {}
 
     def update_config(self, config: GroupSwitchEffectConfig) -> None:
         self.config = config
@@ -474,6 +558,9 @@ class GroupSwitchAnimator:
         self.position = 0.0
         self._beat_detector.reset()
         self._peak_detector.reset()
+        self._amounts = []
+        self._shift_hue = None
+        self._hue_deltas = {}
 
     def tick(
         self,
@@ -502,6 +589,32 @@ class GroupSwitchAnimator:
             delta = direction * steps_per_s * dt
 
         self.position = (self.position + delta) % n
+        self._smooth(dt, n)
+
+    def _shift_target_hue(self, active_index: int) -> float:
+        """hue_shift mode: each group shows a progressively different hue, so
+        which color shows depends on which group is currently active."""
+        return (self.config.custom_hue_deg + active_index * self.config.hue_shift_step_deg) % 360.0
+
+    def _smooth(self, dt: float, n: int) -> None:
+        """The soft switch (`switch_fade_ms`): instead of jumping when the
+        active group changes, each group's share of the group color - and in
+        hue_shift mode the hue, which also changes with the active group -
+        moves a fraction of the way to its new value every tick, the same
+        exponential approach Beat Sync's hue snap uses. With 0 ms, or with
+        nothing to continue from (first tick, the number of groups changed),
+        it's simply set."""
+        cfg = self.config
+        active_index = int(math.floor(self.position)) % n
+        targets = [self._group_amount(index, active_index, n) for index in range(n)]
+        target_hue = self._shift_target_hue(active_index)
+        if cfg.switch_fade_ms <= 0.0 or len(self._amounts) != n or self._shift_hue is None:
+            self._amounts = targets
+            self._shift_hue = target_hue
+            return
+        alpha = _alpha_for(cfg.switch_fade_ms, dt)
+        self._amounts = [amount + (target - amount) * alpha for amount, target in zip(self._amounts, targets)]
+        self._shift_hue = circular_lerp_deg(self._shift_hue, target_hue, alpha)
 
     def active_device_ids(self, groups: List[List[str]]) -> Set[str]:
         """The lamps in the currently active group (same index apply() uses)."""
@@ -521,10 +634,18 @@ class GroupSwitchAnimator:
         cfg = self.config
         active_index = int(math.floor(self.position)) % n
 
+        # Mid soft switch (see _smooth()) the groups are between two places.
+        soft = cfg.switch_fade_ms > 0.0 and len(self._amounts) == n and self._shift_hue is not None
+
         result = dict(colors)
         for index, group in enumerate(groups):
-            amount = self._group_amount(index, active_index, n)
-            if amount <= 0.0:
+            amount = self._amounts[index] if soft else self._group_amount(index, active_index, n)
+            if amount >= 0.999:
+                amount = 1.0
+            if amount <= 0.001 or amount == 1.0:
+                for device_id in group:
+                    self._hue_deltas.pop(device_id, None)  # not in between: nothing to keep track of
+            if amount <= 0.001:
                 continue  # left completely untouched
             for device_id in group:
                 base_color = result.get(device_id, Color.black())
@@ -534,9 +655,7 @@ class GroupSwitchAnimator:
                     target_hue = (h_base + 180.0) % 360.0
                     target_sat = s_base
                 elif cfg.color_mode == "hue_shift":
-                    # Each group shows a progressively different hue, so which
-                    # color flashes on depends on which group is currently active.
-                    target_hue = (cfg.custom_hue_deg + active_index * cfg.hue_shift_step_deg) % 360.0
+                    target_hue = self._shift_hue if soft else self._shift_target_hue(active_index)
                     target_sat = cfg.custom_saturation
                 else:  # "custom"
                     target_hue = cfg.custom_hue_deg
@@ -552,7 +671,7 @@ class GroupSwitchAnimator:
                         # pick one tick by tick.
                         target_hue = (h_base + 180.0 * amount) % 360.0
                     else:
-                        target_hue = circular_lerp_deg(h_base, target_hue, amount)
+                        target_hue = _hue_part_way(h_base, target_hue, amount, self._hue_deltas, device_id)
                     target_sat = lerp(s_base, target_sat, amount)
 
                 v_out = clip(v_base * (1.0 + cfg.intensity * amount))

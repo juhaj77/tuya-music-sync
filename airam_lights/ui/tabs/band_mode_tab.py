@@ -448,6 +448,25 @@ class BandModeTab(QWidget):
         curve_label.setWordWrap(True)
         appearance_col.addWidget(curve_label)
 
+        self.chase_switch_fade_checkbox = QCheckBox("Soft steps (fade each lamp's color change as the highlight moves)")
+        self.chase_switch_fade_checkbox.setChecked(ch.switch_fade)
+        self.chase_switch_fade_checkbox.setToolTip(
+            "With only a handful of lamps the highlight can't really glide: whatever the Width and "
+            "Falloff curve, each lamp's color changes in visible jumps as the highlight moves on - and "
+            "jumps outright when it steps on a beat. On: every lamp's color fades to its new value over "
+            "the Switch fade time below instead. Off: as before."
+        )
+        self.chase_switch_fade_checkbox.toggled.connect(self._on_chase_changed)
+        appearance_col.addWidget(self.chase_switch_fade_checkbox)
+        self.chase_switch_fade_slider = FloatSlider(
+            "Switch fade", 20.0, 1000.0, ch.switch_fade_ms, decimals=0, suffix=" ms",
+            tooltip="How long each lamp takes to fade to its new color when the highlight moves (with Soft "
+            "steps on) - the same kind of time setting as Group Switch's Switch fade and Beat Sync's Hue "
+            "snap speed, so the same value gives the same feel. Longer = softer, with a longer trail.",
+        )
+        self.chase_switch_fade_slider.valueChanged.connect(self._on_chase_changed)
+        appearance_col.addWidget(self.chase_switch_fade_slider)
+
         color_mode_row = QHBoxLayout()
         color_mode_row.addWidget(QLabel("Chase color:"))
         self.chase_color_mode_combo = QComboBox()
@@ -728,6 +747,17 @@ class BandModeTab(QWidget):
         self.gs_fade_checkbox.toggled.connect(self._on_group_switch_changed)
         gs_appearance_col.addWidget(self.gs_fade_checkbox)
 
+        self.gs_switch_fade_slider = FloatSlider(
+            "Switch fade", 0.0, 1000.0, gs.switch_fade_ms, decimals=0, suffix=" ms",
+            tooltip="How the colors change when the active group moves on. 0 = a hard, instant step (as "
+            "before). Above 0 = a soft switch: every group's color glides to its new place over about "
+            "this long - the same kind of time setting as Beat Sync's Hue snap speed, so the same value "
+            "gives the same feel. Works with and without 'Fade across groups'. White pulses that follow "
+            "the group still jump with the active group.",
+        )
+        self.gs_switch_fade_slider.valueChanged.connect(self._on_group_switch_changed)
+        gs_appearance_col.addWidget(self.gs_switch_fade_slider)
+
         self.gs_hue_slider = HueSlider("Custom hue", gs.custom_hue_deg)
         self.gs_hue_slider.setToolTip(
             "Used by 'custom' (the fixed color shown on the active group) and as the starting hue for "
@@ -952,6 +982,7 @@ class BandModeTab(QWidget):
             color_reason = f"{name}'s color mode is '{color_mode}'."
             set_active([w("hue_slider"), w("sat_slider")], color_mode in ("custom", "hue_shift"), color_reason)
             set_active([w("hue_shift_slider")], color_mode == "hue_shift", color_reason)
+        set_active([self.chase_switch_fade_slider], self.chase_switch_fade_checkbox.isChecked(), "Soft steps is off.")
 
     # -- chase overlay --------------------------------------------------------------------
 
@@ -978,6 +1009,8 @@ class BandModeTab(QWidget):
         ch.width = self.chase_width_slider.value()
         ch.intensity = self.chase_intensity_slider.value()
         ch.falloff_curve = self.chase_falloff_curve_combo.currentText()
+        ch.switch_fade = self.chase_switch_fade_checkbox.isChecked()
+        ch.switch_fade_ms = self.chase_switch_fade_slider.value()
         ch.color_mode = self.chase_color_mode_combo.currentText()
         ch.custom_hue_deg = self.chase_hue_slider.value()
         ch.custom_saturation = self.chase_sat_slider.value()
@@ -1012,5 +1045,6 @@ class BandModeTab(QWidget):
         gs.custom_saturation = self.gs_sat_slider.value()
         gs.hue_shift_step_deg = self.gs_hue_shift_slider.value()
         gs.fade_across_groups = self.gs_fade_checkbox.isChecked()
+        gs.switch_fade_ms = self.gs_switch_fade_slider.value()
         self._update_overlay_states()
         self.controller.apply_config_changes()

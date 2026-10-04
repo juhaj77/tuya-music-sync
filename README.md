@@ -468,12 +468,19 @@ white LEDs directly with a single command, without switching work_mode. **Lamp
 transitions** (Color Mapping tab, Global box) picks the way:
 
 - `direct` (default) - DP 28 without fade: crisp flashes, beats and white pulses.
-- `gradient` - DP 28 with the bulb's own short fade (~0.25 s).
+- `smooth` (experimental) - DP 28, chosen per command: a big change (a beat's flash, a
+  white flash lighting up, the strobe) lands instantly like `direct`, while the small
+  steps of a brightness fade, a hue snap or a hue glide are sent with the bulb's own
+  short fade - so the bulb glides from one step to the next instead of showing every
+  command as a tiny jump. Fades look smoother and a little slower.
+- `gradient` - DP 28 with the bulb's own short fade (~0.25 s) on every change.
 - `legacy` - DP 24 and work_mode switching, as before (~0.7 s fades).
 
-With instant transitions every command shows as a step, so smooth fades and hue glides
+With `direct` every command shows as a step, so smooth fades and hue glides
 want a higher **Lamp command rate** (up to 60/s; the color engine computes at least that
-often), and a white flash's brightness now really follows *White pulse attack* /
+often) - or `smooth`, which lets the bulb fill in between the steps. Colours go out at
+the datapoint's own resolution (hue in degrees, saturation and brightness in 0.1 %
+steps), not rounded through 8-bit RGB. A white flash's brightness really follows *White pulse attack* /
 *release* (it swells in and fades out) instead of the bulb's own fade. The bulbs can
 show colour and white at the same time on DP 28, so a flash is a **crossfade**: the
 colour dims as the white swells and comes back as it fades - the lamp never drops to
@@ -853,6 +860,12 @@ advances - the switch itself is still a hard step. It needs at least three group
 two there is nothing in between). White pulses that follow the group
 (*True white lamps: group*) still land on the active group only.
 
+**Switch fade** (0 = off, the hard step) softens the switch itself: when the active
+group moves on, every group's color glides to its new place over about that long
+instead of jumping - a time constant like Beat Sync's *Hue snap speed*, so the same
+value gives the same feel. It works with and without *Fade across groups*, and in
+`hue_shift` mode the hue glides along too.
+
 ### Diagnostics tab
 Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /
 bulb type / latency / command counts (sent, failed, skipped-as-unchanged), current
@@ -977,6 +990,12 @@ positions.
   (an eased S-curve/smoothstep that dwells near the peak color - and near the
   background - for longer, transitioning fastest in the middle). Try `bezier` if a
   chase color feels too brief.
+- **Soft steps** + **Switch fade** (off by default): with only a handful of lamps the
+  highlight can't really glide - whatever the width and falloff curve, each lamp's color
+  changes in visible jumps as the highlight moves on, and jumps outright when it steps
+  on a beat. With Soft steps on, every lamp's color fades to its new value over the
+  Switch fade time instead (a time constant, like Group Switch's *Switch fade* and Beat
+  Sync's *Hue snap speed*). Longer = softer, with a longer trail.
 - **Color**: `custom` (a fixed hue/saturation you set), `complementary` (the opposite
   hue of whatever that lamp's own color currently is), or `hue_shift` (each position
   shows a progressively different hue - a rainbow trail as the light travels around).

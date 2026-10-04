@@ -25,6 +25,7 @@ from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, LEVELS, STROBE_PLACEMENTS, WHITE_PATTERNS
 from ...config.schema import (
+    INSTANT_TRANSITIONS,
     LAMP_TRANSITIONS,
     PULSE_TRIGGERS,
     WHITE_TEMP_MODES,
@@ -752,10 +753,14 @@ class ColorMappingTab(QWidget):
             global_layout, "Lamp transitions:", LAMP_TRANSITIONS, controller.config.network.lamp_transitions,
             "How colors and white flashes reach the bulbs. direct (default): the bulb's real-time control "
             "channel - every change lands instantly (measured: under 33 ms), and a white flash lights the "
-            "white LEDs with one command, without switching the bulb's mode. gradient: the same channel "
-            "with the bulb's own short fade (~0.25 s). legacy: the old way - the bulb fades every change "
+            "white LEDs with one command, without switching the bulb's mode. smooth (experimental): like "
+            "direct for big changes - a beat's flash, a white flash lighting up, the strobe - but the small "
+            "steps of a fade, a hue snap or a hue glide are sent with the bulb's own short fade, so the "
+            "bulb glides from step to step instead of showing each command as a tiny jump; fades look "
+            "smoother and a little slower. gradient: the same channel "
+            "with the bulb's own short fade (~0.25 s) on every change. legacy: the old way - the bulb fades every change "
             "over ~0.7 s, so fast beats blur together, and white flashes need 4-5 commands. If your bulbs "
-            "stop changing color with direct/gradient, choose legacy.",
+            "stop changing color with direct/smooth/gradient, choose legacy.",
         )
         self.transitions_combo.currentTextChanged.connect(self._on_transitions_changed)
 
@@ -917,8 +922,8 @@ class ColorMappingTab(QWidget):
             show_note(self.seq_note, "")
 
         # Strobe: placed by the sequencer, and only with instant lamp transitions.
-        direct = cfg.network.lamp_transitions == "direct"
-        not_direct = "The strobe needs Lamp transitions 'direct' (Global box)."
+        direct = cfg.network.lamp_transitions in INSTANT_TRANSITIONS
+        not_direct = "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box)."
         seq_off = "The sequencer is off." if shared else "The sequencer needs the shared beat clock."
         set_active([self.seq_strobe_checkbox], sequencing and direct, seq_off if not sequencing else not_direct)
         set_active(
@@ -934,7 +939,7 @@ class ColorMappingTab(QWidget):
             direct, not_direct,
         )
         if sequencing and not direct:
-            show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' (Global box): only then "
+            show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box): only then "
                       "do the bulbs take a change instantly and show white and colour at the same time.")
         else:
             show_note(self.seq_strobe_note, "")
@@ -1412,7 +1417,7 @@ class ColorMappingTab(QWidget):
             "other pulses keep running underneath. Rare by default, so it stays an event; placement, "
             "loudness, chance and minimum gap below make it as frequent as you like, and Strobe length as "
             "long as a whole bar. The flash rate follows the tempo: the fastest subdivision of the beat "
-            "under Max rate. Needs Lamp transitions 'direct' (Global box).\n\n"
+            "under Max rate. Needs Lamp transitions 'direct' or 'smooth' (Global box).\n\n"
             "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy - "
             "the usual recommendation for venues is at most 4 flashes per second."
         )
