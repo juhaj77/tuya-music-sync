@@ -38,6 +38,11 @@ def _falloff_weight(dist: float, width: float, curve: str) -> float:
     return linear_weight
 
 
+# _hue_part_way(): how close to 0 or 1 `amount` must be for going back to the
+# short way round to be nearly invisible (moves the hue by 360 * this at most).
+_REWRAP_AMOUNT = 0.05
+
+
 def _hue_part_way(h_base: float, target_hue: float, amount: float, deltas: Dict[str, float], key: str) -> float:
     """The hue `amount` (0..1) of the way from a lamp's own hue to a target
     hue: the short way round the circle - but once on its way, the same way
@@ -50,11 +55,23 @@ def _hue_part_way(h_base: float, target_hue: float, amount: float, deltas: Dict[
     NOT for a target that is by definition exactly opposite
     ("complementary": own hue + 180): there both ways round are equally
     short and floating-point rounding picks one at random, tick by tick -
-    use `(h_base + 180 * amount) % 360` for that instead."""
+    use `(h_base + 180 * amount) % 360` for that instead.
+
+    The long way round is only kept while it's needed: the lamp's own hue
+    can keep turning the same way for as long as it likes (Beat Sync's
+    "step" hue), and a soft step or Fade across groups can keep a lamp in
+    between for just as long - an unbounded winding would then turn tiny
+    changes in `amount` into whole turns of the hue, flickering between
+    colors. So it goes back to the short way as soon as that is nearly
+    invisible (`amount` near 0 or 1: a change of at most 18 degrees), and in
+    any case before it gets a full turn long."""
     delta = ((target_hue - h_base + 180.0) % 360.0) - 180.0
     previous = deltas.get(key)
     if previous is not None:
-        delta += 360.0 * round((previous - delta) / 360.0)
+        kept = delta + 360.0 * round((previous - delta) / 360.0)
+        nearly_invisible = amount <= _REWRAP_AMOUNT or amount >= 1.0 - _REWRAP_AMOUNT
+        if abs(kept) <= 180.0 or (abs(kept) < 360.0 and not nearly_invisible):
+            delta = kept
     deltas[key] = delta
     return (h_base + delta * amount) % 360.0
 

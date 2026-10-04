@@ -1328,7 +1328,9 @@ class ColorMappingTab(QWidget):
         self.seq_walk_combo = self._labeled_combo(
             layout, "Group walk:", GROUP_WALKS, sq.group_walk,
             "Where each white flash goes. forward: the next group each time, so the white travels "
-            "around the room. pingpong: back and forth. random: any other group. all: every lamp.",
+            "around the room. backward: the same the other way round - e.g. against Group Switch's "
+            "colors, which move forward unless Reverse is on. pingpong: back and forth. random: any "
+            "other group. all: every lamp.",
         )
         self.seq_white_density_slider = FloatSlider(
             "White density", 0.0, 1.0, sq.white_density, decimals=2,

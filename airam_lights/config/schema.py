@@ -1156,7 +1156,7 @@ class PulseSequencerConfig:
     enabled: bool = False
     white_pattern: str = "auto"  # see pulse_sequencer.WHITE_PATTERNS
     white_density: float = 0.85  # chance each pattern step actually flashes
-    group_walk: str = "forward"  # "forward" | "pingpong" | "random" | "all"
+    group_walk: str = "forward"  # "forward" | "backward" | "pingpong" | "random" | "all"
     # What the walk steps through: "groups" = Group Switch's groups
     # (PerLampEffect.effect_group); "chase_order" = the Chase order, lamp
     # position by position. Beat Sync's white_pulse_rotators applies here too.

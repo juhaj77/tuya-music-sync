@@ -7,6 +7,7 @@ from airam_lights.color.models import Color, WhiteTarget
 from airam_lights.config.schema import ChaseEffectConfig, GroupSwitchEffectConfig, PerLampEffect, WhiteChaseEffectConfig
 from airam_lights.effects.chase import (
     ChaseAnimator,
+    _hue_part_way,
     GroupSwitchAnimator,
     WhiteChaseAnimator,
     get_chase_group_dwell_weights,
@@ -941,3 +942,39 @@ def test_chase_soft_steps_work_with_a_fixed_color_and_start_clean():
     cfg.switch_fade = False
     animator.tick(0.02, 4)
     assert animator._weights == []
+
+
+def _hue_step(a: float, b: float) -> float:
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def test_hue_part_way_does_not_wind_up_while_the_own_hue_keeps_turning():
+    # A lamp held half way (soft step / Fade across groups) while Beat Sync's
+    # "step" hue keeps turning the same way: the remembered way round must not
+    # grow turn after turn - that turned small changes in the amount into
+    # whole turns of the hue, flickering between colors.
+    deltas = {}
+    for i in range(2000):
+        h_base = (i * 3.0) % 360.0  # ~17 full turns
+        _hue_part_way(h_base, 100.0, 0.5, deltas, "lamp")
+        assert abs(deltas["lamp"]) < 360.0
+
+
+def test_hue_part_way_goes_back_the_short_way_when_nearly_invisible():
+    deltas = {}
+    _hue_part_way(0.0, 170.0, 0.5, deltas, "lamp")  # +170: the short way
+    _hue_part_way(340.0, 170.0, 0.5, deltas, "lamp")  # past opposite: kept at +190
+    assert deltas["lamp"] == pytest.approx(190.0)
+    # Nearly out of the highlight: back to the short way (-170), a hue change of
+    # only 360 * 0.03 = 11 degrees.
+    _hue_part_way(340.0, 170.0, 0.03, deltas, "lamp")
+    assert deltas["lamp"] == pytest.approx(-170.0)
+
+
+def test_hue_part_way_still_keeps_its_way_round_through_opposite():
+    # The reason for the memory: passing through exactly opposite mid-way must
+    # not jump the lamp to the other side of the circle.
+    deltas = {}
+    outs = [_hue_part_way(h, 180.0, 0.5, deltas, "lamp") for h in (10.0, 5.0, 0.0, 355.0, 350.0)]
+    for a, b in zip(outs, outs[1:]):
+        assert _hue_step(a, b) < 5.0

@@ -281,3 +281,12 @@ def test_sequencer_white_events_carry_their_release_curve():
         by_reason.setdefault(e.reason, set()).add(e.release_curve)
     assert by_reason["phrase"] == {"ease_in_out"}
     assert by_reason["fill"] == {"ease_out"}
+
+
+def test_white_walks_backward_through_groups():
+    seq = PulseSequencer(_cfg(group_walk="backward"), random.Random(1))
+    groups = [e.group for _, e in _run(seq, 2) if e.kind == "white"]
+    assert len(groups) >= 7
+    assert groups[0] == 2  # starts from the last group
+    for a, b in zip(groups, groups[1:]):
+        assert b == (a - 1) % 3

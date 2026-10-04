@@ -54,7 +54,7 @@ STEPS_PER_BEAT = 4  # 16th notes
 # the bar (bar steps) - resolved per bar length in _white_steps().
 WHITE_PATTERNS = ("off", "auto", "downbeats", "beats", "offbeats", "syncopated", "gallop", "sixteenths")
 DARK_PATTERNS = ("off", "auto", "before_downbeat", "before_phrase", "before_backbeats", "stutter")
-GROUP_WALKS = ("forward", "pingpong", "random", "all")
+GROUP_WALKS = ("forward", "backward", "pingpong", "random", "all")
 # Where a strobe may end: on the bar line into a new phrase; also into the
 # phrase's second half; on any bar line; also at the middle of each bar.
 STROBE_PLACEMENTS = ("phrase", "half_phrase", "bars", "half_bars")
@@ -552,6 +552,9 @@ class PulseSequencer:
                 self._group_direction = -self._group_direction
                 nxt = self._group_index + self._group_direction
             self._group_index = max(0, min(num_groups - 1, nxt))
+        elif walk == "backward":
+            # Starts from the last group, so the first lap covers them all.
+            self._group_index = (self._group_index - 1) % num_groups if self._group_index >= 0 else num_groups - 1
         else:
             self._group_index = (self._group_index + 1) % num_groups
         return self._group_index

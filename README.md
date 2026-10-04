@@ -612,7 +612,8 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   (the "and"), a 3-3-2 syncopation, a gallop, straight 16ths - or `auto`, which follows
   the loudness: sparse when the song is quiet, busier as it gets louder.
 - **Group walk** - each white flash goes to the next lamp group (the Group Switch
-  groups), so the white travels around the room; *Double chance* sometimes repeats a
+  groups), so the white travels around the room - `backward` sends it the other way
+  round, e.g. against the Group Switch colors; *Double chance* sometimes repeats a
   flash in the same group an 8th later.
 - **Thinning** - three ways to calm the white flashes down, the way a drummer would
   rather than by random gaps:
