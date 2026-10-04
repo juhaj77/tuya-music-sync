@@ -65,7 +65,9 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 > change gliding over 140 ms, and a *Lamp command rate* of 50/s so those glides stay
 > smooth. The **Chase / Rotating Light overlay** ships switched off but already set up to
 > match - turn it on and it fits the rest. Until you assign Group Switch groups (and a
-> Chase order) in the Per-Lamp tab, the white flashes land on every lamp at once. See
+> Chase order) in the Per-Lamp tab, the white flashes land on every lamp at once. **If
+> all your lamps are in one group, switch Group Switch off** (its own sub-tab) - it is
+> on by default, and with a single group there is nothing to switch between. See
 > [section 5](#5-running-the-full-application) for the full writeup, or jump straight to
 > [Beat Sync mode](#beat-sync-mode) or the [Chase overlay](#chase--rotating-light-overlay).
 > The Chase highlight's **width** should scale with how many lamps are in the chase - see
@@ -860,7 +862,10 @@ falloff-curve concept, since there's nothing to blend. Can run at the same time 
 Chase - Chase applies first, then Group Switch's discrete switch applies on top of
 whatever color Chase already produced for that lamp.
 
-**Fade across groups** (off by default) spreads the group color over *all* the groups
+Group Switch is **on in a fresh install**. If all your lamps are in one group, switch it
+off - with a single group there is nothing to switch between.
+
+**Fade across groups** (on in a fresh install) spreads the group color over *all* the groups
 instead of showing it on the active one only: the active group still gets the full
 group color, the group before it one step less, and so on back to the lamps' own color
 - in equal steps around the hue circle, so the in-between groups stay vivid. With three
