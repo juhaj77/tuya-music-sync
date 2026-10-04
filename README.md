@@ -79,55 +79,20 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 
 ## Demo videos
 
-### v1.6 - real-time control (DP 28)
+Two videos recorded with **v1.14** on real hardware: **8 Airam spots**, 4 in the ceiling
+and 4 along the walls, running in **Beat Sync** mode. Both have the **strobe** effect
+in them, and both were filmed on a **Xiaomi 14T in Pro mode at 60 fps**, so the camera
+isn't fighting the lights by auto-adjusting exposure and white balance.
 
-Two newer videos recorded with **v1.6**, which drives the lamps through the real-time
-control datapoint (**DP 28**, *Lamp transitions* `direct`). Earlier builds wrote the
-persistent colour datapoint (DP 24), where the bulb fades every change itself over about
-**0.7 s** - so with DP 28 the effects change far faster and crisper than in the older
-videos below. Both run at a **Lamp command rate of 45 commands/s** and both use the
-**pulse sequencer**.
-
-- [**v1.6 Chase + Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.6/v1_6_chase.mp4) -
-  Chase and Group Switch layered on top of each other: the chase rotates with a
-  **hue shift** while the groups switch to the **complementary color**. Admittedly
-  there's almost too much going on at once - it's a showcase of how fast the lamps now
-  react rather than a tasteful everyday setting.
-- [**v1.6 Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.6/v1_6_group.mp4) -
-  Group Switch effects only, used both for the **white pulses** and for the
-  **complementary color**.
-
-### Earlier videos (DP 24, ~0.7 s bulb fades)
-
-Three demo videos show the app running against real hardware: **8 Airam spots**, 4 in the
-ceiling and 4 along the walls. All are running in **Beat Sync** mode with **true white
-pulses** enabled.
-
-- [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/chase.mp4) -
-  a rotating complementary color chasing around all the spots.
-- [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/group.mp4) -
-  the ceiling spots form one group and the wall spots another, with a complementary
-  color effect between the two groups.
-- [**3 groups**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.0-demo/3_groups_demo.mp4) -
-  the spots are split into **three groups**. Unlike the two videos above, this one was
-  filmed on a **Xiaomi 14T in Pro mode with fixed white balance and fixed ISO**, so the
-  camera isn't fighting the lights (see the note below) - it's a much more faithful
-  capture of the actual colors and the snappiness of the beat-synced flashes/pulses.
+- [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/chase_GitHub.mp4) -
+  a **forward** color effect rotates around the spots, with a **backward** white pulse
+  running the other way.
+- [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/group_GitHub.mp4) -
+  the spots are split into **three groups**, and a white pulse walks through them
+  **backward** in group order.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
-
-> **Heads up:** the Chase and Group videos were filmed on a phone in auto mode, and the
-> phone's camera continuously auto-adjusts exposure and white balance while recording -
-> it's constantly trying to "correct" what it thinks is a color cast or an
-> under/overexposed scene. That fights directly against what the lights are actually doing, so the videos **undersell the
-> real effect**: color transitions look laggier/smoother than they are (the camera is
-> chasing them), whites and saturated hues can look shifted or washed out, and fast
-> brightness changes (e.g. Beat Sync flashes) get flattened as the camera's exposure
-> hunts to compensate. In person, colors are more saturated, whites are actually white,
-> and the beat-synced flashes/pulses are far snappier than the videos suggest. If your
-> phone lets you lock AE/AWB (exposure and white balance) before recording, that will
-> get you a much more accurate capture.
 
 **At a glance:**
 
