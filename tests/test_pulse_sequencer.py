@@ -236,3 +236,48 @@ def test_repeated_groove_with_build_only_adds_flashes():
     for earlier, later in zip(phrase, phrase[1:]):
         assert earlier <= later
     assert len(phrase[0]) < len(phrase[-1])
+
+
+# -- white release curves ---------------------------------------------------------------------
+
+
+def test_release_curves_start_full_end_dark_and_differ_in_between():
+    from airam_lights.effects.pulse_sequencer import release_level
+
+    for curve in ("linear", "ease_in", "ease_out", "ease_in_out"):
+        assert release_level(0.0, curve) == 1.0
+        assert release_level(1.0, curve) == 0.0
+        levels = [release_level(i / 20, curve) for i in range(21)]
+        assert levels == sorted(levels, reverse=True)  # only ever fades
+    assert release_level(0.5, "linear") == 0.5
+    assert release_level(0.5, "ease_in") > 0.5 > release_level(0.5, "ease_out")  # lingers vs. drops
+    assert release_level(0.5, "ease_in_out") == 0.5
+    assert release_level(0.2, "ease_in_out") > release_level(0.2, "linear")  # lingers at first
+    assert release_level(0.8, "ease_in_out") < release_level(0.8, "linear")  # soft landing
+    assert release_level(0.5, "something old") == 0.5  # unknown = linear
+
+
+def test_dynamic_release_curve_follows_the_music():
+    from airam_lights.effects.pulse_sequencer import release_curve_for
+
+    loud = 0.8
+    assert release_curve_for("phrase", 0, 16, loud) == "ease_in_out"
+    assert release_curve_for("fill", 12, 16, loud) == "ease_out"
+    assert release_curve_for("double", 2, 16, loud) == "ease_out"
+    assert release_curve_for("pattern", 0, 16, loud) == "ease_in"  # downbeat
+    assert release_curve_for("pattern", 8, 16, loud) == "ease_in"  # the bar's middle beat
+    assert release_curve_for("pattern", 4, 16, loud) == "ease_out"  # beat 2
+    assert release_curve_for("pattern", 3, 16, loud) == "ease_out"  # a 16th
+    assert release_curve_for("pattern", 0, 16, 0.1) == "ease_in_out"  # quiet: soft breaths
+
+
+def test_sequencer_white_events_carry_their_release_curve():
+    seq = PulseSequencer(
+        _cfg(white_pattern="beats", phrase_bars=4, fills=True, phrase_accent=True), random.Random(1)
+    )
+    whites = [e for _, e in _run(seq, 8, energy=0.5) if e.kind == "white"]
+    by_reason = {}
+    for e in whites:
+        by_reason.setdefault(e.reason, set()).add(e.release_curve)
+    assert by_reason["phrase"] == {"ease_in_out"}
+    assert by_reason["fill"] == {"ease_out"}

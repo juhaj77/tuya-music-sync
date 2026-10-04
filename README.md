@@ -635,6 +635,16 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   toward the phrase start, the phrase start held longest with a slow fade, quiet parts
   dimmer and softer, loud parts full and sharp. *Dynamics amount* sets how strongly
   (0 = every flash identical).
+- **White release curve** (white pulse settings) - the shape of each flash's fade-out,
+  best seen with a longer *White pulse release* (a few hundred ms): `linear` (a straight
+  fade, as before), `ease_in` (lingers near full, then drops away), `ease_out` (drops
+  fast, then a long soft tail, like a struck drum or cymbal), `ease_in_out` (an S-curve).
+  `dynamic` lets the sequencer pick per flash, the way an instrument decays:
+  `ease_in_out` for the phrase-start flash and in quiet parts, `ease_in` on the heavy
+  beats (the light hangs on like a held bass note, then clears for the next beat),
+  `ease_out` on the lighter beats, the fills and the doubles (percussive). It shapes the
+  sequencer's flashes; the per-beat flashes without the sequencer fade out exponentially,
+  and with `legacy` transitions the bulb fades on its own.
 
 The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
 The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -

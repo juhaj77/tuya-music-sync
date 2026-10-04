@@ -235,6 +235,9 @@ class SpectrumModeConfig:
 
 PULSE_TRIGGERS = ("random", "accent", "downbeat")
 WHITE_TEMP_MODES = ("random", "bar", "alternate", "loudness", "phrase")
+# How a white flash fades out over its release - see pulse_sequencer.release_level.
+# "dynamic": the pulse sequencer picks one per flash (pulse_sequencer.release_curve_for).
+RELEASE_CURVES = ("linear", "ease_in", "ease_out", "ease_in_out", "dynamic")
 SYNC_MODES = ("off", "beat", "intensity_peak", "clock")
 
 
@@ -322,6 +325,13 @@ class BeatSyncModeConfig:
     white_pulse_duration_ms: float = 45.0  # how long the white flash is held
     white_pulse_attack_ms: float = 17.0  # timing of the flash's start
     white_pulse_release_ms: float = 49.0  # how long after the hold it ends
+    # The shape of the fade over white_pulse_release_ms, for the pulse
+    # sequencer's flashes (the per-beat flashes fade out exponentially):
+    # "linear" (as before), "ease_in" (lingers bright, then drops),
+    # "ease_out" (drops fast, then a long soft tail), "ease_in_out" (an
+    # S-curve), or "dynamic" - the sequencer picks per flash by where it falls
+    # in the music. See RELEASE_CURVES.
+    white_pulse_release_curve: str = "linear"
 
     # The flash always uses the bulb's WHITE work_mode - its real white
     # diode(s) - never the RGB LEDs: mixing white from RGB would spend the
@@ -415,6 +425,9 @@ class BeatSyncModeConfig:
             white_pulse_duration_ms=float(d.get("white_pulse_duration_ms", 45.0)),
             white_pulse_attack_ms=float(d.get("white_pulse_attack_ms", 17.0)),
             white_pulse_release_ms=float(d.get("white_pulse_release_ms", 49.0)),
+            white_pulse_release_curve=(
+                d.get("white_pulse_release_curve") if d.get("white_pulse_release_curve") in RELEASE_CURVES else "linear"
+            ),
             white_pulse_target=d.get("white_pulse_target", "all"),
             white_pulse_rotators=max(1, min(4, int(d.get("white_pulse_rotators", 1)))),
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),

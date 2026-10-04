@@ -56,6 +56,7 @@ from ..effects.pulse_sequencer import (
     PulseSequencer,
     metric_weight,
     phrase_progress,
+    release_level,
     strobe_plan,
     strobe_steps,
 )
@@ -271,6 +272,7 @@ class VisualizationEngine:
         self._seq_white_hold: Dict[str, float] = {}
         self._seq_white_attack: Dict[str, float] = {}
         self._seq_white_release: Dict[str, float] = {}
+        self._seq_white_curve: Dict[str, str] = {}  # the release curve of each lamp's current flash
         self._seq_white_brightness: Dict[str, float] = {}
         self._seq_continuous_since: Dict[str, float] = {}
         self._seq_last_active: Dict[str, float] = {}
@@ -1019,6 +1021,7 @@ class VisualizationEngine:
         length = attack + hold + release
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = self._white_pulse_temp(cfg, self._clock_beat, event)
+        curve = event.release_curve if cfg.white_pulse_release_curve == "dynamic" else cfg.white_pulse_release_curve
         for lamp in lamps:
             if wall_now < self._seq_white_until.get(lamp, 0.0):
                 continue  # still mid-flash
@@ -1029,6 +1032,7 @@ class VisualizationEngine:
             self._seq_white_attack[lamp] = attack
             self._seq_white_hold[lamp] = hold
             self._seq_white_release[lamp] = release
+            self._seq_white_curve[lamp] = curve
             self._seq_white_brightness[lamp] = event.brightness
             self._seq_white_temp[lamp] = temp
 
@@ -1145,7 +1149,8 @@ class VisualizationEngine:
 
     def _seq_white_envelope(self, lamp: str, wall_now: float, cfg) -> float:
         """0..1 brightness of a sequencer flash: ramps up over attack, holds,
-        ramps down over release (constant 1 with legacy transitions - see
+        fades out over release along the flash's release curve (see
+        pulse_sequencer.release_level) - constant with legacy transitions (see
         the comment on shared_white_target in _tick_beat_sync_mode)."""
         peak = self._seq_white_brightness.get(lamp, 1.0)
         if self.config.network.lamp_transitions == "legacy":
@@ -1159,7 +1164,8 @@ class VisualizationEngine:
         if t < attack + hold:
             return peak
         if release > 0.0:
-            return peak * max(0.0, 1.0 - (t - attack - hold) / release)
+            curve = self._seq_white_curve.get(lamp, "linear")
+            return peak * max(0.0, release_level((t - attack - hold) / release, curve))
         return 0.0
 
     def _seq_white_active(self, lamp: str, wall_now: float) -> bool:

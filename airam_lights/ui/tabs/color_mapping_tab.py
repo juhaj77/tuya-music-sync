@@ -23,11 +23,13 @@ from PySide6.QtWidgets import (
 from ...color.models import STROBE_WAVES
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...config.user_presets import apply_preset, snapshot_preset
+from ...effects.chase import get_chase_groups, get_group_switch_groups
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, LEVELS, STROBE_PLACEMENTS, WHITE_PATTERNS
 from ...config.schema import (
     INSTANT_TRANSITIONS,
     LAMP_TRANSITIONS,
     PULSE_TRIGGERS,
+    RELEASE_CURVES,
     WHITE_TEMP_MODES,
     PulseSequencerConfig,
     RGBModeConfig,
@@ -427,6 +429,8 @@ class ColorMappingTab(QWidget):
         white_target_row.addWidget(self.beat_white_rotators_combo)
         white_target_row.addStretch(1)
         beat_layout.addLayout(white_target_row)
+        self.beat_white_rotators_note = inactive_note()
+        beat_layout.addWidget(self.beat_white_rotators_note)
         self.beat_white_trigger_combo = self._trigger_combo(beat_layout, "White pulse on:", bs.white_pulse_trigger)
         self.beat_white_note = inactive_note()
         beat_layout.addWidget(self.beat_white_note)
@@ -473,6 +477,18 @@ class ColorMappingTab(QWidget):
         ):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
+        self.beat_white_release_curve_combo = self._labeled_combo(
+            beat_layout, "White release curve:", RELEASE_CURVES, bs.white_pulse_release_curve,
+            "The shape of the fade over White pulse release - shows best with a longer release "
+            "(a few hundred ms). linear: a straight fade. ease_in: starts slowly - the flash lingers "
+            "near full, then drops away at the end. ease_out: drops fast, then a long soft tail, like a "
+            "struck drum or cymbal. ease_in_out: an S-curve - lingers, falls, then lands softly. "
+            "dynamic: picked per flash by where it falls in the music - ease_in_out for the phrase "
+            "start and in quiet parts, ease_in (hangs on like a held note) on the heavy beats, "
+            "ease_out (percussive) on the lighter ones, the fills and the doubles. "
+            "For the Pulse sequencer's flashes, with Lamp transitions other than 'legacy'.",
+        )
+        self.beat_white_release_curve_combo.currentTextChanged.connect(self._on_beat_changed)
         self.beat_white_temp_combo = self._labeled_combo(
             beat_layout, "Warm/cool:", WHITE_TEMP_MODES, bs.white_pulse_temp_mode,
             "How each flash's white is chosen between warm and cool. random: rolled per flash with the "
@@ -877,6 +893,15 @@ class ColorMappingTab(QWidget):
                 show_note(note, "")
 
         white = bs.white_pulse_enabled
+        legacy = self.controller.config.network.lamp_transitions == "legacy"
+        set_active(
+            [self.beat_white_release_curve_combo], white and sequencing and not legacy,
+            "White pulses are switched off." if not white else (
+                "The release curve shapes the Pulse sequencer's flashes (the per-beat ones fade out "
+                "exponentially) - the sequencer is off." if not sequencing else
+                "With 'legacy' Lamp transitions the bulb fades on its own."
+            ),
+        )
         set_active(
             [self.beat_white_pulse_target_combo], white and not sequencing,
             "White pulses are switched off." if not white else
@@ -893,6 +918,7 @@ class ColorMappingTab(QWidget):
         else:
             show_note(self.beat_white_temp_note, "")
         rotating = (bs.white_pulse_target == "rotate") if not sequencing else (sq.group_walk != "all")
+        self._show_rotators_warning(white and rotating, sequencing)
         set_active(
             [self.beat_white_rotators_combo], white and rotating,
             "White pulses are switched off." if not white else (
@@ -999,6 +1025,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_duration_ms = self.beat_white_pulse_duration_slider.value()
         bs.white_pulse_attack_ms = self.beat_white_pulse_attack_slider.value()
         bs.white_pulse_release_ms = self.beat_white_pulse_release_slider.value()
+        bs.white_pulse_release_curve = self.beat_white_release_curve_combo.currentText()
         bs.white_pulse_target = self.beat_white_pulse_target_combo.currentText()
         bs.white_pulse_rotators = self.beat_white_rotators_combo.currentData()
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
@@ -1061,6 +1088,23 @@ class ColorMappingTab(QWidget):
     def _on_invert_changed(self, checked: bool) -> None:
         self.controller.config.color_mapping.invert_brightness = checked
         self.controller.apply_config_changes()
+
+    def _show_rotators_warning(self, rotating: bool, sequencing: bool) -> None:
+        """Warns when 'Rotating' covers every position the white walks
+        through - then every flash lands on every lamp and nothing walks."""
+        cfg = self.controller.config
+        selected = self.controller.lamp_manager.selected_device_ids()
+        if sequencing and cfg.sequencer.walk_positions != "chase_order":
+            positions, kind = get_group_switch_groups(cfg.per_lamp_effects, selected), "Group Switch groups"
+        else:
+            positions, kind = get_chase_groups(cfg.per_lamp_effects, selected), "Chase positions"
+        count = len(positions)
+        if rotating and count >= 2 and cfg.color_mapping.beat_sync.white_pulse_rotators >= count:
+            show_note(self.beat_white_rotators_note, f"Rotating {cfg.color_mapping.beat_sync.white_pulse_rotators} "
+                      f"with {count} {kind}: every flash lands on all of them at once, so the white doesn't "
+                      f"walk. Choose fewer than {count}.")
+        else:
+            show_note(self.beat_white_rotators_note, "")
 
     def _on_transitions_changed(self, text: str) -> None:
         self.controller.config.network.lamp_transitions = text

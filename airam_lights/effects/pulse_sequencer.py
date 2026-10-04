@@ -102,6 +102,9 @@ class PulseEvent:
     attack: float = 1.0
     hold: float = 1.0
     release: float = 1.0
+    # White: the release curve white_pulse_release_curve "dynamic" uses (see
+    # release_curve_for) - one of RELEASE_CURVES.
+    release_curve: str = "linear"
 
 
 def metric_weight(bar_step: int, steps_per_bar: int) -> float:
@@ -164,6 +167,45 @@ def white_chance(
         remaining = 1.0 - phrase_bar / (phrase_bars - 1)
         focus += build * (1.0 - focus) * remaining
     return density * (1.0 - focus * (1.0 - weight))
+
+
+def release_level(progress: float, curve: str) -> float:
+    """How bright (1..0) a white flash still is `progress` (0..1) of the way
+    through its release. linear: a straight fade. ease_in: starts slowly -
+    the flash lingers near full, then drops away at the end. ease_out:
+    drops fast, then fades out on a long soft tail (like a struck drum or
+    cymbal). ease_in_out: an S-curve - lingers, falls, then a soft landing.
+    Anything else counts as linear."""
+    x = max(0.0, min(1.0, progress))
+    if curve == "ease_in":
+        return 1.0 - x * x
+    if curve == "ease_out":
+        return (1.0 - x) * (1.0 - x)
+    if curve == "ease_in_out":
+        return 1.0 - x * x * (3.0 - 2.0 * x)
+    return 1.0 - x
+
+
+def release_curve_for(reason: str, bar_step: int, steps_per_bar: int, intensity: float) -> str:
+    """The release curve that suits a sequencer flash (white_pulse_release_curve
+    "dynamic"), the way an instrument's sound decays:
+    - the phrase-start flash: ease_in_out - the long, graceful release of the
+      tension the phrase built up;
+    - fill flashes and doubles: ease_out - percussive, a snare roll's hits;
+    - quiet parts (loudness below 0.3): ease_in_out - soft breaths;
+    - the heavy beats (the downbeat, the bar's middle beat): ease_in - the
+      light hangs on like a held bass note, then clears for the next beat;
+    - everything lighter (beats, "ands", 16ths): ease_out - a hi-hat's or
+      a kick's quick decay."""
+    if reason == "phrase":
+        return "ease_in_out"
+    if reason in ("fill", "double"):
+        return "ease_out"
+    if intensity < 0.3:
+        return "ease_in_out"
+    if metric_weight(bar_step, steps_per_bar) >= 0.65:
+        return "ease_in"
+    return "ease_out"
 
 
 def strobe_steps(beats: float, steps_per_bar: int) -> int:
@@ -364,6 +406,7 @@ class PulseSequencer:
                 if white_reason == "pattern" and self._roll("double", bar_step) < cfg.double_chance:
                     self._pending_doubles[step + STEPS_PER_BEAT // 2] = white_group
             event = PulseEvent("white", white_group, 1.0, white_reason)
+            event.release_curve = release_curve_for(white_reason, bar_step, steps_per_bar, self.intensity)
             if cfg.pulse_dynamics:
                 event.brightness, event.attack, event.hold, event.release = flash_shape(
                     white_reason, bar_step, steps_per_bar, self.intensity, cfg.pulse_dynamics_amount

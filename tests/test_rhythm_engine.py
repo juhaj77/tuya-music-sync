@@ -484,3 +484,40 @@ def test_sequencer_downbeat_flash_outlasts_offbeat_flash(monkeypatch):
     assert downbeats and others
     assert min(f[1] for f in downbeats) > max(f[1] for f in others)
     assert min(f[2] for f in downbeats) > max(f[2] for f in others)
+
+
+def test_sequencer_white_release_follows_the_chosen_curve(monkeypatch):
+    def white_during_release(curve):
+        def configure(c):
+            bs = c.color_mapping.beat_sync
+            bs.white_pulse_enabled = True
+            bs.white_pulse_attack_ms = 10.0
+            bs.white_pulse_duration_ms = 40.0
+            bs.white_pulse_release_ms = 300.0
+            bs.white_pulse_release_curve = curve
+            c.sequencer.enabled = True
+            c.sequencer.white_pattern = "downbeats"
+            c.sequencer.white_density = 1.0
+            c.sequencer.white_accent_focus = 0.0
+            c.sequencer.white_build = 0.0
+            c.sequencer.double_chance = 0.0
+            c.sequencer.dark_pattern = "off"
+            c.sequencer.phrase_accent = False
+            c.sequencer.fills = False
+            c.sequencer.group_walk = "all"
+            c.sequencer.pulse_dynamics = False
+
+        engine, clock, _ = _make_engine(monkeypatch, configure)
+        _run(engine, clock, 6.0, lambda: None)
+        total = [0.0]
+
+        def on_tick():
+            target = engine.latest_lamp_white_targets.get("a")
+            if target is not None:
+                total[0] += target.brightness
+
+        _run(engine, clock, 8.0, on_tick)
+        return total[0]
+
+    ease_in, linear, ease_out = (white_during_release(c) for c in ("ease_in", "linear", "ease_out"))
+    assert ease_in > linear > ease_out > 0.0  # lingering vs. a straight fade vs. a quick drop
