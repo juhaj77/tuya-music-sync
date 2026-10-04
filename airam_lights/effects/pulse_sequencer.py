@@ -380,11 +380,15 @@ class PulseSequencer:
         if strobe is not None:
             events.append(strobe)
         strobing = self._strobe_from_step <= step < self._strobe_until_step
+        # The strobe stops at the bar line so the downbeat lands clean: a white
+        # flash right there (the phrase start's above all) would read as one
+        # more strobe flash that came late, so that step stays without one.
+        strobe_just_ended = self._strobe_from_step < self._strobe_until_step == step
 
         # -- white (the strobe has the white LEDs to itself while it runs) -------------
         white_group: Optional[int] = None
         white_reason = ""
-        if cfg.white_pattern != "off" and not strobing:
+        if cfg.white_pattern != "off" and not strobing and not strobe_just_ended:
             if phrase_start and cfg.phrase_accent:
                 white_reason = "phrase"
             elif in_fill and self._fill_step(bar_step, steps_per_bar):

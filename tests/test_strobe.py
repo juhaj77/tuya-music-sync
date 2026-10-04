@@ -188,6 +188,22 @@ def test_strobe_fills_the_last_beat_of_each_phrase_and_silences_white_there():
     assert any(e.bar_step >= 12 for e in whites if e.step // 16 not in strobe_bars)
 
 
+def test_no_white_flash_on_the_downbeat_right_after_a_strobe():
+    # The phrase start's all-lamps flash right after the strobe would read as
+    # one more strobe flash that came late - that downbeat stays without one.
+    events = _run_sequencer(PulseSequencer(_seq_cfg(phrase_accent=True), random.Random(1)), 13)
+    strobe_ends = {e.step + 1 + 4 for e in events if e.kind == "strobe"}  # announced a 16th early, 1 beat long
+    assert strobe_ends == {64, 128, 192}
+    whites = {e.step: e for e in events if e.kind == "white"}
+    for end in strobe_ends:
+        assert end not in whites
+    # Without a strobe before it, the phrase start keeps its flash.
+    no_strobe = _run_sequencer(PulseSequencer(_seq_cfg(phrase_accent=True, strobe_enabled=False), random.Random(1)), 9)
+    assert any(e.kind == "white" and e.reason == "phrase" and e.step == 64 for e in no_strobe)
+    # ...and so does a downbeat that isn't right after one.
+    assert whites[16].bar_step == 0
+
+
 def test_half_beat_strobe_starts_on_the_last_eighth():
     events = _run_sequencer(PulseSequencer(_seq_cfg(strobe_beats=0.5), random.Random(1)), 8)
     strobes = [e for e in events if e.kind == "strobe"]
