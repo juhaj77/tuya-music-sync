@@ -1384,4 +1384,24 @@ class AppConfig:
 
     @classmethod
     def with_defaults(cls) -> "AppConfig":
-        return cls()
+        """A fresh install's config: the neutral dataclass defaults with
+        default_look.DEFAULT_LOOK on top, so a first run plays a tuned show."""
+        from .default_look import DEFAULT_LOOK
+
+        cfg = cls()
+        targets = {
+            "beat_sync": cfg.color_mapping.beat_sync,
+            "smoothing": cfg.color_mapping.smoothing,
+            "rhythm": cfg.rhythm,
+            "sequencer": cfg.sequencer,
+            "chase": cfg.chase,
+            "group_switch": cfg.group_switch,
+            "network": cfg.network,
+        }
+        for section, values in DEFAULT_LOOK.items():
+            target = targets[section]
+            for key, value in values.items():
+                if not hasattr(target, key):
+                    raise KeyError(f"DEFAULT_LOOK: unknown setting {section}.{key}")
+                setattr(target, key, value)
+        return cfg

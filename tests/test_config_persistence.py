@@ -206,3 +206,16 @@ def test_every_field_is_actually_different_from_default():
     assert populated.ambient_scene != fresh_default.ambient_scene
     assert populated.audio != fresh_default.audio
     assert populated.network != fresh_default.network
+
+
+def test_fresh_install_starts_with_the_default_look():
+    cfg = AppConfig.with_defaults()
+    assert cfg.color_mapping.beat_sync.hue_attack_ms == 140.0
+    assert cfg.chase.switch_fade_ms == 140.0 and cfg.chase.enabled is False
+    assert cfg.group_switch.switch_fade_ms == 140.0 and cfg.group_switch.enabled is True
+    assert cfg.rhythm.shared_clock is True and cfg.sequencer.enabled is True
+    assert cfg.network.lamp_command_rate_hz == 50.0
+    # The neutral dataclass defaults underneath are untouched.
+    assert AppConfig().sequencer.enabled is False
+    # And the look survives a save/load round trip.
+    assert AppConfig.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()

@@ -58,17 +58,18 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 > **RGBCCT** bulb's dedicated white LEDs via its physical WHITE work_mode at the pulse's
 > peak, not just an RGB approximation, with warm and cool white flashes mixed in an
 > adjustable ratio rather than one fixed color temperature every time),
-> instead of the continuous, sometimes-muted blending the other modes do. It also ships
-> paired with the **Chase / Rotating Light overlay** enabled
-> by default, set to **complementary** color - a highlight that rotates through your
-> chase-ordered lamps always showing the opposite hue of whatever Beat Sync just put
-> there, so the combination stays visually varied instead of settling into one static
-> look. See [section 5](#5-running-the-full-application) for the full writeup, or jump
-> straight to [Beat Sync mode](#beat-sync-mode) or the
-> [Chase overlay](#chase--rotating-light-overlay). The Chase highlight's **width**
-> should scale with how many lamps are in the chase - see that section for a starting
-> formula; the shipped default (1.5) assumes a modest handful of lamps and may want
-> adjusting for very small or very large setups.
+> instead of the continuous, sometimes-muted blending the other modes do. A fresh
+> install starts with a tuned show built on it: Beat Sync on the **shared beat clock**,
+> the **pulse sequencer** walking true-white flashes from lamp group to lamp group (with
+> an occasional strobe roll), the **Group Switch** overlay in `hue_shift` mode, every hue
+> change gliding over 140 ms, and a *Lamp command rate* of 50/s so those glides stay
+> smooth. The **Chase / Rotating Light overlay** ships switched off but already set up to
+> match - turn it on and it fits the rest. Until you assign Group Switch groups (and a
+> Chase order) in the Per-Lamp tab, the white flashes land on every lamp at once. See
+> [section 5](#5-running-the-full-application) for the full writeup, or jump straight to
+> [Beat Sync mode](#beat-sync-mode) or the [Chase overlay](#chase--rotating-light-overlay).
+> The Chase highlight's **width** should scale with how many lamps are in the chase - see
+> that section for a starting formula.
 
 > **Read `DEVICE_NOTES.md` first.** It separates *confirmed facts*, *assumptions*, and
 > *things you still need to test* about your specific bulbs. This README assumes you
@@ -139,7 +140,7 @@ to preview video files past a few MB, so they aren't committed directly into the
   brightness/saturation/hue/sensitivity multipliers for every lamp.
 - **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
   width/speed/falloff curve, optionally beat- or peak-synced) layered on top of any
-  mode - **on by default**, paired with Beat Sync (see above).
+  mode - set up but switched off in a fresh install (see above).
 - **Group Switch overlay** - a discrete alternative to Chase: lamps are grouped
   (independently of Chase's own grouping) and exactly one group is fully "active" at a
   time with a hard, instant switch instead of a gradient - useful when you want a clean
@@ -598,7 +599,7 @@ neither:
   color; 360 is a full rainbow every beat.
 
 A gliding color changes on every frame, so lamps receive commands continuously - still
-capped per lamp by *Lamp command rate* (20/s by default).
+capped per lamp by *Lamp command rate* (50/s in a fresh install).
 
 #### Pulse sequencer: white and dark pulses on musical positions
 In the Beat Sync tab, the **Pulse sequencer** takes over the white and dark pulses from
