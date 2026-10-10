@@ -1073,25 +1073,38 @@ class ManualStateConfig:
     overwrite the color you'll want back when you turn it on again.
     """
 
-    last_mode: str = "rgb"  # "rgb" | "white"
+    last_mode: str = "rgb"  # "rgb" | "white" | "mix"
     last_color_r: float = 0.2
     last_color_g: float = 0.5
     last_color_b: float = 0.9
     last_white_brightness: float = 0.8
     last_white_temp: float = 0.5
+    # "mix" (Color + White tab): the white LEDs and the RGB LEDs lit at once,
+    # set group by group - so remembered per lamp, unlike the single values
+    # above. device id -> {"brightness", "temp", "r", "g", "b"}, all 0..1.
+    mix_targets: Dict[str, Dict[str, float]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ManualStateConfig":
+        mix_targets: Dict[str, Dict[str, float]] = {}
+        for device_id, values in (d.get("mix_targets") or {}).items():
+            try:
+                mix_targets[device_id] = {
+                    key: float(values.get(key, 0.0)) for key in ("brightness", "temp", "r", "g", "b")
+                }
+            except (AttributeError, TypeError, ValueError):
+                continue
         return cls(
-            last_mode=d.get("last_mode", "rgb"),
+            last_mode=d.get("last_mode", "rgb") if d.get("last_mode") in ("rgb", "white", "mix") else "rgb",
             last_color_r=float(d.get("last_color_r", 0.2)),
             last_color_g=float(d.get("last_color_g", 0.5)),
             last_color_b=float(d.get("last_color_b", 0.9)),
             last_white_brightness=float(d.get("last_white_brightness", 0.8)),
             last_white_temp=float(d.get("last_white_temp", 0.5)),
+            mix_targets=mix_targets,
         )
 
 

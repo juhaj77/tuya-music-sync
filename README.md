@@ -79,10 +79,10 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 
 ## Demo videos
 
-Two videos recorded with **v1.14** on real hardware: **8 Airam spots**, 4 in the ceiling
-and 4 along the walls, running in **Beat Sync** mode. Both have the **strobe** effect
-in them, and both were filmed on a **Xiaomi 14T in Pro mode at 60 fps**, so the camera
-isn't fighting the lights by auto-adjusting exposure and white balance.
+Videos recorded with **v1.14** on real hardware: **8 Airam spots**, 4 in the ceiling
+and 4 along the walls, running in **Beat Sync** mode. The Chase and Group videos have
+the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mode at
+60 fps**, so the camera isn't fighting the lights by auto-adjusting exposure and white balance.
 
 - [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/chase_GitHub.mp4) -
   a **forward** color effect rotates around the spots, with a **backward** white pulse
@@ -90,6 +90,9 @@ isn't fighting the lights by auto-adjusting exposure and white balance.
 - [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/group_GitHub.mp4) -
   the spots are split into **three groups**, and a white pulse walks through them
   **backward** in group order.
+- [**Mix**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/mix_GitHub.mp4) -
+  the **Group** and **Chase** effects running **on top of each other**. Filmed at
+  **30 fps** instead of 60, to fit a longer clip than the other two.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
@@ -895,6 +898,16 @@ anything you tune in one shows up in the other.
   a **White Chase** effect - a warm-or-cool region (`target_temp`) rotates through the
   chase-ordered lamps instead of an RGB highlight, using the same rotators/width/speed/
   intensity controls and the same position-grouping as the RGB Chase.
+- **Color + White tab** - lights the white LEDs and the RGB LEDs of the same lamps at
+  once, e.g. **blue under cool white** to make it read colder and **red under warm
+  white** to make it read warmer. Pick a saved lamp group (Devices & Setup -> Lamp
+  groups) or the current selection, set the white's temperature and brightness and the
+  color and its strength, and apply - then pick the next group and set it differently.
+  Each lamp's setting is remembered and comes back on restart. Both go out as one
+  command on the real-time control datapoint (DP 28), the only way the bulb shows them
+  together - so it needs *Lamp transitions* other than `legacy` (the default `direct`
+  is fine); with `legacy` the lamps show only the white. White Chase keeps the color
+  under the white while it runs.
 - **Chase / Rotating Light tab** - the RGB Chase overlay described below, run on its
   own ~30 Hz timer instead of driven by audio. "Sync to beat" isn't offered here since
   there's no audio to sync to (picking a beat-synced preset in the music app and then

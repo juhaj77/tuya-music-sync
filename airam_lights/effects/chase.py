@@ -505,7 +505,8 @@ class WhiteChaseAnimator:
                 base = result.get(device_id, WhiteTarget(0.0, 0.5))
                 temp_out = lerp(base.temp, cfg.target_temp, weight)
                 bright_out = clip(base.brightness * (1.0 + weight * cfg.intensity))
-                result[device_id] = WhiteTarget(brightness=bright_out, temp=temp_out)
+                # Keeps the colour under the white (Color + White in the manual app).
+                result[device_id] = WhiteTarget(brightness=bright_out, temp=temp_out, under=base.under)
         return result
 
 

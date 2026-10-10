@@ -62,7 +62,19 @@ class ManualLightController:
         all_ids = list(self.lamp_manager.devices.keys())
         if not all_ids:
             return
-        if ms.last_mode == "white":
+        if ms.last_mode == "mix":
+            # Set group by group, so each lamp gets back its own - and all of
+            # them, not just the current selection (which is only whichever
+            # group was picked last).
+            self.mode = "white"
+            targets = {
+                device_id: self._mix_target_from_state(ms.mix_targets[device_id])
+                for device_id in all_ids
+                if device_id in ms.mix_targets
+            }
+            self.base_white_targets.update(targets)
+            self._send_mix(targets)
+        elif ms.last_mode == "white":
             self.mode = "white"
             target = WhiteTarget(ms.last_white_brightness, ms.last_white_temp).clamped()
             for device_id in all_ids:
@@ -85,12 +97,25 @@ class ManualLightController:
         ms.last_mode = "white"
         ms.last_white_brightness, ms.last_white_temp = brightness, temp
 
+    def _forget_mix(self, device_ids) -> None:
+        """A plain colour or white applied over a lamp replaces its Color +
+        White setting, so a later restart doesn't bring the old mix back."""
+        for device_id in device_ids:
+            self.config.manual_state.mix_targets.pop(device_id, None)
+
+    @staticmethod
+    def _mix_target_from_state(values: Dict[str, float]) -> WhiteTarget:
+        under = Color(values["r"], values["g"], values["b"]).clamped()
+        return WhiteTarget(values["brightness"], values["temp"], under=under).clamped()
+
     # -- static color control ---------------------------------------------------
 
     def set_color_for_selected(self, color: Color) -> None:
         self.mode = "rgb"
         self._remember_color(color)
-        for device_id in self.lamp_manager.selected_device_ids():
+        selected = self.lamp_manager.selected_device_ids()
+        self._forget_mix(selected)
+        for device_id in selected:
             self.base_colors[device_id] = color
         self._push_rgb(self.base_colors)
 
@@ -107,9 +132,45 @@ class ManualLightController:
         self.mode = "white"
         self._remember_white(brightness, temp)
         target = WhiteTarget(brightness, temp).clamped()
-        for device_id in self.lamp_manager.selected_device_ids():
+        selected = self.lamp_manager.selected_device_ids()
+        self._forget_mix(selected)
+        for device_id in selected:
             self.base_white_targets[device_id] = target
         self._push_white(self.base_white_targets)
+
+    def set_mix_for(self, device_ids, brightness: float, temp: float, color: Color) -> None:
+        """Color + White: the white LEDs (brightness + temperature) and the
+        RGB LEDs (`color`) lit at the same time - e.g. blue under cool white,
+        red under warm white. Goes to `device_ids` directly, selected or not,
+        so a saved lamp group can be set without changing the selection.
+
+        Only bulbs driven through the real-time control datapoint (DP 28,
+        NetworkConfig.lamp_transitions other than "legacy") show both at
+        once; with "legacy" the bulb shows just the white."""
+        self.mode = "white"
+        target = WhiteTarget(brightness, temp, under=color.clamped()).clamped()
+        ms = self.config.manual_state
+        ms.last_mode = "mix"
+        targets = {}
+        for device_id in device_ids:
+            ms.mix_targets[device_id] = {
+                "brightness": target.brightness, "temp": target.temp,
+                "r": target.under.r, "g": target.under.g, "b": target.under.b,
+            }
+            self.base_white_targets[device_id] = target
+            targets[device_id] = target
+        self._send_mix(targets)
+
+    def _send_mix(self, targets: Dict[str, WhiteTarget]) -> None:
+        # A white command can't switch the white LEDs fully off (DP 28 keeps
+        # them at its 1 % minimum), so white at zero goes as a plain colour.
+        colors = {d: t.under for d, t in targets.items() if t.brightness <= 0.0 and t.under is not None}
+        whites = {d: t for d, t in targets.items() if d not in colors}
+        if colors:
+            self.lamp_manager.push_colors(colors)
+        if whites:
+            self.lamp_manager.push_white_targets(whites)
+        self.last_white_targets = {**self.last_white_targets, **targets}
 
     def _push_rgb(self, colors: Dict[str, Color]) -> None:
         selected = set(self.lamp_manager.selected_device_ids())

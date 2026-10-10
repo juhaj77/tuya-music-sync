@@ -15,6 +15,7 @@ from .tabs.devices_tab import DevicesTab
 from .tabs.manual_ambient_tab import ManualAmbientTab
 from .tabs.manual_chase_tab import ManualChaseTab
 from .tabs.manual_color_tab import ManualColorTab
+from .tabs.manual_mix_tab import ManualMixTab
 from .tabs.manual_white_tab import ManualWhiteTab
 
 logger = logging.getLogger("airam_lights.ui.manual")
@@ -34,6 +35,7 @@ class ManualMainWindow(QMainWindow):
         tabs.addTab(DevicesTab(self.controller), "Devices && Setup")
         tabs.addTab(ManualColorTab(self.controller), "Manual Color")
         tabs.addTab(ManualWhiteTab(self.controller), "White Balance")
+        tabs.addTab(ManualMixTab(self.controller), "Color + White")
         tabs.addTab(ManualChaseTab(self.controller), "Chase / Rotating Light")
         tabs.addTab(ManualAmbientTab(self.controller), "Ambient Scenes")
 

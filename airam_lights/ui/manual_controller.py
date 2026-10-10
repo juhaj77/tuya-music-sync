@@ -129,6 +129,10 @@ class ManualController(QObject):
         self.manual.set_white_for_selected(brightness, temp)
         self._sync_preview_colors()
 
+    def set_mix_for(self, device_ids, brightness: float, temp: float, color: Color) -> None:
+        self.manual.set_mix_for(device_ids, brightness, temp, color)
+        self._sync_preview_colors()
+
     def apply_config_changes(self) -> None:
         self.manual.apply_config(self.config)
 
