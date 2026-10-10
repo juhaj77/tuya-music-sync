@@ -79,8 +79,9 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 
 ## Demo videos
 
-Videos recorded with **v1.14** on real hardware: **8 Airam spots**, 4 in the ceiling
-and 4 along the walls, running in **Beat Sync** mode. The Chase and Group videos have
+Videos recorded on real hardware - Chase and Group with **v1.14**, Mix with **v1.15**:
+**8 Airam spots**, 4 in the ceiling and 4 along the walls, running in **Beat Sync**
+mode. The Chase and Group videos have
 the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mode at
 60 fps**, so the camera isn't fighting the lights by auto-adjusting exposure and white balance.
 
@@ -90,9 +91,14 @@ the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mod
 - [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/group_GitHub.mp4) -
   the spots are split into **three groups**, and a white pulse walks through them
   **backward** in group order.
-- [**Mix**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/mix_GitHub.mp4) -
-  the **Group** and **Chase** effects running **on top of each other**. Filmed at
-  **30 fps** instead of 60, to fit a longer clip than the other two.
+- [**Mix**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.15/Mix_hue_shift_relative.mp4) -
+  the **Group Switch** and **Chase** overlays running **on top of each other**, with
+  Chase in the **`hue_shift_relative`** color mode. Because the chase only nudges each
+  lamp's own hue a little instead of replacing it, Group Switch's groups hold together
+  much better than with the other chase color modes. The phone camera separates the
+  colors rather poorly, but in the row of lamps on the back wall you should be able to
+  see the hue variation moving from left to right on top of the Group Switch color.
+  Filmed at **30 fps** instead of 60, to fit a longer clip than the other two.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
