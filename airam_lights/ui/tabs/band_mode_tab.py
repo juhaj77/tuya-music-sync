@@ -470,12 +470,13 @@ class BandModeTab(QWidget):
         color_mode_row = QHBoxLayout()
         color_mode_row.addWidget(QLabel("Chase color:"))
         self.chase_color_mode_combo = QComboBox()
-        self.chase_color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
+        self.chase_color_mode_combo.addItems(["custom", "complementary", "hue_shift", "hue_shift_relative"])
         self.chase_color_mode_combo.setCurrentText(ch.color_mode)
         self.chase_color_mode_combo.setToolTip(
             "custom: one fixed hue/saturation for the whole highlight. complementary: always the "
             "opposite hue (+180 deg) of whatever that lamp's active mode is already showing. hue_shift: "
-            "each chase position gets a progressively different hue (a rainbow trail)."
+            "each chase position gets a progressively different hue (a rainbow trail). hue_shift_relative: "
+            "each lamp's own hue turned by 'Hue shift step'."
         )
         self.chase_color_mode_combo.currentTextChanged.connect(self._on_chase_changed)
         color_mode_row.addWidget(self.chase_color_mode_combo)
@@ -484,7 +485,8 @@ class BandModeTab(QWidget):
         color_mode_label = QLabel(
             "custom: a fixed color you set below. complementary: the opposite hue of each lamp's own "
             "color. hue_shift: each chase position shows a different hue (a rainbow trail) starting "
-            "from the custom hue below, stepped by 'Hue shift step' per position."
+            "from the custom hue below, stepped by 'Hue shift step' per position. hue_shift_relative: "
+            "each lamp's own color, its hue turned by 'Hue shift step'."
         )
         color_mode_label.setWordWrap(True)
         appearance_col.addWidget(color_mode_label)
@@ -500,8 +502,9 @@ class BandModeTab(QWidget):
         )
         self.chase_hue_shift_slider = FloatSlider(
             "Hue shift step (for 'hue_shift')", 1.0, 180.0, ch.hue_shift_step_deg, decimals=1, suffix=" deg",
-            tooltip="Only used by the 'hue_shift' color mode - how far the hue advances from one chase "
-            "position to the next, starting from Custom hue above.",
+            tooltip="Only used by the 'hue_shift' color modes. hue_shift: how far the hue advances from one "
+            "chase position to the next, starting from Custom hue above. hue_shift_relative: how far the "
+            "highlight turns each lamp's own hue.",
         )
         for w in (self.chase_hue_slider, self.chase_sat_slider, self.chase_hue_shift_slider):
             w.valueChanged.connect(self._on_chase_changed)
@@ -981,7 +984,7 @@ class BandModeTab(QWidget):
             color_mode = w("color_mode_combo").currentText()
             color_reason = f"{name}'s color mode is '{color_mode}'."
             set_active([w("hue_slider"), w("sat_slider")], color_mode in ("custom", "hue_shift"), color_reason)
-            set_active([w("hue_shift_slider")], color_mode == "hue_shift", color_reason)
+            set_active([w("hue_shift_slider")], color_mode in ("hue_shift", "hue_shift_relative"), color_reason)
         set_active([self.chase_switch_fade_slider], self.chase_switch_fade_checkbox.isChecked(), "Soft steps is off.")
 
     # -- chase overlay --------------------------------------------------------------------

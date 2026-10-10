@@ -98,6 +98,89 @@ def test_hue_shift_mode_varies_hue_by_position():
         assert abs(((h - expected_hue + 180.0) % 360.0) - 180.0) < 1.0
 
 
+def _hue_diff(a: float, b: float) -> float:
+    return ((a - b + 180.0) % 360.0) - 180.0
+
+
+def test_hue_shift_relative_turns_each_lamps_own_hue_by_the_step():
+    # Same step at every position, from each lamp's own hue - not a rainbow
+    # from Custom hue - and the lamp's own saturation is kept.
+    cfg = ChaseEffectConfig(
+        enabled=True, width=0.3, intensity=0.0, color_mode="hue_shift_relative", custom_hue_deg=200.0,
+        custom_saturation=1.0, hue_shift_step_deg=15.0,
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [["a"], ["b"], ["c"], ["d"]]
+    base_colors = {
+        "a": Color.from_hsv(10.0, 1.0, 0.5),
+        "b": Color.from_hsv(120.0, 0.6, 0.5),
+        "c": Color.from_hsv(240.0, 1.0, 0.5),
+        "d": Color.from_hsv(350.0, 1.0, 0.5),  # wraps past 360
+    }
+    for i, group in enumerate(groups):
+        animator.position = float(i)
+        out = animator.apply(dict(base_colors), groups)
+        h_base, s_base, _ = base_colors[group[0]].to_hsv()
+        h, s, _ = out[group[0]].to_hsv()
+        assert abs(_hue_diff(h, h_base + 15.0)) < 1.0
+        assert abs(s - s_base) < 0.01
+
+
+def test_hue_shift_relative_part_way_never_turns_more_than_the_step():
+    # In between (a wide, soft highlight) the turn is the step's share, the
+    # step's own way round - never the long way or more than the step.
+    cfg = ChaseEffectConfig(
+        enabled=True, width=3.0, intensity=0.0, color_mode="hue_shift_relative", hue_shift_step_deg=15.0
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [[f"lamp{i}"] for i in range(8)]
+    for position in [p / 10.0 for p in range(80)]:
+        animator.position = position
+        base_colors = {g[0]: Color.from_hsv((position * 97.0 + i * 45.0) % 360.0, 1.0, 0.5) for i, g in enumerate(groups)}
+        out = animator.apply(dict(base_colors), groups)
+        for g in groups:
+            turn = _hue_diff(out[g[0]].to_hsv()[0], base_colors[g[0]].to_hsv()[0])
+            assert -0.5 < turn < 15.5
+
+
+def test_hue_shift_relative_does_not_build_up_over_many_ticks():
+    # A moving chase over a base hue that keeps turning (like Beat Sync's
+    # "step" hue) for a long time: the output stays within the step of
+    # whatever the base is on that tick - nothing accumulates.
+    cfg = ChaseEffectConfig(
+        enabled=True, width=2.0, intensity=0.0, color_mode="hue_shift_relative", hue_shift_step_deg=15.0,
+        falloff_curve="bezier", switch_fade=True, switch_fade_ms=140.0, speed_rotations_per_s=0.5,
+    )
+    animator = ChaseAnimator(cfg)
+    groups = [[f"lamp{i}"] for i in range(8)]
+    base_hue = 0.0
+    for tick in range(5000):
+        base_hue = (base_hue + 53.3) % 360.0 if tick % 15 == 0 else base_hue
+        animator.tick(1.0 / 30.0, num_positions=len(groups))
+        base_colors = {g[0]: Color.from_hsv(base_hue, 1.0, 0.5) for g in groups}
+        out = animator.apply(dict(base_colors), groups)
+        for g in groups:
+            h = out[g[0]].to_hsv()[0]
+            assert 0.0 <= h < 360.0
+            assert -0.5 < _hue_diff(h, base_hue) < 15.5
+
+
+def test_hue_shift_relative_then_group_switch_complementary():
+    # Chase runs first, Group Switch on top of it: the active group shows
+    # the opposite of the already turned hue - base + 15 + 180.
+    chase = ChaseAnimator(ChaseEffectConfig(
+        enabled=True, width=0.3, intensity=0.0, color_mode="hue_shift_relative", hue_shift_step_deg=15.0
+    ))
+    gs = GroupSwitchAnimator(GroupSwitchEffectConfig(enabled=True, color_mode="complementary", intensity=0.0))
+    groups = [["a"], ["b"]]
+    base_colors = {"a": Color.from_hsv(240.0, 1.0, 0.5), "b": Color.from_hsv(240.0, 1.0, 0.5)}
+    chase.position = 0.0
+    gs.position = 0.0
+    out = gs.apply(chase.apply(dict(base_colors), groups), groups)
+    assert abs(_hue_diff(out["a"].to_hsv()[0], 240.0 + 15.0 + 180.0)) < 1.0
+    assert abs(_hue_diff(out["b"].to_hsv()[0], 240.0)) < 1.0
+
+
 def test_multiple_rotators_light_opposite_positions():
     cfg = ChaseEffectConfig(enabled=True, num_rotators=2, width=0.6, intensity=3.0)
     animator = ChaseAnimator(cfg)

@@ -795,13 +795,15 @@ class ChaseEffectConfig:
     # on that lamp, so it stays visually interesting/varied no matter what
     # colors the base mode is currently showing, instead of imposing one
     # fixed hue regardless of context.
-    color_mode: str = "complementary"  # "custom" | "complementary" | "hue_shift"
+    color_mode: str = "complementary"  # "custom" | "complementary" | "hue_shift" | "hue_shift_relative"
     custom_hue_deg: float = 280.0
     custom_saturation: float = 1.0
     # Used when color_mode == "hue_shift": each successive chase position
     # shows a hue offset by this many degrees from the previous one (starting
     # from custom_hue_deg), so the traveling light's own color gradually
     # cycles through the spectrum as it moves around the loop.
+    # "hue_shift_relative": the highlight turns each lamp's own hue (what the
+    # active mode shows) by this many degrees instead, keeping its saturation.
     hue_shift_step_deg: float = 45.0
     # Soft steps: with only a handful of lamps the highlight can't really
     # glide - whatever the width and falloff curve, each lamp's color changes

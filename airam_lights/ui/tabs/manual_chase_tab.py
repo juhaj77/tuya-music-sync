@@ -151,7 +151,7 @@ class ManualChaseTab(QWidget):
         color_row = QHBoxLayout()
         color_row.addWidget(QLabel("Chase color:"))
         self.color_mode_combo = QComboBox()
-        self.color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
+        self.color_mode_combo.addItems(["custom", "complementary", "hue_shift", "hue_shift_relative"])
         self.color_mode_combo.setCurrentText(ch.color_mode)
         self.color_mode_combo.currentTextChanged.connect(self._on_changed)
         color_row.addWidget(self.color_mode_combo)
@@ -160,7 +160,8 @@ class ManualChaseTab(QWidget):
         layout.addWidget(
             QLabel(
                 "custom: a fixed color below. complementary: the opposite hue of each lamp's own color. "
-                "hue_shift: a rainbow trail - each position's hue steps by the amount below."
+                "hue_shift: a rainbow trail - each position's hue steps by the amount below. "
+                "hue_shift_relative: each lamp's own hue turned by the amount below."
             )
         )
 

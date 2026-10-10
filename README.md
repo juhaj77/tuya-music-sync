@@ -806,7 +806,10 @@ producing.
   the active mode - stays visually varied no matter what colors the base mode is
   currently producing. **hue_shift** instead gives each chase position a progressively
   different, fixed hue (a rainbow trail effect, stepped by `hue_shift_step_deg` from
-  `custom_hue_deg`). **custom** uses one fixed hue/saturation for the whole highlight -
+  `custom_hue_deg`). **hue_shift_relative** turns the hue the lamp is already showing by
+  `hue_shift_step_deg` (e.g. 15° = a small, even nudge that follows the Beat Sync
+  colors), keeping its saturation; with Group Switch on top in `complementary` mode the
+  active group shows the opposite of that already turned hue. **custom** uses one fixed hue/saturation for the whole highlight -
   for the clearest, most obviously visible effect, pick a hue very different from your
   usual palette (e.g. if your mode tends toward blues/greens, try an orange/red hue
   around 20-40°) combined with a narrow width.
@@ -993,7 +996,8 @@ positions.
   Sync's *Hue snap speed*). Longer = softer, with a longer trail.
 - **Color**: `custom` (a fixed hue/saturation you set), `complementary` (the opposite
   hue of whatever that lamp's own color currently is), or `hue_shift` (each position
-  shows a progressively different hue - a rainbow trail as the light travels around).
+  shows a progressively different hue - a rainbow trail as the light travels around), or
+  `hue_shift_relative` (each lamp's own hue turned by the hue shift step).
 - **Dwell x** (per-lamp, in the same position table): how long the highlight lingers
   at that lamp's own position relative to the rest of the loop - 1.0 is uniform/
   default. Lower it for a position where several lamps share one chase order (e.g. a

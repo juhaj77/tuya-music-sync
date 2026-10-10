@@ -406,6 +406,11 @@ class ChaseAnimator:
                 if cfg.color_mode == "complementary":
                     target_hue = (h_base + 180.0) % 360.0
                     target_sat = s_base
+                elif cfg.color_mode == "hue_shift_relative":
+                    # The lamp's own hue, turned by the step - the same for
+                    # every position, so it follows the active mode's color.
+                    target_hue = (h_base + cfg.hue_shift_step_deg) % 360.0
+                    target_sat = s_base
                 elif cfg.color_mode == "hue_shift":
                     # Each position shows a progressively different hue, so
                     # the traveling light's own color gradually shifts
@@ -420,6 +425,11 @@ class ChaseAnimator:
                     # Exactly opposite: both ways round are equally short, so
                     # always go the same way - see _hue_part_way().
                     h_out = (h_base + 180.0 * weight) % 360.0
+                elif cfg.color_mode == "hue_shift_relative":
+                    # Always the step's own way round, worked out afresh from
+                    # this tick's own hue - nothing is carried over between
+                    # ticks, so the shift can't build up past the step.
+                    h_out = (h_base + cfg.hue_shift_step_deg * weight) % 360.0
                 elif weight == 1.0:
                     self._hue_deltas.pop(device_id, None)
                     h_out = target_hue
