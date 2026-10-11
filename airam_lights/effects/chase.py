@@ -218,6 +218,16 @@ class ChaseAnimator:
         # Per lamp, while it is part of the way to the highlight color: which
         # way round the hue circle that way goes - see _hue_part_way().
         self._hue_deltas: Dict[str, float] = {}
+        # The music-driven hue step (ChaseEffectConfig.hue_step_source), set
+        # by the engine every tick; None = the fixed hue_shift_step_deg.
+        self.hue_step_override: Optional[float] = None
+
+    @property
+    def hue_step_deg(self) -> float:
+        """The step the hue_shift color modes use right now."""
+        if self.hue_step_override is not None:
+            return self.hue_step_override
+        return self.config.hue_shift_step_deg
 
     @property
     def position(self) -> float:
@@ -385,6 +395,7 @@ class ChaseAnimator:
             return colors
 
         cfg = self.config
+        step = self.hue_step_deg
         # Mid soft step (see _smooth()) the positions are between two places.
         soft = cfg.switch_fade and cfg.switch_fade_ms > 0.0 and len(self._weights) == n
         weights = self._weights if soft else self._target_weights(n)
@@ -409,13 +420,13 @@ class ChaseAnimator:
                 elif cfg.color_mode == "hue_shift_relative":
                     # The lamp's own hue, turned by the step - the same for
                     # every position, so it follows the active mode's color.
-                    target_hue = (h_base + cfg.hue_shift_step_deg) % 360.0
+                    target_hue = (h_base + step) % 360.0
                     target_sat = s_base
                 elif cfg.color_mode == "hue_shift":
                     # Each position shows a progressively different hue, so
                     # the traveling light's own color gradually shifts
                     # through the spectrum as it moves around the loop.
-                    target_hue = (cfg.custom_hue_deg + i * cfg.hue_shift_step_deg) % 360.0
+                    target_hue = (cfg.custom_hue_deg + i * step) % 360.0
                     target_sat = cfg.custom_saturation
                 else:  # "custom"
                     target_hue = cfg.custom_hue_deg
@@ -429,7 +440,7 @@ class ChaseAnimator:
                     # Always the step's own way round, worked out afresh from
                     # this tick's own hue - nothing is carried over between
                     # ticks, so the shift can't build up past the step.
-                    h_out = (h_base + cfg.hue_shift_step_deg * weight) % 360.0
+                    h_out = (h_base + step * weight) % 360.0
                 elif weight == 1.0:
                     self._hue_deltas.pop(device_id, None)
                     h_out = target_hue

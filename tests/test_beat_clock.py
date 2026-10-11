@@ -168,3 +168,145 @@ def test_keeps_beating_when_kicks_stay_under_the_sensitivity():
     results = _run(clock, compressed(30.0))
     assert clock.locked
     assert len(_beats(results, after=10.0)) == pytest.approx(40, abs=2)
+
+
+# -- fallback tiers: music without a kick -----------------------------------------------
+
+
+def _notes(duration_s, note_times, energy=0.3, loudness=0.5, start=0.0):
+    """Yields (t, energy, flux, loudness): a steady, kick-less bass level and
+    a spectral-flux spike (one tick wide) at each of `note_times`."""
+    notes = sorted(note_times)
+    i = 0
+    n = 0
+    t = start
+    while t < start + duration_s:
+        flux = 0.05 + 0.01 * ((n * 7) % 5)  # a little jitter between notes
+        while i < len(notes) and notes[i] < t - TICK / 2:
+            i += 1
+        if i < len(notes) and abs(notes[i] - t) < TICK / 2:
+            flux = 1.0
+        yield t, energy, flux, loudness
+        n += 1
+        t = start + n * TICK
+
+
+def _run_notes(clock, stream):
+    return [(t, clock.update(e, t, flux=f, loudness=l)) for t, e, f, l in stream]
+
+
+def _rubato_times(duration_s, start_period, end_period):
+    """Note times whose spacing glides from start_period to end_period."""
+    times, t = [], 0.3
+    while t < duration_s:
+        times.append(t)
+        t += start_period + (end_period - start_period) * (t / duration_s)
+    return times
+
+
+def test_follows_the_notes_when_there_is_no_kick():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+    period = 0.7
+    times = [0.3 + k * period for k in range(40)]
+    results = _run_notes(clock, _notes(25.0, times))
+    assert clock.source == "flow"
+    assert clock.period_s == pytest.approx(period, rel=0.06)
+    beat_times = [t for t, _ in _beats(results, after=15.0)]
+    gaps = [b - a for a, b in zip(beat_times, beat_times[1:])]
+    assert gaps and all(abs(g - period) < 0.12 for g in gaps), gaps
+    assert clock.position(25.0) is not None  # the pulse sequencer has a grid to place pulses on
+
+
+def test_flow_bends_with_rubato():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+    times = _rubato_times(40.0, 0.6, 0.85)
+    _run_notes(clock, _notes(40.0, times))
+    assert clock.source == "flow"
+    assert clock.period_s == pytest.approx(0.85, rel=0.1)
+
+
+def test_free_pace_without_a_steady_tempo():
+    import random
+
+    rng = random.Random(3)
+    times, t = [], 0.2
+    while t < 30.0:
+        times.append(t)
+        t += rng.uniform(0.15, 1.1)  # notes with no steady spacing
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+    results = _run_notes(clock, _notes(30.0, times))
+    sources = {b.source for t, b in results if t > 10.0}
+    assert "free" in sources
+    beats = _beats(results, after=10.0)
+    assert len(beats) >= 15  # keeps moving
+    gaps = [b - a for (a, _), (b, _) in zip(beats, beats[1:])]
+    assert min(gaps) > 0.2  # never jittery
+
+
+def test_free_pace_follows_note_density():
+    def settled_period(spacing):
+        clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+        clock._estimate_period = lambda env, **kw: None  # no periodicity anywhere: always the free tier
+        times = [0.2 + k * spacing for k in range(int(20.0 / spacing))]
+        _run_notes(clock, _notes(20.0, times))
+        assert clock.source == "free"
+        return clock.period_s
+
+    assert settled_period(0.2) < settled_period(0.45)
+
+
+def test_free_pace_speeds_up_when_the_music_swells():
+    def settled_period(swell):
+        clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+        clock._estimate_period = lambda env, **kw: None
+        times = [0.2 + k * 0.3 for k in range(60)]
+        stream = [
+            (t, e, f, l + (swell * (t - 10.0) / 8.0 if t > 10.0 else 0.0))
+            for t, e, f, l in _notes(18.0, times, loudness=0.4)
+        ]
+        _run_notes(clock, stream)
+        return clock.period_s
+
+    assert settled_period(0.15) < settled_period(0.0) < settled_period(-0.15)
+
+
+def test_a_clear_beat_takes_over_from_the_notes():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+    times = [0.3 + k * 0.7 for k in range(30)]
+    _run_notes(clock, _notes(20.0, times))
+    assert clock.source == "flow"
+    # Kicks come in at 120 BPM.
+    for t, e in _envelope(12.0, period_s=0.5):
+        clock.update(e, 20.0 + t, flux=0.05, loudness=0.5)
+    assert clock.source == "beat"
+    assert clock.period_s == pytest.approx(0.5, rel=0.04)
+
+
+def test_beat_lost_coasts_then_follows_the_notes():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, coast_bars=2, fallback=True)
+    for t, e in _envelope(10.0, period_s=0.5):
+        clock.update(e, t, flux=0.05, loudness=0.5)
+    assert clock.source == "beat"
+    times = [10.3 + k * 0.7 for k in range(40)]
+    results = _run_notes(clock, _notes(25.0, times, start=10.0))
+    assert any(b.coasting for t, b in results if t < 16.0)  # the old tempo first
+    assert clock.source == "flow"
+    assert clock.period_s == pytest.approx(0.7, rel=0.06)
+
+
+def test_fallback_off_keeps_the_old_behaviour():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=False)
+    times = [0.3 + k * 0.7 for k in range(30)]
+    results = _run_notes(clock, _notes(20.0, times))
+    assert not clock.locked
+    assert not _beats(results)  # steady bass, no kicks: nothing to react to
+
+
+def test_silence_stops_the_fallback_too():
+    clock = BeatClock(sensitivity=1.4, min_interval_ms=100, min_energy=0.1, fallback=True)
+    times = [0.3 + k * 0.7 for k in range(30)]
+    _run_notes(clock, _notes(20.0, times))
+    assert clock.locked
+    results = _run_notes(clock, _notes(4.0, [], energy=0.0, loudness=0.0, start=20.0))
+    assert not clock.locked
+    assert not _beats(results, after=21.0)

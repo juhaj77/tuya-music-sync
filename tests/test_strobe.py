@@ -473,6 +473,7 @@ def _make_engine(monkeypatch, transitions="direct", **strobe):
     config.color_mapping.mode = "beat_sync"
     config.rhythm.shared_clock = True
     config.rhythm.lead_ms = 0.0
+    config.rhythm.fallback = False  # the fake frame has no spectrum for the spectral flux
     config.network.lamp_transitions = transitions
     config.network.lamp_command_rate_hz = 20.0
     bs = config.color_mapping.beat_sync

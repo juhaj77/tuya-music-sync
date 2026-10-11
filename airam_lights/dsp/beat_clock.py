@@ -23,7 +23,8 @@ BeatDetector) it adds:
 - Coasting: when the tempo estimate loses the beat while the music keeps
   playing (a breakdown, a fill, a vocal passage with no clear kick), the
   grid keeps running on the last tempo for up to `coast_bars` bars instead
-  of dropping the lock - otherwise every layer following the clock would
+  of dropping the lock (only a lock that held for a few seconds - a
+  briefly-seen tempo is more likely chance than a beat) - otherwise every layer following the clock would
   stand still until the beat is found again. A clear tempo re-anchors as
   usual; silence stops the clock straight away.
 - Lead: with `lead_ms` > 0, locked beats are emitted that much BEFORE the
@@ -35,6 +36,20 @@ BeatDetector) it adds:
 - Accents: a beat whose onset strength is in the top `accent_ratio` of
   recent beats is flagged, so e.g. true-white flashes can go on the big hits
   only instead of on a random subset.
+- Fallback (`fallback`, with spectral flux fed to update()): music without a
+  steady kick - classical, acoustic, ambient - never gives the bass band a
+  tempo, so once coasting runs out the clock moves down a tier instead of
+  stopping:
+  "flow": the same tempo estimate and grid, but from the spectral flux
+  (every new note, not just kicks), with a wider tempo range and a looser,
+  faster-following grid so rubato doesn't throw it off.
+  "free": no periodicity in the notes either - the grid keeps running at a
+  pace set by how many notes are being played and whether the music is
+  swelling or calming down, and a strong note late in a beat starts the
+  next beat right there.
+  A clear tempo on a higher tier takes over again (two agreeing estimates
+  in a row, so one odd estimate can't flip it); silence stops the clock.
+  `source` on the beats says which tier produced them.
 
 Pure and dependency-light (numpy only), driven by explicit timestamps, so it
 can be unit-tested with synthetic pulse trains (tests/test_beat_clock.py).
@@ -44,7 +59,7 @@ from __future__ import annotations
 import collections
 import math
 from dataclasses import dataclass
-from typing import Deque, List, Optional, Tuple
+from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -60,6 +75,13 @@ _PHASE_GAIN = 0.35
 # The lock is dropped after this many tempo updates in a row without a
 # clear periodicity (or with the music silent).
 _LOCK_LOSS_UPDATES = 3
+# Agreeing estimates in a row a tier needs to start or move its grid, and to
+# take the grid over from a lower tier (see _confirmed).
+_CONFIRM_UPDATES = 2
+_TAKEOVER_UPDATES = 3
+# Only a lock confirmed this many tempo updates (0.5 s each) may coast: a
+# tempo that only showed up briefly is more likely chance than a beat.
+_COAST_MIN_HITS = 6
 # How strongly each tempo update's envelope-wide phase estimate steers the grid.
 _COMB_GAIN = 0.3
 _PHASE_STEPS = 32
@@ -69,6 +91,35 @@ _RECENT_ACTIVITY_S = 1.5
 _RECENT_ACTIVITY_SHARE = 0.25
 # A new tempo estimate this far (relative) from the current one re-anchors.
 _RETEMPO_TOLERANCE = 0.06
+# The autocorrelation peak a tempo needs (white noise reaches ~0.1, a kick
+# pattern ~0.3 and up).
+_MIN_AC = 0.15
+
+# Fallback tiers (see Fallback in the module docstring).
+_FLOW_WINDOW_S = 8.0
+_FLOW_MIN_PERIOD_S = 60.0 / 180.0
+_FLOW_MAX_PERIOD_S = 60.0 / 40.0
+_FLOW_PRIOR_PERIOD_S = 0.6  # ~100 BPM: classical tempos sit lower than dance music
+_FLOW_PRIOR_OCTAVES = 1.0
+_FLOW_MIN_AC = 0.2
+_FLOW_TOLERANCE = 0.3  # wider than _ON_BEAT_TOLERANCE: played notes are less exact than a drum machine
+_FLOW_PHASE_GAIN = 0.45
+_FLOW_TEMPO_GAIN = 0.35  # follows tempo changes (rubato) faster than the beat tier's 0.2
+_FREE_PHASE_GAIN = 0.5
+_FREE_MIN_PERIOD_S = 60.0 / 140.0
+_FREE_MAX_PERIOD_S = 60.0 / 50.0
+_FREE_DEFAULT_PERIOD_S = 0.75
+_FREE_DENSITY_WINDOW_S = 6.0
+_FREE_NOTES_PER_BEAT = 2.0  # notes per beat the free pace assumes (8ths)
+_FREE_TEMPO_GAIN = 0.25  # per tempo update (0.5 s): the pace settles over ~2 s
+_FREE_SWELL_OCTAVES_PER_UNIT = 5.0  # pace doubles per +0.2 (~18 dB) of loudness above the slow average
+_FREE_MAX_SWELL = 1.33
+# Spectral-flux onsets (the fallback tiers' note onsets).
+_FLUX_HISTORY_S = 1.2
+_FLUX_SENSITIVITY = 1.4
+_FLUX_MIN_INTERVAL_S = 0.12
+_LOUDNESS_FAST_S = 1.0
+_LOUDNESS_SLOW_S = 8.0
 
 
 @dataclass
@@ -86,6 +137,7 @@ class ClockBeat:
     period_s: Optional[float] = None
     locked: bool = False
     coasting: bool = False  # running on the last known tempo, beat not currently detected
+    source: str = ""  # tier running the grid: "beat", "flow", "free"; "" = no grid
 
     @property
     def bpm(self) -> Optional[float]:
@@ -104,6 +156,7 @@ class BeatClock:
         beats_per_bar: int = 4,
         accent_ratio: float = 0.25,
         coast_bars: int = 8,
+        fallback: bool = False,
     ):
         self.sensitivity = sensitivity
         self.min_interval_ms = min_interval_ms
@@ -114,6 +167,7 @@ class BeatClock:
         self.beats_per_bar = beats_per_bar
         self.accent_ratio = accent_ratio
         self.coast_bars = coast_bars
+        self.fallback = fallback
         self.reset()
 
     def reset(self) -> None:
@@ -126,7 +180,9 @@ class BeatClock:
         self._period: Optional[float] = None
         self._grid_anchor: Optional[float] = None  # time of a (real, not lead-shifted) grid beat
         self._tempo_misses = 0
-        self._pending_period: Optional[float] = None  # a tempo change waiting for a second, agreeing estimate
+        # Per tier: its latest unconfirmed tempo estimate and how many in a row agreed (see _confirmed).
+        self._pending: Dict[str, Tuple[float, int]] = {}
+        self._lock_hits = 0  # confirmed tempo updates since the grid last (re)locked
         self._coast_since: Optional[float] = None  # when the current run of tempo misses started
         self._last_beat_time: Optional[float] = None  # real (grid) time of the last emitted beat
         self._last_beat_aligned = 0
@@ -135,6 +191,17 @@ class BeatClock:
         self._slot_strength = [0.0] * max(1, self.beats_per_bar)
         self._downbeat_slot = 0
         self._recent_strengths: Deque[float] = collections.deque(maxlen=16)
+        self._source = ""  # see ClockBeat.source
+        self._flow_misses = 0
+        self._flux_history: Deque[Tuple[float, float]] = collections.deque()  # (t, flux) for the rolling average
+        self._flux_envelope: Deque[Tuple[float, float]] = collections.deque()  # (t, flux onset strength)
+        self._flux_onsets: Deque[float] = collections.deque()  # times, for the free tier's note density
+        self._last_flux_onset: Optional[float] = None
+        self._flux_strengths: Deque[float] = collections.deque(maxlen=16)
+        self._have_flux = False
+        self._loud_fast: Optional[float] = None
+        self._loud_slow: Optional[float] = None
+        self._last_loudness_t: Optional[float] = None
         self.latest = ClockBeat()
 
     # -- public state ------------------------------------------------------------------
@@ -149,7 +216,11 @@ class BeatClock:
 
     @property
     def coasting(self) -> bool:
-        return self.locked and self._tempo_misses >= _LOCK_LOSS_UPDATES
+        return self.locked and self._source == "beat" and self._tempo_misses >= _LOCK_LOSS_UPDATES
+
+    @property
+    def source(self) -> str:
+        return self._source if self.locked else ""
 
     def position(self, now_s: float) -> Optional[float]:
         """Where in the music we are (lead included, i.e. where the lamps will
@@ -164,12 +235,24 @@ class BeatClock:
 
     # -- update ----------------------------------------------------------------------------
 
-    def update(self, energy: float, now_s: float) -> ClockBeat:
+    def update(
+        self, energy: float, now_s: float, flux: Optional[float] = None, loudness: Optional[float] = None
+    ) -> ClockBeat:
         """Feed one energy sample (the caller's band energy, roughly 0..1)
-        at wall-clock time `now_s`. Returns what happened on this tick."""
+        at wall-clock time `now_s`. Returns what happened on this tick.
+
+        `flux` (SpectralFeatures' spectral flux) and `loudness` (broadband
+        level, 0..1) feed the fallback tiers; without them, or with
+        `fallback` off, the clock only ever follows the beat band."""
         onset, strength = self._detect_onset(energy, now_s)
-        if energy >= self.min_energy:
+        if energy >= self.min_energy or (loudness is not None and loudness >= self.min_energy):
             self._last_loud = now_s
+        flux_onset, flux_strength = False, 0.0
+        if flux is not None:
+            self._have_flux = True
+            flux_onset, flux_strength = self._detect_flux_onset(flux, now_s, loudness)
+        if loudness is not None:
+            self._track_loudness(loudness, now_s)
         self._update_tempo(now_s)
 
         if not self.locked:
@@ -179,30 +262,42 @@ class BeatClock:
         lead = max(0.0, self.lead_ms) / 1000.0
         # Never two beats closer than half a period, whichever path emits them.
         spaced = self._last_emit is None or now_s - self._last_emit >= 0.5 * period
+        tolerance, phase_gain = _ON_BEAT_TOLERANCE, _PHASE_GAIN
+        if self._source in ("flow", "free"):
+            # The fallback tiers follow notes, not kicks.
+            onset, strength = flux_onset, flux_strength
+            tolerance = _FLOW_TOLERANCE
+            phase_gain = _FLOW_PHASE_GAIN if self._source == "flow" else _FREE_PHASE_GAIN
 
         if onset:
             index = self._grid_index(now_s)
             error = now_s - (self._grid_anchor + index * period)
-            if abs(error) <= _ON_BEAT_TOLERANCE * period:
+            if abs(error) <= tolerance * period:
                 # On-beat onset: pull the grid toward it (a simple phase-locked loop).
-                self._grid_anchor += _PHASE_GAIN * error
+                self._grid_anchor += phase_gain * error
                 if spaced and (self._emitted_grid_index is None or index > self._emitted_grid_index):
                     self._emitted_grid_index = index
                     return self._emit(now_s, strength, predicted=False, grid_time=self._grid_anchor + index * period)
                 # Already emitted early (lead) for this grid beat - just learn how hard it hit.
                 self._learn_strength((self._beat_count - 1) % len(self._slot_strength), strength)
+            elif self._source == "free" and spaced and self._is_strong_flux(strength):
+                # Free pace: a strong note well into the beat starts the next
+                # beat right here, so the pulse still answers the music.
+                self._grid_anchor = now_s
+                self._emitted_grid_index = 0
+                return self._emit(now_s, strength, predicted=False, grid_time=now_s)
             # Off-beat onsets (hi-hats, off-beat snares, vocals) are ignored.
             return self._idle()
 
         # Scheduled beat: the next grid beat, emitted `lead` early; with no
         # lead, a fill-in once the grid beat has clearly passed with no onset.
         music_playing = self._last_loud is not None and now_s - self._last_loud < 2.0 * period
-        next_index = self._grid_index(now_s + lead - _ON_BEAT_TOLERANCE * period)
+        next_index = self._grid_index(now_s + lead - tolerance * period)
         next_time = self._grid_anchor + next_index * period
         if lead > 0.0:
             due = now_s >= next_time - lead
         else:
-            due = now_s >= next_time + _ON_BEAT_TOLERANCE * period
+            due = now_s >= next_time + tolerance * period
         if (
             due
             and spaced
@@ -250,49 +345,92 @@ class BeatClock:
         if not self.tempo_lock:
             self._period = None
             self._grid_anchor = None
+            self._source = ""
             return
         if self._last_tempo_update is not None and now_s - self._last_tempo_update < _TEMPO_UPDATE_S:
             return
         self._last_tempo_update = now_s
 
-        period = self._estimate_period()
+        period = self._estimate_period(self._envelope)
         music_playing = self._last_loud is not None and now_s - self._last_loud < 2.0
-        if period is None or not music_playing:
-            if self._tempo_misses == 0:
-                self._coast_since = now_s
-            self._tempo_misses += 1
-            if self._tempo_misses >= _LOCK_LOSS_UPDATES:
-                if not music_playing:
-                    self._grid_anchor = None
-                    self._period = None
-                elif not self._may_coast(now_s):
-                    self._grid_anchor = None  # lost the beat: fall back to reacting to raw onsets
+        if period is not None and music_playing and self._confirmed(period, "beat"):
+            self._tempo_misses = 0
+            self._coast_since = None
+            self._accept_tempo(now_s, period, "beat", self._envelope)
             return
-        self._tempo_misses = 0
-        self._coast_since = None
+        # No tempo, or one the previous estimate doesn't agree with: a miss.
+        if self._tempo_misses == 0:
+            self._coast_since = now_s
+        self._tempo_misses += 1
+        if not music_playing:
+            if self._tempo_misses >= _LOCK_LOSS_UPDATES:
+                self._grid_anchor = None
+                self._period = None
+                self._source = ""
+            return
+        lost = self._tempo_misses >= _LOCK_LOSS_UPDATES and not (self._source == "beat" and self._may_coast(now_s))
+        if self.fallback and self._have_flux and (self._source in ("flow", "free") or lost):
+            self._fallback_tempo(now_s)
+        elif lost:
+            self._grid_anchor = None  # lost the beat: fall back to reacting to raw onsets
+            self._source = ""
 
-        relock = self._grid_anchor is None
-        if self._period is None or abs(period - self._period) / self._period > _RETEMPO_TOLERANCE:
-            if self._grid_anchor is not None and not (
-                self._pending_period is not None
-                and abs(period - self._pending_period) / self._pending_period <= _RETEMPO_TOLERANCE
-            ):
-                # A running grid only moves to a new tempo that two estimates
-                # in a row agree on - one odd estimate (a fill, the window's
-                # edge) must not throw the beat off.
-                self._pending_period = period
-                return
-            self._pending_period = None
+    def _confirmed(self, period: Optional[float], source: str) -> bool:
+        """Whether tier `source`'s estimate `period` may steer the grid: it
+        agrees with the grid that tier is already running, or enough of the
+        tier's estimates in a row agree on it. A grid only starts on, or
+        moves to, a tempo _CONFIRM_UPDATES estimates in a row agree on - one
+        odd estimate (a fill, the window's edge, a chance peak in music with
+        no beat at all) must neither throw a running beat off nor lock onto a
+        tempo that isn't there - and takes over from a lower tier's running
+        grid only after _TAKEOVER_UPDATES, so the tiers don't flip back and
+        forth. None (no estimate) forgets the tier's earlier ones."""
+        previous = self._pending.pop(source, None)
+        if period is None:
+            return False
+        if (
+            self._source == source
+            and self._grid_anchor is not None
+            and self._period is not None
+            and abs(period - self._period) / self._period <= _RETEMPO_TOLERANCE
+        ):
+            return True
+        agreeing = 1
+        if previous is not None and abs(period - previous[0]) / previous[0] <= _RETEMPO_TOLERANCE:
+            agreeing = previous[1] + 1
+        tiers = ("beat", "flow", "free")
+        takeover = (
+            self._grid_anchor is not None
+            and self._source in tiers
+            and tiers.index(self._source) > tiers.index(source)
+        )
+        if agreeing >= (_TAKEOVER_UPDATES if takeover else _CONFIRM_UPDATES):
+            return True
+        self._pending[source] = (period, agreeing)
+        return False
+
+    def _accept_tempo(self, now_s: float, period: float, source: str, envelope) -> None:
+        """Moves the grid to a confirmed `period` of tier `source`, its phase
+        from `envelope`."""
+        relock = (
+            self._grid_anchor is None
+            or source != self._source
+            or self._period is None
+            or abs(period - self._period) / self._period > _RETEMPO_TOLERANCE
+        )
+        if relock:
             self._period = period
-            relock = True
+            self._source = source
+            self._lock_hits = 1
         else:
-            self._pending_period = None
-            self._period += 0.2 * (period - self._period)
+            gain = _FLOW_TEMPO_GAIN if source == "flow" else 0.2
+            self._period += gain * (period - self._period)
+            self._lock_hits += 1
 
-        anchor = self._estimate_phase(now_s, self._period)
+        anchor = self._estimate_phase(now_s, self._period, envelope)
         if anchor is None:
             return
-        if relock:
+        if relock or self._grid_anchor is None:
             self._grid_anchor = anchor
             # Treat grid beats already in the past as done; the next one is scheduled normally.
             self._emitted_grid_index = int(math.floor((now_s - anchor) / self._period + 1e-9))
@@ -303,20 +441,75 @@ class BeatClock:
             k = round((anchor - self._grid_anchor) / self._period)
             self._grid_anchor += _COMB_GAIN * (anchor - (self._grid_anchor + k * self._period))
 
+    def _fallback_tempo(self, now_s: float) -> None:
+        """The beat band has no tempo (see Fallback in the module docstring):
+        follow the notes' tempo ("flow") if they have one, else a free pace."""
+        period = self._estimate_period(
+            self._flux_envelope,
+            min_period=_FLOW_MIN_PERIOD_S,
+            max_period=_FLOW_MAX_PERIOD_S,
+            prior_period=_FLOW_PRIOR_PERIOD_S,
+            prior_octaves=_FLOW_PRIOR_OCTAVES,
+            min_ac=_FLOW_MIN_AC,
+        )
+        if self._confirmed(period, "flow"):
+            self._flow_misses = 0
+            self._accept_tempo(now_s, period, "flow", self._flux_envelope)
+            if self._source == "flow" and self._grid_anchor is not None:
+                return
+            # Too little envelope for a phase yet: the free pace goes on meanwhile.
+        elif self._source == "flow":
+            self._flow_misses += 1
+            if self._flow_misses < _LOCK_LOSS_UPDATES:
+                return  # a short gap in the notes' periodicity: keep the flow grid
+        self._free_tempo(now_s)
+
+    def _free_tempo(self, now_s: float) -> None:
+        target = self._free_target_period(now_s)
+        if self._grid_anchor is None or self._period is None:
+            # Start the free pace with a beat right away.
+            self._period = target
+            self._grid_anchor = now_s
+            self._emitted_grid_index = -1
+        else:
+            if self._last_beat_time is not None and self._last_beat_time >= self._grid_anchor - 1e-9:
+                # Re-anchor on the last beat, so a new pace only moves the beats still to come.
+                self._grid_anchor = self._last_beat_time
+                self._emitted_grid_index = 0
+            self._period += _FREE_TEMPO_GAIN * (target - self._period)
+        self._source = "free"
+
+    def _free_target_period(self, now_s: float) -> float:
+        """The free tier's pace: from the note density (more notes, faster
+        beats), sped up while the music swells and slowed while it calms."""
+        while self._flux_onsets and self._flux_onsets[0] < now_s - _FREE_DENSITY_WINDOW_S:
+            self._flux_onsets.popleft()
+        if len(self._flux_onsets) >= 2:
+            rate = len(self._flux_onsets) / _FREE_DENSITY_WINDOW_S
+            period = _FREE_NOTES_PER_BEAT / rate
+        else:
+            period = self._period or _FREE_DEFAULT_PERIOD_S
+        if self._loud_fast is not None and self._loud_slow is not None:
+            swell = 2.0 ** (_FREE_SWELL_OCTAVES_PER_UNIT * (self._loud_fast - self._loud_slow))
+            period /= min(_FREE_MAX_SWELL, max(1.0 / _FREE_MAX_SWELL, swell))
+        return min(_FREE_MAX_PERIOD_S, max(_FREE_MIN_PERIOD_S, period))
+
     def _may_coast(self, now_s: float) -> bool:
         """Whether the grid may keep running on the last tempo (see Coasting
         in the module docstring)."""
         if self._grid_anchor is None or self._period is None or self._coast_since is None:
             return False
+        if self._lock_hits < _COAST_MIN_HITS:
+            return False
         limit = max(0, int(self.coast_bars)) * max(1, int(self.beats_per_bar)) * self._period
         return now_s - self._coast_since < limit
 
-    def _estimate_phase(self, now_s: float, period: float) -> Optional[float]:
+    def _estimate_phase(self, now_s: float, period: float, envelope) -> Optional[float]:
         """Where the beats fall, given the period: the phase whose comb of
-        beat times best lines up with the recent onset envelope (recent
+        beat times best lines up with the recent onset `envelope` (recent
         samples weighted more). Returns a grid beat time <= now."""
         window = min(_TEMPO_WINDOW_S, 4.0 * period)
-        samples = [(t, v) for t, v in self._envelope if t >= now_s - window]
+        samples = [(t, v) for t, v in envelope if t >= now_s - window]
         if len(samples) < 8:
             return None
         times = np.fromiter((t for t, _ in samples), float)
@@ -334,15 +527,25 @@ class BeatClock:
                 best_phase, best_score = phase, score
         return best_phase + math.floor((now_s - best_phase) / period) * period
 
-    def _estimate_period(self) -> Optional[float]:
-        if len(self._envelope) < 20:
+    def _estimate_period(
+        self,
+        envelope,
+        min_period: float = _MIN_PERIOD_S,
+        max_period: float = _MAX_PERIOD_S,
+        prior_period: float = 0.5,
+        prior_octaves: float = 0.9,
+        min_ac: float = _MIN_AC,
+    ) -> Optional[float]:
+        """The onset `envelope`'s dominant period within [min_period,
+        max_period], or None without a clear periodicity."""
+        if len(envelope) < 20:
             return None
-        times = np.fromiter((t for t, _ in self._envelope), float)
+        times = np.fromiter((t for t, _ in envelope), float)
         span = times[-1] - times[0]
-        if span < 3.0:
+        if span < max(3.0, 2.0 * max_period):
             return None
         dt = span / (len(times) - 1)
-        x = np.fromiter((v for _, v in self._envelope), float)
+        x = np.fromiter((v for _, v in envelope), float)
         x = x - x.mean()
         energy = float(np.dot(x, x))
         if energy <= 1e-12:
@@ -350,31 +553,90 @@ class BeatClock:
         # Only a window that's still active at its recent end says anything
         # about the current tempo: when the beat stops, the last few old
         # kicks sliding out of the window produce junk periodicities.
-        raw = np.fromiter((v for _, v in self._envelope), float)
+        raw = np.fromiter((v for _, v in envelope), float)
         recent = raw[times >= times[-1] - _RECENT_ACTIVITY_S]
         if recent.mean() < _RECENT_ACTIVITY_SHARE * raw.mean():
             return None
-        lo = max(1, int(_MIN_PERIOD_S / dt))
-        hi = min(len(x) - 2, int(math.ceil(_MAX_PERIOD_S / dt)))
+        lo = max(1, int(min_period / dt))
+        hi = min(len(x) - 2, int(math.ceil(max_period / dt)))
         if hi <= lo:
             return None
-        lags = np.arange(lo, hi + 1)
-        ac = np.array([np.dot(x[:-k], x[k:]) for k in lags]) / energy
-        # Mild log-Gaussian preference around 120 BPM to avoid octave errors.
-        prior = np.exp(-0.5 * (np.log2((lags * dt) / 0.5) / 0.9) ** 2)
-        score = ac * prior
-        best = int(np.argmax(score))
-        if ac[best] < 0.1:
+        # One lag either side of the range, so a peak right at its edge can be told from a slope.
+        lags = np.arange(lo - 1, hi + 2)
+        ac = np.array([np.dot(x[:-k], x[k:]) if k > 0 else energy for k in lags]) / energy
+        # Only real peaks of the autocorrelation are tempo candidates. Long,
+        # slowly decaying notes (piano, strings, bass lines) make the onset
+        # envelope broad, and its autocorrelation then just slopes down from
+        # the shortest lag - picking the best point on that slope locked the
+        # clock onto a junk tempo at the edge of the range on any music
+        # without drums.
+        peaks = [i for i in range(1, len(ac) - 1) if ac[i] > ac[i - 1] and ac[i] >= ac[i + 1]]
+        if not peaks:
+            return None
+        peaks = np.array(peaks)
+        # Mild log-Gaussian preference around the prior tempo (120 BPM for
+        # the beat band) to avoid locking to double/half tempo.
+        prior = np.exp(-0.5 * (np.log2((lags[peaks] * dt) / prior_period) / prior_octaves) ** 2)
+        best = int(peaks[int(np.argmax(ac[peaks] * prior))])
+        if ac[best] < min_ac:
             return None  # no clear periodicity
         lag = float(lags[best])
-        if 0 < best < len(ac) - 1:  # parabolic interpolation for sub-sample precision
-            a, b, c = ac[best - 1], ac[best], ac[best + 1]
-            denom = a - 2 * b + c
-            # Only around a real peak of the autocorrelation (the prior can
-            # pick a point on a slope, where the parabola shoots far off).
-            if b >= a and b >= c and denom < -1e-12:
-                lag += max(-0.5, min(0.5, 0.5 * (a - c) / denom))
+        a, b, c = ac[best - 1], ac[best], ac[best + 1]
+        denom = a - 2 * b + c
+        if denom < -1e-12:  # parabolic interpolation for sub-sample precision
+            lag += max(-0.5, min(0.5, 0.5 * (a - c) / denom))
         return lag * dt
+
+    def _detect_flux_onset(self, flux: float, now_s: float, loudness: Optional[float]) -> Tuple[bool, float]:
+        """A note onset: spectral flux well above its recent average (the
+        fallback tiers' counterpart of _detect_onset)."""
+        self._flux_history.append((now_s, flux))
+        cutoff = now_s - _FLUX_HISTORY_S
+        while self._flux_history and self._flux_history[0][0] < cutoff:
+            self._flux_history.popleft()
+        avg = sum(f for _, f in self._flux_history) / len(self._flux_history)
+
+        self._flux_envelope.append((now_s, max(0.0, flux - avg)))
+        env_cutoff = now_s - _FLOW_WINDOW_S
+        while self._flux_envelope and self._flux_envelope[0][0] < env_cutoff:
+            self._flux_envelope.popleft()
+
+        if len(self._flux_history) < 4 or avg <= 1e-9:
+            return False, 0.0
+        strength = flux / avg
+        refractory = _FLUX_MIN_INTERVAL_S
+        if self._period is not None:
+            refractory = max(refractory, 0.3 * self._period)
+        audible = loudness is None or loudness >= self.min_energy
+        onset = (
+            audible
+            and strength > _FLUX_SENSITIVITY
+            and (self._last_flux_onset is None or now_s - self._last_flux_onset >= refractory)
+        )
+        if onset:
+            self._last_flux_onset = now_s
+            self._flux_onsets.append(now_s)
+            self._flux_strengths.append(strength)
+        return onset, strength
+
+    def _is_strong_flux(self, strength: float) -> bool:
+        """A note onset among the hardest `accent_ratio` of the recent ones."""
+        if len(self._flux_strengths) < 4:
+            return False
+        ranked = sorted(self._flux_strengths)
+        top = max(1, int(math.ceil(len(ranked) * max(0.0, min(1.0, self.accent_ratio)))))
+        return strength >= ranked[-top]
+
+    def _track_loudness(self, loudness: float, now_s: float) -> None:
+        """Fast and slow averages of the broadband level: fast above slow =
+        the music is swelling (crescendo), below = calming down."""
+        if self._loud_fast is None or self._loud_slow is None or self._last_loudness_t is None:
+            self._loud_fast = self._loud_slow = loudness
+        else:
+            dt = max(0.0, now_s - self._last_loudness_t)
+            self._loud_fast += (1.0 - math.exp(-dt / _LOUDNESS_FAST_S)) * (loudness - self._loud_fast)
+            self._loud_slow += (1.0 - math.exp(-dt / _LOUDNESS_SLOW_S)) * (loudness - self._loud_slow)
+        self._last_loudness_t = now_s
 
     def _grid_index(self, t: float) -> int:
         return int(round((t - self._grid_anchor) / self._period))
@@ -439,6 +701,7 @@ class BeatClock:
             period_s=self._period,
             locked=self.locked,
             coasting=self.coasting,
+            source=self.source,
         )
         return self.latest
 
@@ -451,6 +714,7 @@ class BeatClock:
             period_s=self._period,
             locked=self.locked,
             coasting=self.coasting,
+            source=self.source,
         )
 
 

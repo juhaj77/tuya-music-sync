@@ -652,8 +652,31 @@ faint brightness ripple. Three ways to pick the new hue each beat:
 - **random** (default): a new hue every hit, forced to differ from the last one by at
   least `min_hue_jump_deg` so you never get two similar colors back to back.
 - **step**: advances by a fixed angle each hit (default 137.5°, the "golden angle" -
-  cycles through well-spread colors without ever repeating for a long time).
-- **spectrum**: hue follows the spectral centroid at the instant of the hit.
+  cycles through well-spread colors without ever repeating for a long time). With
+  **Hue step from** set to anything but **fixed**, the music sets each step between
+  **Step min** and **Step max**, using the same sources as Chase's hue step:
+  - **intensity**: small steps to neighbouring colors in a quiet part, big jumps to
+    contrasting colors in a chorus.
+  - **brightness**: bass-heavy vs bright sound.
+  - **intensity_brightness**: both of the above.
+  - **pitch**: the note's tension in the key. It glides over to intensity_brightness
+    when no note stands out or the notes don't move.
+
+  The color always moves on, so it never gets stuck on one color.
+- **spectrum**: the music picks each hit's color, spread over HSV Music's Hue min..max.
+  **Spectrum from** sets what it follows. **pitch** (the default) follows the note that
+  stands out, by its place in the key on the circle of fifths. The key's seven notes are
+  spread over the whole range, so related notes and chords get neighbouring colors.
+  Pitch is used while a note stands out clearly and the notes actually move. During
+  drums, noise, atonal passages or one note droning on, it glides over to
+  **intensity_brightness** (loudness plus bass-heavy vs bright sound) and back, without
+  switching abruptly. **brightness** and **intensity** follow just one of the two. Every
+  source is measured against the song's own recent range, so all music uses the whole
+  hue range. (Earlier versions used an absolute 20 Hz-16 kHz scale, which put
+  most music in the same turquoise slice.) With **Glide hue**, the color glides toward
+  **Glide distance** the way the music's color last moved, turning round at the ends of
+  the hue range. The line under the
+  hue mode shows the note, the key and how much of the color comes from the pitch.
 
 `sensitivity` / `min_interval_ms` / `min_energy` tune how trigger-happy the detector
 is; `hue snap speed` / `brightness attack` / `brightness decay` tune how sharp vs.
@@ -819,6 +842,17 @@ producing.
   for the clearest, most obviously visible effect, pick a hue very different from your
   usual palette (e.g. if your mode tends toward blues/greens, try an orange/red hue
   around 20-40°) combined with a narrow width.
+- **Hue shift step from** (both hue_shift modes): **fixed** uses `hue_shift_step_deg`;
+  the other sources let the music set the step between **Step min** and **Step max**
+  every moment. **intensity** follows how loud the music is, **brightness** whether
+  the sound is bass-heavy or bright, and **intensity_brightness** averages the two. All
+  three are measured against the song's own recent range. **pitch** follows the note
+  that stands out by how much tension it has in the song's key: the key note itself
+  gives Step min, notes foreign to the key give Step max. Drums are filtered out first
+  (harmonic/percussive separation), and when no note stands out clearly enough (drums,
+  noise, atonal passages), the step glides over to intensity_brightness and back. The
+  line under the sliders shows the current step, note, key and the pitch's share.
+  Music app only: the manual app has no audio, so it always uses the fixed step.
 - **Chase dwell x** (per-lamp effects table, one column per lamp): how long the
   highlight lingers at *this lamp's* chase position relative to the others - 1.0 is
   the default/uniform speed. Lower it for a position that has several physical lamps

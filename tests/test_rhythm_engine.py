@@ -51,6 +51,7 @@ def _make_engine(monkeypatch, configure):
     config.color_mapping.mode = "beat_sync"
     config.rhythm.shared_clock = True
     config.rhythm.lead_ms = 0.0
+    config.rhythm.fallback = False  # the fake frame has no spectrum for the spectral flux
     bs = config.color_mapping.beat_sync
     bs.dark_pulse_enabled = False
     bs.white_pulse_enabled = False

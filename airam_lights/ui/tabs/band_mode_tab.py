@@ -14,7 +14,7 @@ lets the per-lamp table claim real vertical space the same way the Devices
 & Setup tab's lamp list does."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...config.schema import BandDefinition, PerLampEffect
+from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import beat_divisions, choice_combo, inactive_note, set_active, show_note
@@ -509,6 +510,45 @@ class BandModeTab(QWidget):
         for w in (self.chase_hue_slider, self.chase_sat_slider, self.chase_hue_shift_slider):
             w.valueChanged.connect(self._on_chase_changed)
             appearance_col.addWidget(w)
+
+        step_source_row = QHBoxLayout()
+        step_source_row.addWidget(QLabel("Hue shift step from:"))
+        self.chase_hue_step_source_combo = QComboBox()
+        self.chase_hue_step_source_combo.addItems(list(HUE_STEP_SOURCES))
+        self.chase_hue_step_source_combo.setCurrentText(ch.hue_step_source)
+        self.chase_hue_step_source_combo.setToolTip(
+            "fixed: the Hue shift step above. The others let the music set the step, between Step min "
+            "and Step max below, every moment: intensity = how loud it is right now (wider in a chorus, "
+            "narrower in a quiet part); brightness = bass-heavy vs bright sound (follows which "
+            "instruments play); intensity_brightness = both averaged; pitch = the note that stands out, "
+            "by how much tension it has in the song's key (the key note itself = Step min, notes "
+            "foreign to the key = Step max). When no note stands out clearly enough (drums, noise, "
+            "atonal passages), pitch glides over to intensity_brightness and back - no switching. "
+            "Each source follows the music's own recent range, so quiet and loud songs both use the "
+            "whole min-max range."
+        )
+        self.chase_hue_step_source_combo.currentTextChanged.connect(self._on_chase_changed)
+        step_source_row.addWidget(self.chase_hue_step_source_combo)
+        step_source_row.addStretch(1)
+        appearance_col.addLayout(step_source_row)
+        self.chase_hue_step_min_slider = FloatSlider(
+            "Step min", 0.0, 180.0, ch.hue_step_min_deg, decimals=1, suffix=" deg",
+            tooltip="The step when the music source is at its lowest (quiet, dark sound, the key note).",
+        )
+        self.chase_hue_step_max_slider = FloatSlider(
+            "Step max", 0.0, 180.0, ch.hue_step_max_deg, decimals=1, suffix=" deg",
+            tooltip="The step when the music source is at its highest (loud, bright sound, notes foreign "
+            "to the key). May be below Step min to turn the mapping around.",
+        )
+        for w in (self.chase_hue_step_min_slider, self.chase_hue_step_max_slider):
+            w.valueChanged.connect(self._on_chase_changed)
+            appearance_col.addWidget(w)
+        self.chase_hue_step_status_label = QLabel()
+        self.chase_hue_step_status_label.setWordWrap(True)
+        appearance_col.addWidget(self.chase_hue_step_status_label)
+        self._hue_step_timer = QTimer(self)
+        self._hue_step_timer.timeout.connect(self._refresh_hue_step_status)
+        self._hue_step_timer.start(200)
         appearance_col.addStretch(1)
 
         self.chase_beat_low_spin.valueChanged.connect(self._on_chase_changed)
@@ -987,6 +1027,24 @@ class BandModeTab(QWidget):
             set_active([w("hue_shift_slider")], color_mode in ("hue_shift", "hue_shift_relative"), color_reason)
         set_active([self.chase_switch_fade_slider], self.chase_switch_fade_checkbox.isChecked(), "Soft steps is off.")
 
+        chase_mode = self.chase_color_mode_combo.currentText()
+        shifting = chase_mode in ("hue_shift", "hue_shift_relative")
+        source = self.chase_hue_step_source_combo.currentText()
+        set_active([self.chase_hue_step_source_combo], shifting, f"Chase's color mode is '{chase_mode}'.")
+        if shifting:
+            set_active(
+                [self.chase_hue_shift_slider], source == "fixed", f"Hue shift step comes from '{source}'."
+            )
+            set_active(
+                [self.chase_hue_step_min_slider, self.chase_hue_step_max_slider],
+                source != "fixed", "Hue shift step is 'fixed' (the slider above).",
+            )
+        else:
+            set_active(
+                [self.chase_hue_step_min_slider, self.chase_hue_step_max_slider],
+                False, f"Chase's color mode is '{chase_mode}'.",
+            )
+
     # -- chase overlay --------------------------------------------------------------------
 
     def _on_chase_changed(self, *_args) -> None:
@@ -1018,8 +1076,30 @@ class BandModeTab(QWidget):
         ch.custom_hue_deg = self.chase_hue_slider.value()
         ch.custom_saturation = self.chase_sat_slider.value()
         ch.hue_shift_step_deg = self.chase_hue_shift_slider.value()
+        ch.hue_step_source = self.chase_hue_step_source_combo.currentText()
+        ch.hue_step_min_deg = self.chase_hue_step_min_slider.value()
+        ch.hue_step_max_deg = self.chase_hue_step_max_slider.value()
         self._update_overlay_states()
         self.controller.apply_config_changes()
+
+    def _refresh_hue_step_status(self) -> None:
+        ch = self.controller.config.chase
+        if ch.hue_step_source == "fixed" or ch.color_mode not in ("hue_shift", "hue_shift_relative"):
+            self.chase_hue_step_status_label.setText("")
+            return
+        status = self.controller.engine.hue_step_status if self.controller.engine.running else None
+        if status is None:
+            self.chase_hue_step_status_label.setText("Step now: - (runs while the visualizer and Chase are on)")
+            return
+        text = f"Step now: {status['step_deg']:.0f} deg"
+        pitch = status.get("pitch")
+        if pitch is not None:
+            text += (
+                f"  |  note {pitch.note_name} in {pitch.key_name}, note clear {pitch.confidence:.0%}, "
+                f"notes moving {pitch.variety:.0%} -> pitch share {status['pitch_weight']:.0%} "
+                "(the rest from intensity+brightness)"
+            )
+        self.chase_hue_step_status_label.setText(text)
 
     # -- group switch overlay --------------------------------------------------------------
 

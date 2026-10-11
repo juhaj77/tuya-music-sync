@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from ...color.models import STROBE_WAVES
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
+from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.chase import get_chase_groups, get_group_switch_groups
 from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, LEVELS, STROBE_PLACEMENTS, WHITE_PATTERNS
@@ -210,15 +211,37 @@ class ColorMappingTab(QWidget):
         )
         self.beat_hue_mode_combo.currentTextChanged.connect(self._on_beat_changed)
         hue_row.addWidget(self.beat_hue_mode_combo)
+        hue_row.addSpacing(16)
+        hue_row.addWidget(QLabel("Spectrum from:"))
+        self.beat_spectrum_source_combo = QComboBox()
+        self.beat_spectrum_source_combo.addItems(["pitch", "intensity_brightness", "brightness", "intensity"])
+        self.beat_spectrum_source_combo.setCurrentText(bs.spectrum_source)
+        self.beat_spectrum_source_combo.setToolTip(
+            "What places each beat's color in the hue range (HSV Music's Hue min/max) in 'spectrum' "
+            "mode. pitch: the note that stands out, around the circle of fifths (related notes and keys "
+            "get neighbouring colors) - while a note stands out clearly and the notes move; when they "
+            "don't (drums, noise, atonal passages, one note droning on) it glides over to "
+            "intensity_brightness and back, no switching. intensity_brightness: loudness and "
+            "bass-heavy vs bright sound averaged. brightness / intensity: one of them. Each follows the "
+            "music's own recent range, so every song uses the whole hue range."
+        )
+        self.beat_spectrum_source_combo.currentTextChanged.connect(self._on_beat_changed)
+        hue_row.addWidget(self.beat_spectrum_source_combo)
         hue_row.addStretch(1)
         beat_layout.addLayout(hue_row)
         beat_hue_mode_note = QLabel(
             "random: a fresh, sufficiently-different color every hit. step: cycles through the color "
-            "wheel by a fixed angle each hit (never repeats for a long time). spectrum: hue follows "
-            "the spectral centroid at the moment of the hit."
+            "wheel by a fixed angle each hit (never repeats for a long time). spectrum: the music picks "
+            "the color (see Spectrum from), spread over HSV Music's Hue min..max."
         )
         beat_hue_mode_note.setWordWrap(True)
         beat_layout.addWidget(beat_hue_mode_note)
+        self.beat_spectrum_status_label = QLabel()
+        self.beat_spectrum_status_label.setWordWrap(True)
+        beat_layout.addWidget(self.beat_spectrum_status_label)
+        self._spectrum_timer = QTimer(self)
+        self._spectrum_timer.timeout.connect(self._refresh_spectrum_status)
+        self._spectrum_timer.start(200)
 
         hue_every_row = QHBoxLayout()
         hue_every_row.addWidget(QLabel("Change hue:"))
@@ -237,6 +260,35 @@ class ColorMappingTab(QWidget):
             "Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg",
             tooltip="How far around the color wheel the hue jumps on each beat, in 'step' mode - "
             "bigger steps mean more visually different colors from one hit to the next.",
+        )
+        self.beat_hue_step_source_row = QWidget()
+        step_source_layout = QHBoxLayout(self.beat_hue_step_source_row)
+        step_source_layout.setContentsMargins(0, 0, 0, 0)
+        step_source_layout.addWidget(QLabel("Hue step from:"))
+        self.beat_hue_step_source_combo = QComboBox()
+        self.beat_hue_step_source_combo.addItems(list(HUE_STEP_SOURCES))
+        self.beat_hue_step_source_combo.setCurrentText(bs.hue_step_source)
+        self.beat_hue_step_source_combo.setToolTip(
+            "'step' mode: fixed = the Hue step above on every color change. The others let the music "
+            "set each step, between Step min and Step max: intensity = how loud it is right now (small "
+            "steps to neighbouring colors in a quiet part, big jumps to contrasting colors in a chorus); "
+            "brightness = bass-heavy vs bright sound; intensity_brightness = both; pitch = the note "
+            "that stands out, by its tension in the key (the key note = Step min, notes foreign to the "
+            "key = Step max), gliding over to intensity_brightness when no note stands out or the "
+            "notes don't move. Each follows the music's own recent range. The color always moves on, "
+            "so it can't get stuck on one color."
+        )
+        self.beat_hue_step_source_combo.currentTextChanged.connect(self._on_beat_changed)
+        step_source_layout.addWidget(self.beat_hue_step_source_combo)
+        step_source_layout.addStretch(1)
+        self.beat_hue_step_min_slider = FloatSlider(
+            "Step min", 0.0, 180.0, bs.hue_step_min_deg, decimals=0, suffix=" deg",
+            tooltip="The step when the music source is at its lowest (quiet, dark sound, the key note).",
+        )
+        self.beat_hue_step_max_slider = FloatSlider(
+            "Step max", 0.0, 180.0, bs.hue_step_max_deg, decimals=0, suffix=" deg",
+            tooltip="The step when the music source is at its highest (loud, bright sound, notes foreign "
+            "to the key). 180 = the opposite color.",
         )
         self.beat_min_jump_slider = FloatSlider(
             "Min hue jump (for 'random')", 0.0, 180.0, bs.min_hue_jump_deg, decimals=0, suffix=" deg",
@@ -276,6 +328,9 @@ class ColorMappingTab(QWidget):
         )
         for w in (
             self.beat_hue_step_slider,
+            self.beat_hue_step_source_row,
+            self.beat_hue_step_min_slider,
+            self.beat_hue_step_max_slider,
             self.beat_min_jump_slider,
             self.beat_saturation_slider,
             self.beat_flash_slider,
@@ -284,7 +339,8 @@ class ColorMappingTab(QWidget):
             self.beat_bright_attack_slider,
             self.beat_bright_release_slider,
         ):
-            w.valueChanged.connect(self._on_beat_changed)
+            if isinstance(w, FloatSlider):
+                w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
         between_row = QHBoxLayout()
@@ -323,7 +379,9 @@ class ColorMappingTab(QWidget):
             "Glide distance", 0.0, 360.0, bs.hue_glide_deg, decimals=0, suffix=" deg",
             tooltip="How far around the color wheel the color travels between two beats, toward the next "
             "color. About the Hue step (in 'step' mode) = it arrives exactly at the next color; more "
-            "overshoots and snaps back on the beat; 360 = a full rainbow every beat.",
+            "overshoots and snaps back on the beat; 360 = a full rainbow every beat. In 'spectrum' mode "
+            "the color glides this far the way the music's color last moved, turning round at the ends "
+            "of the hue range.",
         )
         self.beat_hue_glide_slider.valueChanged.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_hue_glide_slider)
@@ -853,11 +911,21 @@ class ColorMappingTab(QWidget):
             "out - tune detection in the Rhythm box instead."
         ) if shared else "")
 
-        # In spectrum mode the hue glide heads one Hue step onward (there's no known next color).
-        set_active(
-            [self.beat_hue_step_slider], bs.hue_mode == "step" or (bs.glide_hue and bs.hue_mode == "spectrum"),
-            f"Hue mode is '{bs.hue_mode}'.",
-        )
+        step_reason = f"Hue mode is '{bs.hue_mode}'."
+        music_step = bs.hue_step_source != "fixed"
+        set_active([self.beat_hue_step_source_combo], bs.hue_mode == "step", step_reason)
+        if bs.hue_mode == "step":
+            set_active([self.beat_hue_step_slider], not music_step, f"Hue step comes from '{bs.hue_step_source}'.")
+            set_active(
+                [self.beat_hue_step_min_slider, self.beat_hue_step_max_slider], music_step,
+                "Hue step is 'fixed' (the Hue step slider).",
+            )
+        else:
+            set_active(
+                [self.beat_hue_step_slider, self.beat_hue_step_min_slider, self.beat_hue_step_max_slider],
+                False, step_reason,
+            )
+        set_active([self.beat_spectrum_source_combo], bs.hue_mode == "spectrum", f"Hue mode is '{bs.hue_mode}'.")
         set_active(
             [self.beat_sustain_slider], bs.fade_brightness,
             "Fade brightness is off: brightness stays at Flash brightness between beats.",
@@ -999,7 +1067,11 @@ class ColorMappingTab(QWidget):
         bs.min_interval_ms = self.beat_min_interval_slider.value()
         bs.min_energy = self.beat_min_energy_slider.value()
         bs.hue_mode = self.beat_hue_mode_combo.currentText()
+        bs.spectrum_source = self.beat_spectrum_source_combo.currentText()
         bs.hue_step_deg = self.beat_hue_step_slider.value()
+        bs.hue_step_source = self.beat_hue_step_source_combo.currentText()
+        bs.hue_step_min_deg = self.beat_hue_step_min_slider.value()
+        bs.hue_step_max_deg = self.beat_hue_step_max_slider.value()
         bs.hue_every_n_beats = self.beat_hue_every_combo.currentData()
         bs.min_hue_jump_deg = self.beat_min_jump_slider.value()
         bs.saturation = self.beat_saturation_slider.value()
@@ -1285,6 +1357,20 @@ class ColorMappingTab(QWidget):
         bar_row.addWidget(self.rhythm_coast_spin)
         bar_row.addStretch(1)
         layout.addLayout(bar_row)
+
+        self.rhythm_fallback_checkbox = QCheckBox("No beat? Follow the notes")
+        self.rhythm_fallback_checkbox.setChecked(rh.fallback)
+        self.rhythm_fallback_checkbox.setToolTip(
+            "For music without a steady kick (classical, acoustic, ambient), with Lock to tempo on. Once "
+            "the beat is lost and Keep going has run out, the clock follows the tempo of the notes "
+            "themselves (every new note, not just kicks; it bends with the music's tempo), and if the "
+            "notes have no steady tempo either, a free pace: faster with more notes and while the music "
+            "swells, slower when it calms down, a strong note starting the next beat. So Chase, Group "
+            "Switch and the pulse sequencer keep moving. A clear beat takes over again by itself. Off: "
+            "the clock stops and only reacts to raw kicks."
+        )
+        self.rhythm_fallback_checkbox.toggled.connect(self._on_rhythm_changed)
+        layout.addWidget(self.rhythm_fallback_checkbox)
 
         self.rhythm_status_label = QLabel()
         layout.addWidget(self.rhythm_status_label)
@@ -1622,6 +1708,7 @@ class ColorMappingTab(QWidget):
         rh.accent_ratio = self.rhythm_accent_slider.value()
         rh.tempo_lock = self.rhythm_lock_checkbox.isChecked()
         rh.coast_bars = self.rhythm_coast_spin.value()
+        rh.fallback = self.rhythm_fallback_checkbox.isChecked()
         bar_changed = rh.beats_per_bar != self.rhythm_bpb_spin.value()
         rh.beats_per_bar = self.rhythm_bpb_spin.value()
         if bar_changed:
@@ -1631,6 +1718,33 @@ class ColorMappingTab(QWidget):
         self._update_beat_states()
         self.controller.apply_config_changes()
 
+    def _refresh_spectrum_status(self) -> None:
+        """The line under Hue mode: what the music-driven spectrum hue / hue step is doing."""
+        cfg = self.controller.config.color_mapping
+        bs = cfg.beat_sync
+        spectrum = bs.hue_mode == "spectrum"
+        music_step = bs.hue_mode == "step" and bs.hue_step_source != "fixed"
+        if cfg.mode != "beat_sync" or not (spectrum or music_step):
+            self.beat_spectrum_status_label.setText("")
+            return
+        label = "Spectrum" if spectrum else "Hue step"
+        engine = self.controller.engine
+        if not engine.running:
+            self.beat_spectrum_status_label.setText(f"{label}: - (runs while the visualizer is on)")
+            return
+        source = bs.spectrum_source if spectrum else bs.hue_step_source
+        text = f"{label}: from {source}"
+        if music_step and engine.beat_hue_step_now is not None:
+            text += f", last step {engine.beat_hue_step_now:.0f} deg"
+        pitch = engine.latest_pitch
+        if pitch is not None and source == "pitch":
+            text += (
+                f"  |  note {pitch.note_name} in {pitch.key_name}, note clear {pitch.confidence:.0%}, "
+                f"notes moving {pitch.variety:.0%} -> pitch share {engine.pitch_weight:.0%} "
+                "(the rest from intensity+brightness)"
+            )
+        self.beat_spectrum_status_label.setText(text)
+
     def _refresh_rhythm_status(self) -> None:
         engine = self.controller.engine
         if not engine.running or not engine.clock_active:
@@ -1638,9 +1752,19 @@ class ColorMappingTab(QWidget):
             return
         beat = engine.latest_clock_beat
         tempo = f"{beat.bpm:.0f} BPM" if beat.bpm else "finding tempo..."
-        lock = "coasting on last tempo" if beat.coasting else "locked" if beat.locked else "not locked"
+        if beat.coasting:
+            lock = "coasting on last tempo"
+        elif beat.source == "flow":
+            lock = "following the notes (no beat)"
+        elif beat.source == "free":
+            lock = "free pace (no steady tempo)"
+        else:
+            lock = "locked" if beat.locked else "not locked"
         bar = self.controller.config.rhythm.beats_per_bar
         text = f"Clock: {tempo}, {lock}, beat {beat.bar_position + 1}/{bar}"
+        features = engine.latest_features
+        if features.harmonic is not None:
+            text += f", drums {features.percussive_share:.0%}"
         seq = engine.sequencer_status
         if seq is not None:
             text += f"  |  phrase bar {seq['phrase_bar'] + 1}/{seq['phrase_bars']}, loudness: {seq['level']}"

@@ -259,7 +259,22 @@ class BeatSyncModeConfig:
     min_energy: float = 0.12  # absolute floor, avoids false triggers in near-silence
 
     hue_mode: str = "random"  # "random" | "step" | "spectrum"
+    # hue_mode "spectrum": what places each beat's color in the hue range
+    # (HSVModeConfig.hue_min_deg..hue_max_deg), always against the music's own
+    # recent range - see dsp.hue_step: "brightness" (bass-heavy vs bright
+    # sound) | "intensity" | "intensity_brightness" | "pitch" (the dominant
+    # note on the circle of fifths while a note stands out and the notes
+    # move, cross-fading to intensity_brightness when not).
+    spectrum_source: str = "pitch"
     hue_step_deg: float = 137.5  # used when hue_mode == "step" (golden angle - good spread, never repeats)
+    # hue_mode "step": what sets the step - "fixed" = hue_step_deg; "intensity"
+    # | "brightness" | "intensity_brightness" | "pitch" = the music at each hue
+    # change, mapped onto [hue_step_min_deg, hue_step_max_deg] (see dsp.hue_step
+    # - "pitch" = the note's tension in the key, cross-fading to
+    # intensity_brightness when no note stands out or the notes don't move).
+    hue_step_source: str = "fixed"
+    hue_step_min_deg: float = 20.0
+    hue_step_max_deg: float = 150.0
     # Every beat still flashes, but the hue only changes on every Nth beat -
     # e.g. 4 with the shared beat clock (RhythmConfig) = one color per bar,
     # which reads as a pattern instead of a new random color on every hit.
@@ -398,6 +413,10 @@ class BeatSyncModeConfig:
             min_interval_ms=float(d.get("min_interval_ms", 120.0)),
             min_energy=float(d.get("min_energy", 0.12)),
             hue_mode=d.get("hue_mode", "random"),
+            spectrum_source=d.get("spectrum_source", "pitch"),
+            hue_step_source=d.get("hue_step_source", "fixed"),
+            hue_step_min_deg=float(d.get("hue_step_min_deg", 20.0)),
+            hue_step_max_deg=float(d.get("hue_step_max_deg", 150.0)),
             hue_step_deg=float(d.get("hue_step_deg", 137.5)),
             hue_every_n_beats=max(1, int(d.get("hue_every_n_beats", 1))),
             min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
@@ -805,6 +824,15 @@ class ChaseEffectConfig:
     # "hue_shift_relative": the highlight turns each lamp's own hue (what the
     # active mode shows) by this many degrees instead, keeping its saturation.
     hue_shift_step_deg: float = 45.0
+    # What sets the step in the hue_shift modes: "fixed" = hue_shift_step_deg;
+    # "intensity" | "brightness" | "intensity_brightness" | "pitch" = the
+    # music, mapped onto [hue_step_min_deg, hue_step_max_deg] every tick (see
+    # dsp.hue_step - "pitch" follows the dominant note while one stands out,
+    # cross-fading to intensity+brightness when it doesn't). Music app only:
+    # the manual app has no audio, so it always uses the fixed step.
+    hue_step_source: str = "fixed"
+    hue_step_min_deg: float = 15.0
+    hue_step_max_deg: float = 90.0
     # Soft steps: with only a handful of lamps the highlight can't really
     # glide - whatever the width and falloff curve, each lamp's color changes
     # in visible jumps as the highlight moves on (and outright jumps when it
@@ -851,6 +879,9 @@ class ChaseEffectConfig:
             falloff_curve=d.get("falloff_curve", "linear"),
             color_mode=d.get("color_mode", "custom"),
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
+            hue_step_source=d.get("hue_step_source", "fixed"),
+            hue_step_min_deg=float(d.get("hue_step_min_deg", 15.0)),
+            hue_step_max_deg=float(d.get("hue_step_max_deg", 90.0)),
             custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
             custom_saturation=float(d.get("custom_saturation", 1.0)),
             switch_fade=bool(d.get("switch_fade", False)),
@@ -1138,6 +1169,11 @@ class RhythmConfig:
     # When the beat is lost while the music keeps playing, keep going on the
     # last tempo for up to this many bars (0 = stop and wait for the beat).
     coast_bars: int = 8
+    # With no beat to lock onto (classical, acoustic, ambient), follow the
+    # notes' tempo instead, or failing that a free pace from the note density
+    # and loudness - see dsp.beat_clock's Fallback. Off = the clock stops and
+    # just reacts to raw kicks once coasting runs out.
+    fallback: bool = True
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -1156,6 +1192,7 @@ class RhythmConfig:
             beats_per_bar=max(1, int(d.get("beats_per_bar", 4))),
             accent_ratio=float(d.get("accent_ratio", 0.25)),
             coast_bars=max(0, int(d.get("coast_bars", 8))),
+            fallback=bool(d.get("fallback", True)),
         )
 
 

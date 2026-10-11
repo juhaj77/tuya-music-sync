@@ -61,6 +61,9 @@ from ..effects.pulse_sequencer import (
     strobe_steps,
 )
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother, MultiSmoother
+from ..dsp.hue_step import SOURCES as HUE_STEP_SOURCES, HueStepSignals
+from ..dsp.pitch import PitchTracker
+from ..dsp.spectral_features import FeatureFrame, SpectralFeatures
 from ..lamps.manager import LampManager
 
 logger = logging.getLogger("airam_lights.engine")
@@ -102,6 +105,11 @@ _WHITE_CHAIN_GAP_TOLERANCE_S = 0.3
 # A shorter tolerance: one lamp's RGB gap between two of its own flashes is
 # already a real chance for its worker to send the reverted color.
 _SEQ_WHITE_GAP_TOLERANCE_S = 0.15
+
+# Note tracking (see _tick_music_signals): ~170 ms at 48 kHz, ~5.9 Hz per
+# bin, and a harmonic/percussive split over the last 5 ticks (~170 ms at 30 Hz).
+_PITCH_FFT_SIZE = 8192
+_PITCH_HARMONIC_FRAMES = 5
 
 
 class TimeSeriesBuffer:
@@ -255,6 +263,27 @@ class VisualizationEngine:
         self._clock_beat = ClockBeat()
         self._clock_energy = 0.0
         self.clock_active = False
+        # Spectral flux + harmonic/percussive split, for the clock's fallback
+        # tiers (music without a kick to lock onto).
+        self._spectral_features = SpectralFeatures()
+        self.latest_features = FeatureFrame()
+        # Music-driven color (dsp.hue_step): Chase's hue step
+        # (ChaseEffectConfig.hue_step_source) and Beat Sync's spectrum hue
+        # (BeatSyncModeConfig.spectrum_source), ticked once per visual tick in
+        # _tick_music_signals while either uses it. The note tracking gets its
+        # own long FFT window (bass notes need the frequency resolution) and
+        # its own, shorter harmonic/percussive split (a new note must show up
+        # within a fraction of a second).
+        self._hue_step_signals = HueStepSignals()
+        self._music_signals_active = False
+        self.latest_pitch = None  # PitchState while the note tracking runs, for display
+        self._beat_target_x: Optional[float] = None  # Beat Sync spectrum: 0..1 behind the current beat hue
+        self._spectrum_glide_dir = 1.0  # Beat Sync spectrum: which way the glide heads this beat
+        self.beat_hue_step_now: Optional[float] = None  # Beat Sync step mode: the last music-driven step, for display
+        self._pitch_fft: Optional[FFTEngine] = None
+        self._pitch_features = SpectralFeatures(harmonic_frames=_PITCH_HARMONIC_FRAMES)
+        self._pitch_tracker = PitchTracker()
+        self.hue_step_status: Optional[dict] = None  # for display, while a music-driven step runs
         # Beat Sync's "change hue every N beats" bookkeeping: the decision is
         # made on the beat itself, then used on the (possibly dark-pulse-
         # delayed) flash that follows it.
@@ -395,6 +424,7 @@ class VisualizationEngine:
         clock.beats_per_bar = rh.beats_per_bar
         clock.accent_ratio = rh.accent_ratio
         clock.coast_bars = rh.coast_bars
+        clock.fallback = rh.fallback
 
     @property
     def sequencer_status(self) -> Optional[dict]:
@@ -462,6 +492,7 @@ class VisualizationEngine:
         self._under_white_fraction = {}
         self._white_targets_preselected = False
         self._tick_beat_clock(frame, wall_now, mode)
+        self._tick_music_signals(frame, dt, mode)
 
         if mode == "beat_sync_white":
             # A different physical DP (brightness+temp, work_mode='white')
@@ -536,7 +567,17 @@ class VisualizationEngine:
             self._clock_beat = ClockBeat()
             return
         self._clock_energy = band_energy(frame, rh.detect_low_hz, rh.detect_high_hz)
-        self._clock_beat = self._beat_clock.update(self._clock_energy, wall_now)
+        if rh.fallback and rh.tempo_lock:
+            self.latest_features = self._spectral_features.update(frame)
+            self._clock_beat = self._beat_clock.update(
+                self._clock_energy,
+                wall_now,
+                flux=self.latest_features.flux,
+                loudness=band_energy(frame, 20.0, 16000.0),
+            )
+        else:
+            self.latest_features = FeatureFrame()
+            self._clock_beat = self._beat_clock.update(self._clock_energy, wall_now)
 
     @staticmethod
     def _pulse_trigger_allows(trigger: str, clock: Optional[ClockBeat]) -> bool:
@@ -798,7 +839,22 @@ class VisualizationEngine:
             value_s = cfg.flash_brightness  # full strength all the time (dark pulses still dip it below)
         glide = self._smoother_beat_glide.update(1.0 if flash_now else 0.0, dt)
         target_hue = self._beat_target_hue
-        if cfg.glide_hue:
+        if cfg.glide_hue and cfg.hue_mode == "spectrum" and self._beat_target_x is not None:
+            # Glide hue_glide_deg over the beat, the way the music's color
+            # last moved (see _pick_next_beat_hue), inside the hue range - the
+            # next color isn't known before the beat, and gliding only as far
+            # as the music's color right now barely moves at all while a note
+            # holds.
+            progress = self._hue_glide_progress(cfg, glide, wall_now)
+            hsv_cfg = self.config.color_mapping.hsv
+            span = abs(hsv_cfg.hue_max_deg - hsv_cfg.hue_min_deg)
+            x = self._beat_target_x
+            if span > 1e-6:
+                x += self._spectrum_glide_dir * (cfg.hue_glide_deg / span) * progress
+                if span < 359.0:
+                    x = max(0.0, min(1.0, x))
+            target_hue = lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, x) % 360.0
+        elif cfg.glide_hue:
             progress = self._hue_glide_progress(cfg, glide, wall_now)
             toward = self._upcoming_beat_hue(cfg)
             direction = -1.0 if ((toward - self._beat_target_hue + 180.0) % 360.0) - 180.0 < 0.0 else 1.0
@@ -1185,17 +1241,40 @@ class VisualizationEngine:
             return False
         return True
 
+    def _beat_hue_step(self, cfg) -> float:
+        """Beat Sync step mode: the fixed hue_step_deg, or the music's step
+        between hue_step_min_deg and hue_step_max_deg (hue_step_source)."""
+        if cfg.hue_step_source not in HUE_STEP_SOURCES[1:] or not self._music_signals_active:
+            self.beat_hue_step_now = None
+            return cfg.hue_step_deg
+        value = self._hue_step_signals.value(cfg.hue_step_source)
+        self.beat_hue_step_now = cfg.hue_step_min_deg + (cfg.hue_step_max_deg - cfg.hue_step_min_deg) * value
+        return self.beat_hue_step_now
+
     def _pick_next_beat_hue(self, cfg, frame: SpectrumFrame) -> float:
         if cfg.hue_mode == "step":
-            self._beat_hue_cursor = (self._beat_hue_cursor + cfg.hue_step_deg) % 360.0
+            self._beat_hue_cursor = (self._beat_hue_cursor + self._beat_hue_step(cfg)) % 360.0
             return self._beat_hue_cursor
 
         if cfg.hue_mode == "spectrum":
-            centroid = spectral_centroid_hz(frame)
+            # Spread over the whole hue range by the music's own recent range
+            # (dsp.hue_step) - an absolute 20 Hz..16 kHz scale put almost all
+            # music in the same narrow slice of it.
             hsv_cfg = self.config.color_mapping.hsv
-            high = 16000.0
-            t = (math.log(clip(centroid, 20.0, high)) - math.log(20.0)) / (math.log(high) - math.log(20.0))
-            return lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, t)
+            previous = self._beat_target_x
+            x = self._spectrum_x(cfg)
+            # The glide carries on the way the music's color last moved...
+            if previous is not None and abs(x - previous) > 0.02:
+                self._spectrum_glide_dir = 1.0 if x > previous else -1.0
+            # ...unless that runs out of the hue range (a full circle has no ends).
+            span = abs(hsv_cfg.hue_max_deg - hsv_cfg.hue_min_deg)
+            if 1e-6 < span < 359.0:
+                reach = cfg.hue_glide_deg / span
+                end = x + self._spectrum_glide_dir * reach
+                if end > 1.0 or end < 0.0:
+                    self._spectrum_glide_dir = 1.0 if 1.0 - x >= x else -1.0
+            self._beat_target_x = x
+            return lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, x)
 
         # "random" (default): pick a hue that's visibly different from the
         # last one, so every beat gives a clearly new color instead of
@@ -1235,13 +1314,14 @@ class VisualizationEngine:
         """The color the next hue change will land on - the hue glide moves
         in its direction, so the glide flows into the next color."""
         if cfg.hue_mode == "step":
-            return (self._beat_hue_cursor + cfg.hue_step_deg) % 360.0
+            step = cfg.hue_step_deg if self.beat_hue_step_now is None else self.beat_hue_step_now
+            return (self._beat_hue_cursor + step) % 360.0
         if cfg.hue_mode == "random":
             if self._beat_upcoming_hue is None:
                 self._beat_upcoming_hue = self._random_hue_away_from(self._beat_target_hue, cfg.min_hue_jump_deg)
             return self._beat_upcoming_hue
-        # "spectrum": the next color depends on the music at that moment, so
-        # there's nothing to glide toward yet - drift one hue step onward.
+        # "spectrum" before its first beat (after that it glides toward the
+        # music's color itself, see _tick_beat_sync_mode): one hue step onward.
         return (self._beat_target_hue + cfg.hue_step_deg) % 360.0
 
     def _tick_beat_sync_white_mode(
@@ -1423,6 +1503,8 @@ class VisualizationEngine:
         elif cfg.sync_mode == "intensity_peak":
             intensity_energy = band_energy(frame, cfg.peak_detect_low_hz, cfg.peak_detect_high_hz)
 
+        self._chase_animator.hue_step_override = self._music_hue_step(frame, dt)
+
         dwell_weights = get_chase_group_dwell_weights(self.config.per_lamp_effects, groups)
         self._chase_animator.tick(
             dt,
@@ -1434,6 +1516,68 @@ class VisualizationEngine:
             clock_beat=self._clock_beat,
         )
         return self._chase_animator.apply(colors, groups)
+
+    def _chase_follows_music(self) -> bool:
+        ch = self.config.chase
+        return (
+            ch.enabled
+            and ch.color_mode in ("hue_shift", "hue_shift_relative")
+            and ch.hue_step_source in HUE_STEP_SOURCES[1:]
+        )
+
+    def _tick_music_signals(self, frame: SpectrumFrame, dt: float, mode: str) -> None:
+        """Updates the music-driven color signals (dsp.hue_step), once per
+        tick, while Chase's hue step or Beat Sync's spectrum hue / hue step
+        uses them - the note tracking only while one of them uses "pitch"."""
+        bs = self.config.color_mapping.beat_sync
+        chase = self._chase_follows_music()
+        beat_source = None
+        if mode == "beat_sync" and bs.hue_mode == "spectrum":
+            beat_source = bs.spectrum_source
+        elif mode == "beat_sync" and bs.hue_mode == "step" and bs.hue_step_source in HUE_STEP_SOURCES[1:]:
+            beat_source = bs.hue_step_source
+        self._music_signals_active = chase or beat_source is not None
+        if not self._music_signals_active:
+            self.latest_pitch = None
+            return
+        pitch = None
+        if (chase and self.config.chase.hue_step_source == "pitch") or beat_source == "pitch":
+            if self._pitch_fft is None:
+                self._pitch_fft = FFTEngine(self.audio.samplerate, _PITCH_FFT_SIZE)
+            self._pitch_fft.set_samplerate(self.audio.samplerate)
+            long_frame = self._pitch_fft.compute(self.audio.read_latest(_PITCH_FFT_SIZE))
+            features = self._pitch_features.update(long_frame)
+            pitch = self._pitch_tracker.update(features.harmonic, features.freqs, features.percussive_share, dt)
+        self.latest_pitch = pitch
+        self._hue_step_signals.update(band_energy(frame, 20.0, 16000.0), spectral_centroid_hz(frame), pitch, dt)
+
+    @property
+    def pitch_weight(self) -> Optional[float]:
+        """How much of a "pitch" source the note makes up right now, for display."""
+        return self._hue_step_signals.pitch_weight if self.latest_pitch is not None else None
+
+    def _music_hue_step(self, frame: SpectrumFrame, dt: float) -> Optional[float]:
+        """Chase's hue step this tick when it follows the music (see
+        dsp.hue_step), else None (the fixed hue_shift_step_deg)."""
+        cfg = self.config.chase
+        if not self._chase_follows_music() or not self._music_signals_active:
+            self.hue_step_status = None
+            return None
+        value = self._hue_step_signals.value(cfg.hue_step_source)
+        step = cfg.hue_step_min_deg + (cfg.hue_step_max_deg - cfg.hue_step_min_deg) * value
+        self.hue_step_status = {
+            "source": cfg.hue_step_source,
+            "step_deg": step,
+            "pitch": self.latest_pitch,
+            "pitch_weight": self.pitch_weight,
+        }
+        return step
+
+    def _spectrum_x(self, cfg) -> float:
+        """Beat Sync spectrum mode: where in the hue range the music puts
+        the color right now, 0..1 (see BeatSyncModeConfig.spectrum_source)."""
+        value = self._hue_step_signals.value(cfg.spectrum_source, pitch_as="note")
+        return value if value is not None else self._hue_step_signals.brightness
 
     # -- Group Switch overlay: discrete alternative to Chase, layered the same way ---------
     #
