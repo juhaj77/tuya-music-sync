@@ -101,13 +101,14 @@ the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mod
   see the hue variation moving from left to right on top of the Group Switch color.
   Filmed at **30 fps** instead of 60, to fit a longer clip than the other two.
 - [**Mix - hue from pitch**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Mix_hue_from_pitch.mp4) -
-  the same Group Switch + Chase mix as above, but now the **base color comes from the
-  music's pitch** (Beat Sync **`spectrum`** with *Spectrum from* = **`pitch`**): the note
-  that stands out, placed in the song's key, picks the hue. In 33 seconds the room goes
-  around the whole color circle - magenta, blue, red, orange, yellow, green and cyan -
-  gliding from one color to the next instead of snapping. A **white pulse rotates** around
-  the spots on top, and Chase's **Switch fade** is shorter than in the v1.15 clip, so the
-  chase steps read more crisply. Back at **60 fps**.
+  the same Group Switch + Chase mix as above, but now the **base color's step comes from
+  the music's pitch** (Beat Sync hue mode **`step`** with *Hue step from* = **`pitch`**):
+  each beat the hue moves on by a step set by the note that stands out - a small step to
+  a neighbouring color when the note sits close to the song's key note, a big jump to a
+  contrasting color on a note with more tension. In 33 seconds the room goes around the
+  whole color circle - magenta, blue, red, orange, yellow, green and cyan. A **white
+  pulse rotates** around the spots on top, and Chase's **Switch fade** is shorter than in
+  the v1.15 clip. Back at **60 fps**.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
