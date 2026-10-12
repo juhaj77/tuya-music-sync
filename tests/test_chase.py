@@ -1061,3 +1061,39 @@ def test_hue_part_way_still_keeps_its_way_round_through_opposite():
     outs = [_hue_part_way(h, 180.0, 0.5, deltas, "lamp") for h in (10.0, 5.0, 0.0, 355.0, 350.0)]
     for a, b in zip(outs, outs[1:]):
         assert _hue_step(a, b) < 5.0
+
+
+def test_group_switch_num_active_groups_lights_every_other_group():
+    """4 groups, 2 active: groups 1+3 light up together, then 2+4."""
+    cfg = GroupSwitchEffectConfig(enabled=True, color_mode="custom", custom_hue_deg=200.0, intensity=0.0, num_active_groups=2)
+    animator = GroupSwitchAnimator(cfg)
+    groups = [["a1", "a2"], ["b1", "b2"], ["c1", "c2"], ["d1", "d2"]]
+    base_colors = {lamp: Color(0.1, 0.1, 0.1) for group in groups for lamp in group}
+
+    for position, lit in ((0.0, {"a1", "a2", "c1", "c2"}), (1.0, {"b1", "b2", "d1", "d2"})):
+        animator.position = position
+        out = animator.apply(dict(base_colors), groups)
+        changed = {lamp for lamp in base_colors if out[lamp] != base_colors[lamp]}
+        assert changed == lit
+        assert animator.active_device_ids(groups) == lit
+
+
+def test_group_switch_num_active_groups_ramps_between_active_groups():
+    """fade_across_groups with 6 groups and 2 active: each active group gets
+    its own ramp over the 3 groups behind it, down to 0 right ahead of the
+    other active group."""
+    cfg = GroupSwitchEffectConfig(enabled=True, fade_across_groups=True, num_active_groups=2)
+    animator = GroupSwitchAnimator(cfg)
+    amounts = [animator._group_amount(i, [0, 3], 6) for i in range(6)]
+    assert amounts == [1.0, 0.0, 0.5, 1.0, 0.0, 0.5]
+    # One active group: unchanged from before.
+    single = [animator._group_amount(i, [0], 3) for i in range(3)]
+    assert single == [1.0, 0.0, 0.5]
+
+
+def test_group_switch_num_active_groups_persists():
+    assert GroupSwitchEffectConfig().num_active_groups == 1
+    cfg = GroupSwitchEffectConfig(num_active_groups=2)
+    assert GroupSwitchEffectConfig.from_dict(cfg.to_dict()).num_active_groups == 2
+    assert GroupSwitchEffectConfig.from_dict({}).num_active_groups == 1  # settings from an older version
+    assert GroupSwitchEffectConfig.from_dict({"num_active_groups": 0}).num_active_groups == 1

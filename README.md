@@ -746,7 +746,7 @@ of continuous white time, so a lamp can never end up looking stuck in white rega
 how the beats line up. By default every selected lamp flashes white together;
 `white_pulse_target` (**True white lamps** in the UI) can instead limit the flash to just
 the lamps the **Chase** highlight is currently on (`chase`) or to Group Switch's currently
-active group (`group`) - the lamps are picked when the flash starts and held for its
+active group(s) (`group`) - the lamps are picked when the flash starts and held for its
 duration, and it falls back to all lamps if that effect isn't enabled. Following the Chase
 highlight skips lamps whenever Chase moves more than one lamp between two flashes; `rotate`
 avoids that by giving the white its **own rotation** through the Chase order: every flash
@@ -876,7 +876,8 @@ A **discrete alternative** to the Chase overlay above, in its own sub-tab: inste
 highlight that gradually blends across neighboring lamps, lamps are grouped by
 **effect group** (0, 1, 2, ... - set in the per-lamp effects table, a separate grouping
 from Chase's own **chase order**, so a lamp can be in either, both, or neither), and
-exactly **one group is fully active at a time** with a hard, instant switch - no
+**one group is fully active at a time** (or several, see *Active groups at once*
+below) with a hard, instant switch - no
 gradient, no partial blend on neighboring groups. Same speed-source model as Chase
 (`off` / `beat` / `intensity_peak`, its own independent detector) and the same
 custom/complementary/hue_shift color options, but deliberately without a width or
@@ -887,6 +888,12 @@ whatever color Chase already produced for that lamp.
 Group Switch is **on in a fresh install**. If all your lamps are in one group, switch it
 off - with a single group there is nothing to switch between.
 
+**Active groups at once** (1 by default) makes that many groups active together, evenly
+spaced through the group order - the same spacing as Chase's *Number of rotators*. With
+four groups of two lamps and 2 active, every other group switches: groups 1+3, then 2+4,
+and back. White pulses that follow the group (*True white lamps: group*) land on all the
+active groups.
+
 **Fade across groups** (on in a fresh install) spreads the group color over *all* the groups
 instead of showing it on the active one only: the active group still gets the full
 group color, the group before it one step less, and so on back to the lamps' own color
@@ -895,8 +902,10 @@ groups and `complementary` that is own color -> halfway -> the opposite color; w
 more groups the steps get smaller (five groups: 0, 45, 90, 135, 180 degrees). The
 brightness boost fades the same way, and the whole ramp moves along as the active group
 advances - the switch itself is still a hard step. It needs at least three groups (with
-two there is nothing in between). White pulses that follow the group
-(*True white lamps: group*) still land on the active group only.
+two there is nothing in between). With several active groups, each one gets its own
+ramp over the groups behind it, back to the previous active group - so it needs at
+least three groups per active group. White pulses that follow the group
+(*True white lamps: group*) still land on the active groups only.
 
 **Switch fade** (0 = off, the hard step) softens the switch itself: when the active
 group moves on, every group's color glides to its new place over about that long

@@ -615,6 +615,21 @@ class BandModeTab(QWidget):
         self.gs_reverse_checkbox.toggled.connect(self._on_group_switch_changed)
         gs_speed_col.addWidget(self.gs_reverse_checkbox)
 
+        gs_active_row = QHBoxLayout()
+        gs_active_row.addWidget(QLabel("Active groups at once:"))
+        self.gs_num_active_spin = QSpinBox()
+        self.gs_num_active_spin.setRange(1, 16)
+        self.gs_num_active_spin.setValue(gs.num_active_groups)
+        self.gs_num_active_spin.setToolTip(
+            "How many groups show the group color at once, evenly spaced through the group order - "
+            "like Chase's Number of rotators. With 4 groups, 2 = every other group: groups 1+3, then "
+            "2+4. White pulses that follow the group land on all the active groups."
+        )
+        self.gs_num_active_spin.valueChanged.connect(self._on_group_switch_changed)
+        gs_active_row.addWidget(self.gs_num_active_spin)
+        gs_active_row.addStretch(1)
+        gs_speed_col.addLayout(gs_active_row)
+
         gs_sync_mode_row = QHBoxLayout()
         gs_sync_mode_row.addWidget(QLabel("Speed source:"))
         self.gs_sync_mode_combo = QComboBox()
@@ -784,8 +799,9 @@ class BandModeTab(QWidget):
             "the group before it a step less, and so on back to the lamps' own color. With 3 groups and "
             "'complementary': own color -> halfway there -> the opposite color; with more groups, "
             "smaller steps. The ramp moves along with the active group. Needs at least 3 groups (with 2 "
-            "there is nothing in between). The brightness boost fades the same way. White pulses that "
-            "follow the group still land on the active group only."
+            "there is nothing in between). The brightness boost fades the same way. With several active "
+            "groups each one gets its own ramp, back to the active group behind it. White pulses that "
+            "follow the group still land on the active groups only."
         )
         self.gs_fade_checkbox.toggled.connect(self._on_group_switch_changed)
         gs_appearance_col.addWidget(self.gs_fade_checkbox)
@@ -1108,6 +1124,7 @@ class BandModeTab(QWidget):
         gs.enabled = self.gs_enabled_checkbox.isChecked()
         gs.speed_rotations_per_s = self.gs_speed_slider.value()
         gs.reverse = self.gs_reverse_checkbox.isChecked()
+        gs.num_active_groups = self.gs_num_active_spin.value()
         gs.sync_mode = self.gs_sync_mode_combo.currentText()
         if gs.sync_mode == "clock":
             gs.beat_multiplier = float(self.gs_clock_steps_spin.value())

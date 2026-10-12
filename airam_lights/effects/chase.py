@@ -535,7 +535,7 @@ class GroupSwitchAnimator:
     """Alternative to ChaseAnimator's continuous rotation: lamps are grouped
     by PerLampEffect.effect_group (see get_group_switch_groups() - a
     separate, independent grouping from Chase's chase_order), and exactly
-    ONE group is "active" at a time, shown at full target-color strength -
+    ONE group (or `num_active_groups`) is "active" at a time, shown at full target-color strength -
     every other group is left completely untouched. There is no width or
     falloff shaping here: the switch from one active group to the next is
     instant, a hard on/off step rather than Chase's gradient - the target
@@ -557,9 +557,10 @@ class GroupSwitchAnimator:
     shared-clock beat; with no `now_s` at all (no time/audio context to
     sync to), both fall back to the same constant speed as "off".
 
-    Deliberately no "num_rotators"-style multi-active-group support (yet) -
-    a first, simple version to try out before adding more shaping, per the
-    request that prompted this class."""
+    `num_active_groups` > 1 makes that many groups active at once, evenly
+    spaced through the group order (the same spacing as Chase's
+    num_rotators): e.g. 4 groups and 2 active = every other group, so the
+    switch alternates between groups 1+3 and 2+4."""
 
     def __init__(self, config: GroupSwitchEffectConfig):
         self.config = config
@@ -645,7 +646,8 @@ class GroupSwitchAnimator:
         it's simply set."""
         cfg = self.config
         active_index = int(math.floor(self.position)) % n
-        targets = [self._group_amount(index, active_index, n) for index in range(n)]
+        actives = self._active_indices(active_index, n)
+        targets = [self._group_amount(index, actives, n) for index in range(n)]
         target_hue = self._shift_target_hue(active_index)
         if cfg.switch_fade_ms <= 0.0 or len(self._amounts) != n or self._shift_hue is None:
             self._amounts = targets
@@ -655,11 +657,17 @@ class GroupSwitchAnimator:
         self._amounts = [amount + (target - amount) * alpha for amount, target in zip(self._amounts, targets)]
         self._shift_hue = circular_lerp_deg(self._shift_hue, target_hue, alpha)
 
+    def _active_indices(self, active_index: int, n: int) -> List[int]:
+        """The active group plus `num_active_groups - 1` more, evenly spaced
+        through the group order (see spread_positions())."""
+        count = max(1, min(int(self.config.num_active_groups), n))
+        return sorted({(active_index + int(round(k * n / count))) % n for k in range(count)})
+
     def active_device_ids(self, groups: List[List[str]]) -> Set[str]:
-        """The lamps in the currently active group (same index apply() uses)."""
+        """The lamps in the currently active group(s) (same indices apply() uses)."""
         if not groups:
             return set()
-        return set(groups[int(math.floor(self.position)) % len(groups)])
+        return spread_positions(groups, int(math.floor(self.position)) % len(groups), self.config.num_active_groups)
 
     def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
         """Renders the current active group onto `colors`. Brightness is,
@@ -672,13 +680,14 @@ class GroupSwitchAnimator:
 
         cfg = self.config
         active_index = int(math.floor(self.position)) % n
+        actives = self._active_indices(active_index, n)
 
         # Mid soft switch (see _smooth()) the groups are between two places.
         soft = cfg.switch_fade_ms > 0.0 and len(self._amounts) == n and self._shift_hue is not None
 
         result = dict(colors)
         for index, group in enumerate(groups):
-            amount = self._amounts[index] if soft else self._group_amount(index, active_index, n)
+            amount = self._amounts[index] if soft else self._group_amount(index, actives, n)
             if amount >= 0.999:
                 amount = 1.0
             if amount <= 0.001 or amount == 1.0:
@@ -717,16 +726,25 @@ class GroupSwitchAnimator:
                 result[device_id] = Color.from_hsv(target_hue, target_sat, v_out)
         return result
 
-    def _group_amount(self, index: int, active_index: int, n: int) -> float:
+    def _group_amount(self, index: int, actives: List[int], n: int) -> float:
         """How much of the group color the group at `index` shows, 0..1.
-        Normally all (the active group) or nothing (every other one). With
-        `fade_across_groups`: a ramp over all the groups - the active one
-        1.0, each group before it (where the active group just came from)
-        one equal step less, down to 0 for the one right ahead of it. E.g.
+        Normally all (an active group) or nothing (every other one). With
+        `fade_across_groups`: a ramp over the groups - the active one 1.0,
+        each group before it (where the active group just came from) one
+        equal step less, down to 0 for the one right ahead of the previous
+        active group (with one active group: right ahead of itself). E.g.
         3 groups: 1.0, 0.5, 0."""
-        if index == active_index:
+        if index in actives:
             return 1.0
         if not self.config.fade_across_groups or n < 3:
             return 0.0
-        behind = (index - active_index) % n if self.config.reverse else (active_index - index) % n
-        return 1.0 - behind / (n - 1)
+
+        def behind(a: int, b: int) -> int:
+            """How many groups `b` is behind `a`, in the direction of travel."""
+            return (b - a) % n if self.config.reverse else (a - b) % n
+
+        nearest = min(actives, key=lambda a: behind(a, index))
+        gap = min((behind(nearest, a) for a in actives if a != nearest), default=n)
+        if gap < 3:
+            return 0.0  # nothing between two active groups to ramp over
+        return 1.0 - behind(nearest, index) / (gap - 1)

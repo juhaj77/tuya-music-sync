@@ -898,7 +898,7 @@ class GroupSwitchEffectConfig:
     """Alternative to the Chase overlay's continuous rotation: lamps are
     grouped by PerLampEffect.effect_group (own, separate grouping from
     Chase's chase_order - a lamp can be part of either, both, or neither),
-    and exactly ONE group is "active" at a time, shown at full target-color
+    and ONE group (or `num_active_groups`) is "active" at a time, shown at full target-color
     strength - every other group is left completely untouched. Unlike
     Chase, there is no width/falloff shaping: switching from one active
     group to the next is instant, a hard on/off step rather than a
@@ -959,6 +959,9 @@ class GroupSwitchEffectConfig:
     # glides to its new place over about this long (a time constant, like
     # Beat Sync's hue snap speed) instead of jumping.
     switch_fade_ms: float = 0.0
+    # How many groups are active at once, evenly spaced through the group
+    # order (like Chase's num_rotators): 4 groups and 2 = every other group.
+    num_active_groups: int = 1
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -992,6 +995,7 @@ class GroupSwitchEffectConfig:
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
             fade_across_groups=bool(d.get("fade_across_groups", False)),
             switch_fade_ms=max(0.0, float(d.get("switch_fade_ms", 0.0))),
+            num_active_groups=max(1, int(d.get("num_active_groups", 1))),
         )
 
 
