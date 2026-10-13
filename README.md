@@ -117,8 +117,10 @@ the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mod
   **2 rotators**, **width 2** lamps with a **linear** falloff, in **`hue_shift_relative`**
   mode with *Hue shift step from* = **`intensity_brightness`** (between 34 and 151
   degrees), so the louder and brighter the sound, the further the highlighted lamps turn
-  away from the room's base color. Group Switch (`complementary`) and the rotating white
-  pulses run on top as before. About a minute, filmed at **30 fps**.
+  away from the room's base color. Group Switch (`complementary`) now has
+  **Fade across groups** on - it is off in all the other videos - so the group color
+  spreads over all the groups in steps instead of showing on the active group only. The
+  rotating white pulses run on top as before. About a minute, filmed at **30 fps**.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
