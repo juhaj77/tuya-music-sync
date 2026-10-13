@@ -267,8 +267,9 @@ class VisualizationEngine:
         # tiers (music without a kick to lock onto).
         self._spectral_features = SpectralFeatures()
         self.latest_features = FeatureFrame()
-        # Music-driven color (dsp.hue_step): Chase's hue step
-        # (ChaseEffectConfig.hue_step_source) and Beat Sync's spectrum hue
+        # Music-driven color (dsp.hue_step): Chase's and Group Switch's hue
+        # step (ChaseEffectConfig/GroupSwitchEffectConfig.hue_step_source) and
+        # Beat Sync's spectrum hue
         # (BeatSyncModeConfig.spectrum_source), ticked once per visual tick in
         # _tick_music_signals while either uses it. The note tracking gets its
         # own long FFT window (bass notes need the frequency resolution) and
@@ -283,7 +284,8 @@ class VisualizationEngine:
         self._pitch_fft: Optional[FFTEngine] = None
         self._pitch_features = SpectralFeatures(harmonic_frames=_PITCH_HARMONIC_FRAMES)
         self._pitch_tracker = PitchTracker()
-        self.hue_step_status: Optional[dict] = None  # for display, while a music-driven step runs
+        self.hue_step_status: Optional[dict] = None  # for display, while Chase's music-driven step runs
+        self.group_hue_step_status: Optional[dict] = None  # the same for Group Switch
         # Beat Sync's "change hue every N beats" bookkeeping: the decision is
         # made on the beat itself, then used on the (possibly dark-pulse-
         # delayed) flash that follows it.
@@ -493,6 +495,7 @@ class VisualizationEngine:
         self._white_targets_preselected = False
         self._tick_beat_clock(frame, wall_now, mode)
         self._tick_music_signals(frame, dt, mode)
+        self.hue_step_status = self.group_hue_step_status = None  # set again by an overlay that runs
 
         if mode == "beat_sync_white":
             # A different physical DP (brightness+temp, work_mode='white')
@@ -1503,7 +1506,7 @@ class VisualizationEngine:
         elif cfg.sync_mode == "intensity_peak":
             intensity_energy = band_energy(frame, cfg.peak_detect_low_hz, cfg.peak_detect_high_hz)
 
-        self._chase_animator.hue_step_override = self._music_hue_step(frame, dt)
+        self._chase_animator.hue_step_override, self.hue_step_status = self._music_hue_step(cfg)
 
         dwell_weights = get_chase_group_dwell_weights(self.config.per_lamp_effects, groups)
         self._chase_animator.tick(
@@ -1517,31 +1520,38 @@ class VisualizationEngine:
         )
         return self._chase_animator.apply(colors, groups)
 
-    def _chase_follows_music(self) -> bool:
-        ch = self.config.chase
+    @staticmethod
+    def _overlay_follows_music(cfg, mode: str) -> bool:
+        """Chase / Group Switch: whether its hue step comes from the music
+        right now. Never in Beat Sync White, where the overlays don't run."""
         return (
-            ch.enabled
-            and ch.color_mode in ("hue_shift", "hue_shift_relative")
-            and ch.hue_step_source in HUE_STEP_SOURCES[1:]
+            cfg.enabled
+            and mode != "beat_sync_white"
+            and cfg.color_mode in ("hue_shift", "hue_shift_relative")
+            and cfg.hue_step_source in HUE_STEP_SOURCES[1:]
         )
 
     def _tick_music_signals(self, frame: SpectrumFrame, dt: float, mode: str) -> None:
         """Updates the music-driven color signals (dsp.hue_step), once per
-        tick, while Chase's hue step or Beat Sync's spectrum hue / hue step
-        uses them - the note tracking only while one of them uses "pitch"."""
+        tick, while Chase's or Group Switch's hue step or Beat Sync's
+        spectrum hue / hue step uses them - the note tracking only while one
+        of them uses "pitch"."""
         bs = self.config.color_mapping.beat_sync
-        chase = self._chase_follows_music()
-        beat_source = None
+        sources = {
+            cfg.hue_step_source
+            for cfg in (self.config.chase, self.config.group_switch)
+            if self._overlay_follows_music(cfg, mode)
+        }
         if mode == "beat_sync" and bs.hue_mode == "spectrum":
-            beat_source = bs.spectrum_source
+            sources.add(bs.spectrum_source)
         elif mode == "beat_sync" and bs.hue_mode == "step" and bs.hue_step_source in HUE_STEP_SOURCES[1:]:
-            beat_source = bs.hue_step_source
-        self._music_signals_active = chase or beat_source is not None
+            sources.add(bs.hue_step_source)
+        self._music_signals_active = bool(sources)
         if not self._music_signals_active:
             self.latest_pitch = None
             return
         pitch = None
-        if (chase and self.config.chase.hue_step_source == "pitch") or beat_source == "pitch":
+        if "pitch" in sources:
             if self._pitch_fft is None:
                 self._pitch_fft = FFTEngine(self.audio.samplerate, _PITCH_FFT_SIZE)
             self._pitch_fft.set_samplerate(self.audio.samplerate)
@@ -1556,22 +1566,23 @@ class VisualizationEngine:
         """How much of a "pitch" source the note makes up right now, for display."""
         return self._hue_step_signals.pitch_weight if self.latest_pitch is not None else None
 
-    def _music_hue_step(self, frame: SpectrumFrame, dt: float) -> Optional[float]:
-        """Chase's hue step this tick when it follows the music (see
-        dsp.hue_step), else None (the fixed hue_shift_step_deg)."""
-        cfg = self.config.chase
-        if not self._chase_follows_music() or not self._music_signals_active:
-            self.hue_step_status = None
-            return None
+    def _music_hue_step(self, cfg) -> "Tuple[Optional[float], Optional[dict]]":
+        """Chase's / Group Switch's (`cfg`) hue step this tick when it follows
+        the music (see dsp.hue_step), else None (the fixed
+        hue_shift_step_deg) - plus its status for display. Only ever a step
+        between Step min and Step max, worked out afresh every tick: the
+        overlays turn each tick's own colors by it, so nothing builds up."""
+        if not self._overlay_follows_music(cfg, self.config.color_mapping.mode) or not self._music_signals_active:
+            return None, None
         value = self._hue_step_signals.value(cfg.hue_step_source)
         step = cfg.hue_step_min_deg + (cfg.hue_step_max_deg - cfg.hue_step_min_deg) * value
-        self.hue_step_status = {
+        status = {
             "source": cfg.hue_step_source,
             "step_deg": step,
             "pitch": self.latest_pitch,
             "pitch_weight": self.pitch_weight,
         }
-        return step
+        return step, status
 
     def _spectrum_x(self, cfg) -> float:
         """Beat Sync spectrum mode: where in the hue range the music puts
@@ -1603,6 +1614,7 @@ class VisualizationEngine:
         elif cfg.sync_mode == "intensity_peak":
             intensity_energy = band_energy(frame, cfg.peak_detect_low_hz, cfg.peak_detect_high_hz)
 
+        self._group_switch_animator.hue_step_override, self.group_hue_step_status = self._music_hue_step(cfg)
         self._group_switch_animator.tick(
             dt,
             num_positions=len(groups),

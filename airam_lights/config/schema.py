@@ -938,13 +938,21 @@ class GroupSwitchEffectConfig:
 
     intensity: float = 3.0  # brightness boost multiplier on the active group (base 0 always stays 0)
 
-    color_mode: str = "custom"  # "custom" | "complementary" | "hue_shift"
+    color_mode: str = "custom"  # "custom" | "complementary" | "hue_shift" | "hue_shift_relative"
     custom_hue_deg: float = 280.0
     custom_saturation: float = 1.0
     # Used when color_mode == "hue_shift": each successive group shows a hue
     # offset by this many degrees from the previous one (starting from
     # custom_hue_deg) - same slider/meaning as Chase's hue_shift_step_deg.
+    # "hue_shift_relative": the active group turns each lamp's own hue (what
+    # the active mode and Chase show) by this many degrees instead, keeping
+    # its saturation.
     hue_shift_step_deg: float = 45.0
+    # What sets the step in the hue_shift modes - same sources and meaning as
+    # ChaseEffectConfig.hue_step_source, with this overlay's own range.
+    hue_step_source: str = "fixed"
+    hue_step_min_deg: float = 15.0
+    hue_step_max_deg: float = 90.0
     # Off: only the active group shows the group color, every other group is
     # left untouched. On: the color fades across the groups in equal steps,
     # from the lamps' own color to the group color - the active group gets
@@ -993,6 +1001,9 @@ class GroupSwitchEffectConfig:
             custom_hue_deg=float(d.get("custom_hue_deg", 280.0)),
             custom_saturation=float(d.get("custom_saturation", 1.0)),
             hue_shift_step_deg=float(d.get("hue_shift_step_deg", 45.0)),
+            hue_step_source=d.get("hue_step_source", "fixed"),
+            hue_step_min_deg=float(d.get("hue_step_min_deg", 15.0)),
+            hue_step_max_deg=float(d.get("hue_step_max_deg", 90.0)),
             fade_across_groups=bool(d.get("fade_across_groups", False)),
             switch_fade_ms=max(0.0, float(d.get("switch_fade_ms", 0.0))),
             num_active_groups=max(1, int(d.get("num_active_groups", 1))),

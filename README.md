@@ -828,11 +828,14 @@ and it applies in every mode, not just 8-band.
 
 #### Chase / Rotating Light overlay
 An overlay effect layered on top of **whichever color mode is active** (RGB, HSV,
-8-Band, Beat Sync, Peak Flash, Custom - all of them), **enabled by default**: give a
+8-Band, Beat Sync, Peak Flash, Custom - every RGB mode), **enabled by default**: give a
 lamp a **chase order** (0, 1, 2, ...) in the per-lamp effects table to include it in the
 rotation, then a moving highlight travels through them in that order, creating a
 spinning/chasing light effect on top of whatever colors the active mode is already
-producing.
+producing. The one exception is **Beat Sync White**: it drives the lamps' white mode
+(brightness + color temperature), which a hue overlay has nothing to work on, so Chase and
+Group Switch don't run there - their settings are greyed out with a note while it's the
+active mode.
 
 - **Speed source**: `off` for a constant number of **full rotations per second** (e.g.
   0.5 = one complete lap around all the chase-ordered lamps every 2 seconds, regardless
@@ -892,7 +895,7 @@ from Chase's own **chase order**, so a lamp can be in either, both, or neither),
 below) with a hard, instant switch - no
 gradient, no partial blend on neighboring groups. Same speed-source model as Chase
 (`off` / `beat` / `intensity_peak`, its own independent detector) and the same
-custom/complementary/hue_shift color options, but deliberately without a width or
+custom/complementary/hue_shift/hue_shift_relative color options, but deliberately without a width or
 falloff-curve concept, since there's nothing to blend. Can run at the same time as
 Chase - Chase applies first, then Group Switch's discrete switch applies on top of
 whatever color Chase already produced for that lamp.
@@ -924,6 +927,16 @@ group moves on, every group's color glides to its new place over about that long
 instead of jumping - a time constant like Beat Sync's *Hue snap speed*, so the same
 value gives the same feel. It works with and without *Fade across groups*, and in
 `hue_shift` mode the hue glides along too.
+
+**hue_shift_relative** works like Chase's: the active group turns the hue its lamps
+already show (the active mode's color, with Chase's on top if it runs) by the *Hue shift
+step*, keeping their saturation - with *Fade across groups* the groups behind it turn
+part of the way. **Hue shift step from** is the same as Chase's too (`fixed`,
+`intensity`, `brightness`, `intensity_brightness`, `pitch`, with Group Switch's own
+*Step min* / *Step max* and status line), for both `hue_shift` modes. The step is worked
+out afresh every tick and only ever turns that tick's own colors, so the shifts never
+build up: with both overlays in `hue_shift_relative`, a lamp is at most Chase's step plus
+Group Switch's step away from the base color, however long the show runs.
 
 ### Diagnostics tab
 Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /

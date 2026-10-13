@@ -1,6 +1,8 @@
 """Unit tests for the shared Chase overlay (effects/chase.py) - used by both
 the music visualizer and the standalone manual control app, so this is
 tested independently of both."""
+import random
+
 import pytest
 
 from airam_lights.color.models import Color, WhiteTarget
@@ -1097,3 +1099,74 @@ def test_group_switch_num_active_groups_persists():
     assert GroupSwitchEffectConfig.from_dict(cfg.to_dict()).num_active_groups == 2
     assert GroupSwitchEffectConfig.from_dict({}).num_active_groups == 1  # settings from an older version
     assert GroupSwitchEffectConfig.from_dict({"num_active_groups": 0}).num_active_groups == 1
+
+
+def test_group_switch_hue_shift_relative_turns_the_active_groups_own_hue():
+    gs = GroupSwitchAnimator(GroupSwitchEffectConfig(
+        enabled=True, color_mode="hue_shift_relative", hue_shift_step_deg=30.0, intensity=0.0
+    ))
+    groups = [["a"], ["b"], ["c"]]
+    base = {k: Color.from_hsv(200.0, 0.8, 0.5) for k in "abc"}
+    gs.position = 1.0
+    out = gs.apply(dict(base), groups)
+    h, s, _ = out["b"].to_hsv()
+    assert abs(_hue_diff(h, 230.0)) < 1.0 and abs(s - 0.8) < 0.01
+    assert abs(_hue_diff(out["a"].to_hsv()[0], 200.0)) < 1.0
+    gs.hue_step_override = 90.0
+    assert abs(_hue_diff(gs.apply(dict(base), groups)["b"].to_hsv()[0], 290.0)) < 1.0
+
+
+def test_group_switch_hue_shift_uses_the_music_step():
+    gs = GroupSwitchAnimator(GroupSwitchEffectConfig(
+        enabled=True, color_mode="hue_shift", custom_hue_deg=0.0, hue_shift_step_deg=10.0, intensity=0.0
+    ))
+    groups = [["a"], ["b"], ["c"]]
+    base = {k: Color.from_hsv(0.0, 1.0, 0.5) for k in "abc"}
+    gs.hue_step_override = 60.0
+    gs.position = 2.0
+    gs.tick(0.0, num_positions=3)
+    assert abs(_hue_diff(gs.apply(dict(base), groups)["c"].to_hsv()[0], 120.0)) < 1.0
+
+
+def test_chase_and_group_switch_relative_shifts_do_not_build_up():
+    # Both overlays in hue_shift_relative over a base hue that keeps turning,
+    # with the music-driven steps jumping around every tick, a fading ramp
+    # and soft switches: every tick's output stays within the two steps of
+    # that tick's own base hue - nothing accumulates, however long it runs.
+    rng = random.Random(3)
+    chase = ChaseAnimator(ChaseEffectConfig(
+        enabled=True, num_rotators=2, width=2.0, intensity=0.0, color_mode="hue_shift_relative",
+        switch_fade=True, switch_fade_ms=89.0, speed_rotations_per_s=0.5,
+    ))
+    gs = GroupSwitchAnimator(GroupSwitchEffectConfig(
+        enabled=True, color_mode="hue_shift_relative", intensity=0.0, fade_across_groups=True,
+        switch_fade_ms=370.0, speed_rotations_per_s=0.7,
+    ))
+    lamps = [f"lamp{i}" for i in range(8)]
+    chase_groups = [[lamp] for lamp in lamps]
+    gs_groups = [lamps[0:2], lamps[2:4], lamps[4:6], lamps[6:8]]
+    base_hue = 0.0
+    for tick in range(5000):
+        if tick % 15 == 0:
+            base_hue = (base_hue + rng.uniform(39.0, 170.0)) % 360.0
+        chase.hue_step_override = rng.uniform(34.0, 151.0)
+        gs.hue_step_override = rng.uniform(15.0, 90.0)
+        chase.tick(1.0 / 30.0, num_positions=len(chase_groups))
+        gs.tick(1.0 / 30.0, num_positions=len(gs_groups))
+        base = {lamp: Color.from_hsv(base_hue, 1.0, 0.5) for lamp in lamps}
+        out = gs.apply(chase.apply(dict(base), chase_groups), gs_groups)
+        limit = chase.hue_step_override + gs.hue_step_override
+        for lamp in lamps:
+            turn = (out[lamp].to_hsv()[0] - base_hue) % 360.0
+            assert turn < limit + 0.5 or turn > 359.5, (tick, lamp, turn)
+
+
+def test_group_switch_hue_step_settings_survive_a_save():
+    cfg = GroupSwitchEffectConfig(
+        color_mode="hue_shift_relative", hue_step_source="pitch", hue_step_min_deg=5.0, hue_step_max_deg=120.0
+    )
+    back = GroupSwitchEffectConfig.from_dict(cfg.to_dict())
+    assert (back.color_mode, back.hue_step_source, back.hue_step_min_deg, back.hue_step_max_deg) == (
+        "hue_shift_relative", "pitch", 5.0, 120.0
+    )
+    assert GroupSwitchEffectConfig.from_dict({}).hue_step_source == "fixed"

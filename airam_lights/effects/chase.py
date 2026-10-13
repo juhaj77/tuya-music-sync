@@ -584,6 +584,16 @@ class GroupSwitchAnimator:
         # color: which way round the hue circle (and how far) that way goes -
         # see apply().
         self._hue_deltas: Dict[str, float] = {}
+        # The music-driven hue step (GroupSwitchEffectConfig.hue_step_source),
+        # set by the engine every tick; None = the fixed hue_shift_step_deg.
+        self.hue_step_override: Optional[float] = None
+
+    @property
+    def hue_step_deg(self) -> float:
+        """The step the hue_shift color modes use right now."""
+        if self.hue_step_override is not None:
+            return self.hue_step_override
+        return self.config.hue_shift_step_deg
 
     def update_config(self, config: GroupSwitchEffectConfig) -> None:
         self.config = config
@@ -634,7 +644,7 @@ class GroupSwitchAnimator:
     def _shift_target_hue(self, active_index: int) -> float:
         """hue_shift mode: each group shows a progressively different hue, so
         which color shows depends on which group is currently active."""
-        return (self.config.custom_hue_deg + active_index * self.config.hue_shift_step_deg) % 360.0
+        return (self.config.custom_hue_deg + active_index * self.hue_step_deg) % 360.0
 
     def _smooth(self, dt: float, n: int) -> None:
         """The soft switch (`switch_fade_ms`): instead of jumping when the
@@ -679,6 +689,7 @@ class GroupSwitchAnimator:
             return colors
 
         cfg = self.config
+        step = self.hue_step_deg
         active_index = int(math.floor(self.position)) % n
         actives = self._active_indices(active_index, n)
 
@@ -702,6 +713,11 @@ class GroupSwitchAnimator:
                 if cfg.color_mode == "complementary":
                     target_hue = (h_base + 180.0) % 360.0
                     target_sat = s_base
+                elif cfg.color_mode == "hue_shift_relative":
+                    # The lamp's own hue, turned by the step - it follows
+                    # the active mode's (and Chase's) color.
+                    target_hue = (h_base + step) % 360.0
+                    target_sat = s_base
                 elif cfg.color_mode == "hue_shift":
                     target_hue = self._shift_hue if soft else self._shift_target_hue(active_index)
                     target_sat = cfg.custom_saturation
@@ -718,6 +734,12 @@ class GroupSwitchAnimator:
                         # so always go the same way instead of letting rounding
                         # pick one tick by tick.
                         target_hue = (h_base + 180.0 * amount) % 360.0
+                    elif cfg.color_mode == "hue_shift_relative":
+                        # Always the step's own way round, worked out afresh
+                        # from this tick's own hue - nothing is carried over
+                        # between ticks, so the shift can't build up past the
+                        # step (same as Chase's hue_shift_relative).
+                        target_hue = (h_base + step * amount) % 360.0
                     else:
                         target_hue = _hue_part_way(h_base, target_hue, amount, self._hue_deltas, device_id)
                     target_sat = lerp(s_base, target_sat, amount)

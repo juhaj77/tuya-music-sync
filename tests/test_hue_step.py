@@ -335,3 +335,36 @@ def test_beat_sync_step_settings_survive_a_save():
     back = BeatSyncModeConfig.from_dict(cfg.to_dict())
     assert (back.hue_step_source, back.hue_step_min_deg, back.hue_step_max_deg) == ("pitch", 10.0, 170.0)
     assert BeatSyncModeConfig.from_dict({}).hue_step_source == "fixed"
+
+
+def test_engine_drives_the_group_switch_step_from_the_music(monkeypatch):
+    config = AppConfig()
+    config.color_mapping.mode = "hsv_music"
+    config.chase.enabled = False
+    config.group_switch.enabled = True
+    config.group_switch.color_mode = "hue_shift_relative"
+    config.group_switch.hue_step_source = "pitch"
+    config.group_switch.hue_step_min_deg = 10.0
+    config.group_switch.hue_step_max_deg = 100.0
+    for i, dev in enumerate(["a", "b", "c"]):
+        config.per_lamp_effects[dev] = PerLampEffect(device_id=dev, effect_group=i)
+    audio = AudioCapture()
+    sr = audio.samplerate
+    monkeypatch.setattr(audio, "read_latest", lambda n: _chord_audio(sr, n))
+    engine = VisualizationEngine(config, audio, _Lamps())
+    engine.running = True
+    engine._raw_frame = FFTEngine(sr, 2048).compute(_chord_audio(sr, 2048))
+    for _ in range(90):
+        engine.tick_visual()
+    status = engine.group_hue_step_status
+    assert engine.hue_step_status is None
+    assert status is not None and status["source"] == "pitch"
+    assert 10.0 <= status["step_deg"] <= 100.0
+    assert engine._group_switch_animator.hue_step_override == pytest.approx(status["step_deg"])
+    assert status["pitch"].note_name in ("C", "E", "G")
+
+    # Beat Sync White: the overlays don't run, so neither does their music step.
+    config.color_mapping.mode = "beat_sync_white"
+    engine.tick_visual()
+    assert engine.group_hue_step_status is None
+    assert engine.latest_pitch is None

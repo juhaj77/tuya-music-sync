@@ -205,7 +205,9 @@ class BandModeTab(QWidget):
         effects_root.addWidget(effects_box, stretch=1)
 
         # -- chase / rotating light overlay ----------------------------------------------
-        chase_box = QGroupBox("Chase / Rotating Light overlay (works on top of ANY mode above)")
+        self.chase_white_note = inactive_note()
+        chase_root.addWidget(self.chase_white_note)
+        self.chase_box = chase_box = QGroupBox("Chase / Rotating Light overlay (works on top of every RGB mode)")
         chase_outer_layout = QVBoxLayout(chase_box)
         chase_intro_label = QLabel(
             "Set 'Chase order' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
@@ -511,44 +513,12 @@ class BandModeTab(QWidget):
             w.valueChanged.connect(self._on_chase_changed)
             appearance_col.addWidget(w)
 
-        step_source_row = QHBoxLayout()
-        step_source_row.addWidget(QLabel("Hue shift step from:"))
-        self.chase_hue_step_source_combo = QComboBox()
-        self.chase_hue_step_source_combo.addItems(list(HUE_STEP_SOURCES))
-        self.chase_hue_step_source_combo.setCurrentText(ch.hue_step_source)
-        self.chase_hue_step_source_combo.setToolTip(
-            "fixed: the Hue shift step above. The others let the music set the step, between Step min "
-            "and Step max below, every moment: intensity = how loud it is right now (wider in a chorus, "
-            "narrower in a quiet part); brightness = bass-heavy vs bright sound (follows which "
-            "instruments play); intensity_brightness = both averaged; pitch = the note that stands out, "
-            "by how much tension it has in the song's key (the key note itself = Step min, notes "
-            "foreign to the key = Step max). When no note stands out clearly enough (drums, noise, "
-            "atonal passages), pitch glides over to intensity_brightness and back - no switching. "
-            "Each source follows the music's own recent range, so quiet and loud songs both use the "
-            "whole min-max range."
-        )
-        self.chase_hue_step_source_combo.currentTextChanged.connect(self._on_chase_changed)
-        step_source_row.addWidget(self.chase_hue_step_source_combo)
-        step_source_row.addStretch(1)
-        appearance_col.addLayout(step_source_row)
-        self.chase_hue_step_min_slider = FloatSlider(
-            "Step min", 0.0, 180.0, ch.hue_step_min_deg, decimals=1, suffix=" deg",
-            tooltip="The step when the music source is at its lowest (quiet, dark sound, the key note).",
-        )
-        self.chase_hue_step_max_slider = FloatSlider(
-            "Step max", 0.0, 180.0, ch.hue_step_max_deg, decimals=1, suffix=" deg",
-            tooltip="The step when the music source is at its highest (loud, bright sound, notes foreign "
-            "to the key). May be below Step min to turn the mapping around.",
-        )
-        for w in (self.chase_hue_step_min_slider, self.chase_hue_step_max_slider):
-            w.valueChanged.connect(self._on_chase_changed)
-            appearance_col.addWidget(w)
-        self.chase_hue_step_status_label = QLabel()
-        self.chase_hue_step_status_label.setWordWrap(True)
-        appearance_col.addWidget(self.chase_hue_step_status_label)
-        self._hue_step_timer = QTimer(self)
-        self._hue_step_timer.timeout.connect(self._refresh_hue_step_status)
-        self._hue_step_timer.start(200)
+        (
+            self.chase_hue_step_source_combo,
+            self.chase_hue_step_min_slider,
+            self.chase_hue_step_max_slider,
+            self.chase_hue_step_status_label,
+        ) = self._hue_step_controls(appearance_col, ch, self._on_chase_changed)
         appearance_col.addStretch(1)
 
         self.chase_beat_low_spin.valueChanged.connect(self._on_chase_changed)
@@ -559,7 +529,9 @@ class BandModeTab(QWidget):
         chase_root.addWidget(chase_box)
 
         # -- group switch: discrete alternative to the chase overlay above --------------------
-        gs_box = QGroupBox("Group Switch (discrete alternative to Chase - one active group at a time)")
+        self.gs_white_note = inactive_note()
+        group_switch_root.addWidget(self.gs_white_note)
+        self.gs_box = gs_box = QGroupBox("Group Switch (discrete alternative to Chase - one active group at a time)")
         gs_outer_layout = QVBoxLayout(gs_box)
         gs_intro_label = QLabel(
             "Set 'Effect group' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
@@ -771,12 +743,13 @@ class BandModeTab(QWidget):
         gs_color_mode_row = QHBoxLayout()
         gs_color_mode_row.addWidget(QLabel("Group color:"))
         self.gs_color_mode_combo = QComboBox()
-        self.gs_color_mode_combo.addItems(["custom", "complementary", "hue_shift"])
+        self.gs_color_mode_combo.addItems(["custom", "complementary", "hue_shift", "hue_shift_relative"])
         self.gs_color_mode_combo.setCurrentText(gs.color_mode)
         self.gs_color_mode_combo.setToolTip(
             "custom: one fixed hue/saturation shown on whichever group is active. complementary: always "
             "the opposite hue (+180 deg) of that group's own current color. hue_shift: each group gets a "
-            "progressively different hue, so which color shows depends on which group is active."
+            "progressively different hue, so which color shows depends on which group is active. "
+            "hue_shift_relative: each lamp's own hue turned by 'Hue shift step'."
         )
         self.gs_color_mode_combo.currentTextChanged.connect(self._on_group_switch_changed)
         gs_color_mode_row.addWidget(self.gs_color_mode_combo)
@@ -786,7 +759,9 @@ class BandModeTab(QWidget):
             "custom: a fixed color you set below, shown on whichever group is currently active. "
             "complementary: the opposite hue of that group's own current color. hue_shift: each "
             "group shows a different hue starting from the custom hue below, stepped by 'Hue shift "
-            "step' per group - so which color flashes on depends on which group is active."
+            "step' per group - so which color flashes on depends on which group is active. "
+            "hue_shift_relative: each lamp's own color (with Chase's color on it), its hue turned by "
+            "'Hue shift step'."
         )
         gs_color_mode_label.setWordWrap(True)
         gs_appearance_col.addWidget(gs_color_mode_label)
@@ -828,12 +803,19 @@ class BandModeTab(QWidget):
         )
         self.gs_hue_shift_slider = FloatSlider(
             "Hue shift step (for 'hue_shift')", 1.0, 180.0, gs.hue_shift_step_deg, decimals=1, suffix=" deg",
-            tooltip="Only used by the 'hue_shift' color mode - how far the hue advances from one group "
-            "to the next, starting from Custom hue above.",
+            tooltip="Only used by the 'hue_shift' color modes. hue_shift: how far the hue advances from one "
+            "group to the next, starting from Custom hue above. hue_shift_relative: how far the active "
+            "group turns each lamp's own hue.",
         )
         for w in (self.gs_hue_slider, self.gs_sat_slider, self.gs_hue_shift_slider):
             w.valueChanged.connect(self._on_group_switch_changed)
             gs_appearance_col.addWidget(w)
+        (
+            self.gs_hue_step_source_combo,
+            self.gs_hue_step_min_slider,
+            self.gs_hue_step_max_slider,
+            self.gs_hue_step_status_label,
+        ) = self._hue_step_controls(gs_appearance_col, gs, self._on_group_switch_changed)
         gs_appearance_col.addStretch(1)
 
         self.gs_beat_low_spin.valueChanged.connect(self._on_group_switch_changed)
@@ -847,6 +829,10 @@ class BandModeTab(QWidget):
         controller.lampsChanged.connect(self._populate_effects_table)
         self._populate_effects_table()
         self._update_overlay_states()
+
+        self._hue_step_timer = QTimer(self)
+        self._hue_step_timer.timeout.connect(self._refresh_hue_step_status)
+        self._hue_step_timer.start(200)
 
     # -- band definitions --------------------------------------------------------------
 
@@ -979,6 +965,47 @@ class BandModeTab(QWidget):
         setattr(effect, attr, value)
         self.controller.apply_config_changes()
 
+    @staticmethod
+    def _hue_step_controls(layout: QVBoxLayout, cfg, on_change):
+        """Chase's and Group Switch's 'Hue shift step from' row, its Step
+        min/max sliders and the status line under them."""
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Hue shift step from:"))
+        combo = QComboBox()
+        combo.addItems(list(HUE_STEP_SOURCES))
+        combo.setCurrentText(cfg.hue_step_source)
+        combo.setToolTip(
+            "fixed: the Hue shift step above. The others let the music set the step, between Step min "
+            "and Step max below, every moment: intensity = how loud it is right now (wider in a chorus, "
+            "narrower in a quiet part); brightness = bass-heavy vs bright sound (follows which "
+            "instruments play); intensity_brightness = both averaged; pitch = the note that stands out, "
+            "by how much tension it has in the song's key (the key note itself = Step min, notes "
+            "foreign to the key = Step max). When no note stands out clearly enough (drums, noise, "
+            "atonal passages), pitch glides over to intensity_brightness and back - no switching. "
+            "Each source follows the music's own recent range, so quiet and loud songs both use the "
+            "whole min-max range."
+        )
+        combo.currentTextChanged.connect(on_change)
+        row.addWidget(combo)
+        row.addStretch(1)
+        layout.addLayout(row)
+        step_min = FloatSlider(
+            "Step min", 0.0, 180.0, cfg.hue_step_min_deg, decimals=1, suffix=" deg",
+            tooltip="The step when the music source is at its lowest (quiet, dark sound, the key note).",
+        )
+        step_max = FloatSlider(
+            "Step max", 0.0, 180.0, cfg.hue_step_max_deg, decimals=1, suffix=" deg",
+            tooltip="The step when the music source is at its highest (loud, bright sound, notes foreign "
+            "to the key). May be below Step min to turn the mapping around.",
+        )
+        for w in (step_min, step_max):
+            w.valueChanged.connect(on_change)
+            layout.addWidget(w)
+        status = QLabel()
+        status.setWordWrap(True)
+        layout.addWidget(status)
+        return combo, step_min, step_max, status
+
     def _clock_controls(self, layout: QVBoxLayout, every: int, multiplier: float, unit: str, on_change):
         """Speed source 'clock': how often (a fixed musical division, so moves
         always land on the same place in the bar) and how far (whole steps -
@@ -1040,25 +1067,31 @@ class BandModeTab(QWidget):
             color_mode = w("color_mode_combo").currentText()
             color_reason = f"{name}'s color mode is '{color_mode}'."
             set_active([w("hue_slider"), w("sat_slider")], color_mode in ("custom", "hue_shift"), color_reason)
-            set_active([w("hue_shift_slider")], color_mode in ("hue_shift", "hue_shift_relative"), color_reason)
+            shifting = color_mode in ("hue_shift", "hue_shift_relative")
+            source = w("hue_step_source_combo").currentText()
+            set_active([w("hue_step_source_combo")], shifting, color_reason)
+            if shifting:
+                set_active([w("hue_shift_slider")], source == "fixed", f"Hue shift step comes from '{source}'.")
+                set_active(
+                    [w("hue_step_min_slider"), w("hue_step_max_slider")],
+                    source != "fixed", "Hue shift step is 'fixed' (the slider above).",
+                )
+            else:
+                set_active(
+                    [w("hue_shift_slider"), w("hue_step_min_slider"), w("hue_step_max_slider")], False, color_reason
+                )
         set_active([self.chase_switch_fade_slider], self.chase_switch_fade_checkbox.isChecked(), "Soft steps is off.")
 
-        chase_mode = self.chase_color_mode_combo.currentText()
-        shifting = chase_mode in ("hue_shift", "hue_shift_relative")
-        source = self.chase_hue_step_source_combo.currentText()
-        set_active([self.chase_hue_step_source_combo], shifting, f"Chase's color mode is '{chase_mode}'.")
-        if shifting:
-            set_active(
-                [self.chase_hue_shift_slider], source == "fixed", f"Hue shift step comes from '{source}'."
-            )
-            set_active(
-                [self.chase_hue_step_min_slider, self.chase_hue_step_max_slider],
-                source != "fixed", "Hue shift step is 'fixed' (the slider above).",
-            )
-        else:
-            set_active(
-                [self.chase_hue_step_min_slider, self.chase_hue_step_max_slider],
-                False, f"Chase's color mode is '{chase_mode}'.",
+        # The overlays recolor RGB - Beat Sync White drives the lamps' white
+        # mode instead, so there they don't run at all.
+        white = self.controller.config.color_mapping.mode == "beat_sync_white"
+        for box, note in ((self.chase_box, self.chase_white_note), (self.gs_box, self.gs_white_note)):
+            set_active([box], not white, "The color mode is Beat Sync White - the overlays only recolor RGB.")
+            show_note(
+                note,
+                "Not used in Beat Sync White: that mode drives the lamps' white mode (brightness + color "
+                "temperature), and this overlay recolors RGB. It runs in every other color mode."
+                if white else "",
             )
 
     # -- chase overlay --------------------------------------------------------------------
@@ -1099,23 +1132,34 @@ class BandModeTab(QWidget):
         self.controller.apply_config_changes()
 
     def _refresh_hue_step_status(self) -> None:
-        ch = self.controller.config.chase
-        if ch.hue_step_source == "fixed" or ch.color_mode not in ("hue_shift", "hue_shift_relative"):
-            self.chase_hue_step_status_label.setText("")
-            return
-        status = self.controller.engine.hue_step_status if self.controller.engine.running else None
-        if status is None:
-            self.chase_hue_step_status_label.setText("Step now: - (runs while the visualizer and Chase are on)")
-            return
-        text = f"Step now: {status['step_deg']:.0f} deg"
-        pitch = status.get("pitch")
-        if pitch is not None:
-            text += (
-                f"  |  note {pitch.note_name} in {pitch.key_name}, note clear {pitch.confidence:.0%}, "
-                f"notes moving {pitch.variety:.0%} -> pitch share {status['pitch_weight']:.0%} "
-                "(the rest from intensity+brightness)"
-            )
-        self.chase_hue_step_status_label.setText(text)
+        engine = self.controller.engine
+        for cfg, label, status, name in (
+            (self.controller.config.chase, self.chase_hue_step_status_label, engine.hue_step_status, "Chase"),
+            (
+                self.controller.config.group_switch, self.gs_hue_step_status_label, engine.group_hue_step_status,
+                "Group Switch",
+            ),
+        ):
+            if cfg.hue_step_source == "fixed" or cfg.color_mode not in ("hue_shift", "hue_shift_relative"):
+                label.setText("")
+                continue
+            if status is None or not engine.running:
+                label.setText(f"Step now: - (runs while the visualizer and {name} are on)")
+                continue
+            text = f"Step now: {status['step_deg']:.0f} deg"
+            pitch = status.get("pitch")
+            if pitch is not None:
+                text += (
+                    f"  |  note {pitch.note_name} in {pitch.key_name}, note clear {pitch.confidence:.0%}, "
+                    f"notes moving {pitch.variety:.0%} -> pitch share {status['pitch_weight']:.0%} "
+                    "(the rest from intensity+brightness)"
+                )
+            label.setText(text)
+
+    def showEvent(self, event) -> None:
+        # The color mode is picked in another tab - catch up with it here.
+        super().showEvent(event)
+        self._update_overlay_states()
 
     # -- group switch overlay --------------------------------------------------------------
 
@@ -1144,6 +1188,9 @@ class BandModeTab(QWidget):
         gs.custom_hue_deg = self.gs_hue_slider.value()
         gs.custom_saturation = self.gs_sat_slider.value()
         gs.hue_shift_step_deg = self.gs_hue_shift_slider.value()
+        gs.hue_step_source = self.gs_hue_step_source_combo.currentText()
+        gs.hue_step_min_deg = self.gs_hue_step_min_slider.value()
+        gs.hue_step_max_deg = self.gs_hue_step_max_slider.value()
         gs.fade_across_groups = self.gs_fade_checkbox.isChecked()
         gs.switch_fade_ms = self.gs_switch_fade_slider.value()
         self._update_overlay_states()
