@@ -79,48 +79,30 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 
 ## Demo videos
 
-Videos recorded on real hardware - Chase and Group with **v1.14**, Mix with **v1.15**,
-Mix - hue from pitch and Deep Purple with **v1.16**:
-**8 Airam spots**, 4 in the ceiling and 4 along the walls, running in **Beat Sync**
-mode. The Chase and Group videos have
-the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mode at
-60 fps**, so the camera isn't fighting the lights by auto-adjusting exposure and white balance.
+Recorded on real hardware: **8 Airam spots**, 4 in the ceiling and 4 along the walls, all
+in **Beat Sync** mode with the **strobe** on, filmed on a **Xiaomi 14T in Pro mode** so the
+camera isn't fighting the lights by auto-adjusting exposure and white balance.
 
-- [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/chase_GitHub.mp4) -
-  a **forward** color effect rotates around the spots, with a **backward** white pulse
-  running the other way.
-- [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/group_GitHub.mp4) -
-  the spots are split into **three groups**, and a white pulse walks through them
-  **backward** in group order.
-- [**Mix**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.15/Mix_hue_shift_relative.mp4) -
-  the **Group Switch** and **Chase** overlays running **on top of each other**, with
-  Chase in the **`hue_shift_relative`** color mode. Because the chase only nudges each
-  lamp's own hue a little instead of replacing it, Group Switch's groups hold together
-  much better than with the other chase color modes. The phone camera separates the
-  colors rather poorly, but in the row of lamps on the back wall you should be able to
-  see the hue variation moving from left to right on top of the Group Switch color.
-  Filmed at **30 fps** instead of 60, to fit a longer clip than the other two.
-- [**Mix - hue from pitch**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Mix_hue_from_pitch.mp4) -
-  the same Group Switch + Chase mix as above, but now the **base color's step comes from
-  the music's pitch** (Beat Sync hue mode **`step`** with *Hue step from* = **`pitch`**):
-  each beat the hue moves on by a step set by the note that stands out - a small step to
-  a neighbouring color when the note sits close to the song's key note, a big jump to a
-  contrasting color on a note with more tension. In 33 seconds the room goes around the
-  whole color circle - magenta, blue, red, orange, yellow, green and cyan. A **white
-  pulse rotates** around the spots on top, and Chase's **Switch fade** is shorter than in
-  the v1.15 clip. Back at **60 fps**.
-- [**Deep Purple**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Deep_Purple.mp4) -
-  a change from the more mainstream electronic music of the other clips (Amon Tobin):
-  **Deep Purple**, and the lights go along with the style surprisingly well. Same
-  version and settings as *Mix - hue from pitch* - the base color still steps by
-  **pitch** - but now **Chase** brings in its own **music-driven** hue step as well:
-  **2 rotators**, **width 2** lamps with a **linear** falloff, in **`hue_shift_relative`**
-  mode with *Hue shift step from* = **`intensity_brightness`** (between 34 and 151
-  degrees), so the louder and brighter the sound, the further the highlighted lamps turn
-  away from the room's base color. Group Switch (`complementary`) now has
-  **Fade across groups** on - it is off in all the other videos - so the group color
-  spreads over all the groups in steps instead of showing on the active group only. The
-  rotating white pulses run on top as before. About a minute, filmed at **30 fps**.
+| Video | Length | Ver | FPS | Base hue | Chase overlay | Group Switch | White pulse |
+|:--|:-:|:-:|:-:|:--|:--|:--|:--|
+| [**Deep Purple**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Deep_Purple.mp4) | 1 min | 1.16 | 30 | step<br>from **pitch** | 2 rotators, width 2 linear<br>relative, from **`intensity_brightness`** | complementary<br>**fade across groups** | rotation |
+| [**Mix - hue relative**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.15/Mix_hue_shift_relative.mp4) | 1 min | 1.15 | 30 | step<br>fixed | on<br>relative, fixed step | complementary<br>active group only | on |
+| [**Group**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/group_GitHub.mp4) | 30 s | 1.14 | 60 | step<br>fixed | off | complementary<br>3 groups | group walk<br>backward |
+| [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/chase_GitHub.mp4) | 30 s | 1.14 | 60 | step<br>fixed | forward | off | rotation<br>backward |
+| [**Mix - hue from pitch**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Mix_hue_from_pitch.mp4) | 33 s | 1.16 | 60 | step<br>from **pitch** | on, short switch fade<br>relative, fixed step | complementary<br>active group only | rotation |
+
+- **Deep Purple** - a change from the more mainstream electronic music of the other clips
+  (Amon Tobin), and the lights go along with the style surprisingly well. The louder and
+  brighter the sound, the further Chase turns the highlighted lamps away from the room's
+  base color (34-151 degrees). **Fade across groups** is on only in this video, so the
+  group color spreads over all the groups in steps instead of showing on the active group only.
+- **Mix - hue relative** - with Chase in `hue_shift_relative` mode each lamp's own hue is
+  only nudged, so Group Switch's groups hold together much better than with the other
+  chase color modes. The phone camera separates the colors rather poorly, but the row of
+  lamps on the back wall shows the hue variation moving from left to right.
+- **Mix - hue from pitch** - each beat the base hue moves on by a step set by the note that
+  stands out: a small step when it sits close to the song's key note, a big jump on a note
+  with more tension. In 33 seconds the room goes around the whole color circle.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
