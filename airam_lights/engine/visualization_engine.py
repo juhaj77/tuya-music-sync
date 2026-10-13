@@ -291,6 +291,10 @@ class VisualizationEngine:
         # delayed) flash that follows it.
         self._beat_sync_beat_count = 0
         self._beat_hue_due = True
+        # Flashes since the hue last changed: with hue_every_n_beats above 1
+        # the hue glide spreads over all N beats instead of starting over on
+        # each one (see _hue_glide_progress).
+        self._glide_beats_done = 0
 
         # Pulse sequencer (see effects/pulse_sequencer.py): per-lamp white
         # flash state, since its flashes walk between groups and overlap.
@@ -836,6 +840,9 @@ class VisualizationEngine:
             if self._beat_hue_due:
                 self._beat_target_hue = self._pick_next_beat_hue(cfg, frame)
                 self._beat_hue_due = False
+                self._glide_beats_done = 0
+            else:
+                self._glide_beats_done += 1
             self.last_beat_time = wall_now
 
         in_dark_pulse = self._beat_dark_until is not None
@@ -1372,18 +1379,24 @@ class VisualizationEngine:
         return candidate
 
     def _hue_glide_progress(self, cfg, decay_glide: float, wall_now: float) -> float:
-        """0 right on a beat .. 1 by the next one. Timing "beat": evenly over
-        the beat interval (the shared clock's tempo, or Beat Sync's own
-        detector's average interval) so the color keeps moving until the next
-        hit. Timing "decay", or no tempo known yet: follows the flash's decay."""
+        """0 right on a hue change .. 1 by the next one. Within a beat: timing
+        "beat" spreads it evenly over the beat interval (the shared clock's
+        tempo, or Beat Sync's own detector's average interval) so the color
+        keeps moving until the next hit; timing "decay", or no tempo known
+        yet, follows the flash's decay. With hue_every_n_beats above 1 each
+        beat carries on from where the one before left off, so the glide
+        spans all N beats instead of starting over (and jumping back) on
+        every beat that doesn't change the hue."""
+        within = 1.0 - decay_glide
         if cfg.hue_glide_timing == "beat" and self.last_beat_time is not None:
             if self.config.rhythm.shared_clock:
                 period = self._clock_beat.period_s
             else:
                 period = self._beat_detector.average_interval_s()
             if period:
-                return clip((wall_now - self.last_beat_time) / period)
-        return 1.0 - decay_glide
+                within = clip((wall_now - self.last_beat_time) / period)
+        every_n = max(1, int(cfg.hue_every_n_beats))
+        return clip((min(self._glide_beats_done, every_n - 1) + within) / every_n)
 
     def _upcoming_beat_hue(self, cfg) -> float:
         """The color the next hue change will land on - the hue glide moves

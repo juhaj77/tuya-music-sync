@@ -255,6 +255,26 @@ def test_glide_without_fade_keeps_full_brightness_and_moves_all_beat(monkeypatch
         assert abs((samples[b][3] - base) % 360.0 - 120.0) < 1e-6  # the beat lands on the next color
 
 
+def test_glide_spans_every_n_beats_without_jumping_back(monkeypatch):
+    def configure(c):
+        _glide_config(fade=False, deg=90.0)(c)
+        c.color_mapping.beat_sync.hue_every_n_beats = 2
+
+    engine, clock, _ = _make_engine(monkeypatch, configure)
+    _run(engine, clock, 6.0, lambda: None)
+    samples = _collect(engine, clock)
+    changes = [i for i in range(1, len(samples)) if samples[i][3] != samples[i - 1][3]]
+    assert len(changes) >= 3
+    for a, b in zip(changes, changes[1:]):
+        base = samples[a][3]
+        travelled = [(samples[i][1] - base + 180.0) % 360.0 - 180.0 for i in range(a, b)]
+        # Onward all the way between two hue changes - the beat in between
+        # carries on instead of starting the glide over.
+        assert all(y >= x - 1.0 for x, y in zip(travelled, travelled[1:])), travelled
+        assert 30.0 < travelled[(b - a) // 2] < 60.0  # halfway over the two beats...
+        assert 75.0 < travelled[-1] <= 90.5  # ...and nearly the full distance just before the change
+
+
 def test_fade_and_glide_together(monkeypatch):
     engine, clock, _ = _make_engine(monkeypatch, _glide_config(fade=True))
     _run(engine, clock, 6.0, lambda: None)

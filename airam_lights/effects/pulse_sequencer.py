@@ -351,10 +351,13 @@ class PulseSequencer:
         energy: broadband loudness level (0..1) for the dynamics. Returns the
         events for every 16th step crossed since the previous tick."""
         self._track_intensity(energy, now_s, dt)
-        self._bar_intensities.append(self.intensity)
         if position is None:
+            # No bar lines while the clock isn't locked: nothing would ever
+            # empty the bar's samples, so don't collect them meanwhile.
             self._last_step = None
+            self._bar_intensities = []
             return []
+        self._bar_intensities.append(self.intensity)
         step = int(math.floor(position * STEPS_PER_BEAT))
         if self._last_step is None or step < self._last_step or step - self._last_step > STEPS_PER_BEAT:
             # First tick, or the grid jumped (re-lock, bar start re-estimated): resync silently.
