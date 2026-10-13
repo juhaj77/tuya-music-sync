@@ -25,7 +25,14 @@ from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.chase import get_chase_groups, get_group_switch_groups
-from ...effects.pulse_sequencer import DARK_PATTERNS, GROUP_WALKS, LEVELS, STROBE_PLACEMENTS, WHITE_PATTERNS
+from ...effects.pulse_sequencer import (
+    DARK_PATTERNS,
+    FLASH_STROBE_PLACEMENTS,
+    GROUP_WALKS,
+    LEVELS,
+    STROBE_PLACEMENTS,
+    WHITE_PATTERNS,
+)
 from ...config.schema import (
     INSTANT_TRANSITIONS,
     LAMP_TRANSITIONS,
@@ -1032,6 +1039,18 @@ class ColorMappingTab(QWidget):
              self.seq_strobe_duty_slider, self.seq_strobe_brightness_slider, self.seq_strobe_test_button],
             direct, not_direct,
         )
+        set_active(
+            [self.seq_flash_strobe_checkbox], sequencing and direct and white,
+            seq_off if not sequencing else not_direct if not direct else "White pulses are off.",
+        )
+        set_active(
+            [self.seq_flash_strobe_placement_combo, self.seq_flash_strobe_level_combo,
+             self.seq_flash_strobe_chance_slider,
+             self.seq_flash_strobe_gap_slider, self.seq_flash_strobe_brightness_slider],
+            sequencing and direct and white and sq.flash_strobe_enabled,
+            seq_off if not sequencing else not_direct if not direct
+            else "White pulses are off." if not white else "Flash strobe is off.",
+        )
         if sequencing and not direct:
             show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box): only then "
                       "do the bulbs take a change instantly and show white and colour at the same time.")
@@ -1646,6 +1665,70 @@ class ColorMappingTab(QWidget):
         test_row.addWidget(self.seq_strobe_test_label, stretch=1)
         layout.addLayout(test_row)
 
+        self._build_flash_strobe_controls(layout, sq)
+
+    def _build_flash_strobe_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        self.seq_flash_strobe_checkbox = QCheckBox(
+            "Flash strobe (now and then one group's white flash becomes a short strobe)"
+        )
+        self.seq_flash_strobe_checkbox.setChecked(sq.flash_strobe_enabled)
+        self.seq_flash_strobe_checkbox.setToolTip(
+            "Along the white walk: now and then one of the walk's white flashes is played as a short "
+            "strobe on just that lamp group instead - so as the white goes round the room, a strobe shows "
+            "up here and there, like a glitch. With several White rotators only the walk's own group "
+            "strobes; the others keep their plain white flash. It starts on the flash's beat (never the "
+            "downbeat, which lands clean) and "
+            "lasts as long as that white flash would (its attack + duration + release, as the pulse "
+            "dynamics shaped it), stopping at the bar line at the latest. Its flashes follow the white "
+            "flash's brightness: they rise over the attack, hold, and fade over the release along its "
+            "release curve (times Flash strobe brightness below) - so it doesn't stand out from the white "
+            "pulses. With a white flash shorter than two strobe flashes it stays a plain flash. "
+            "The rate and on-time are the Strobe's (Strobe max rate, Strobe on-time above). Independent "
+            "of the Strobe checkbox. Needs Lamp transitions 'direct' or 'smooth' (Global box).\n\n"
+            "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy."
+        )
+        self.seq_flash_strobe_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_flash_strobe_checkbox)
+
+        self.seq_flash_strobe_placement_combo = self._labeled_combo(
+            layout, "Flash strobe placement:", FLASH_STROBE_PLACEMENTS, sq.flash_strobe_placement,
+            "Which white flashes may become one. bar_end: only the flash on the bar's last beat - a roll "
+            "into the next bar. beats: a flash on any beat but the downbeat (8th and 16th flashes in "
+            "between never do).",
+        )
+        self.seq_flash_strobe_level_combo = self._labeled_combo(
+            layout, "Flash strobe from loudness:", LEVELS, sq.flash_strobe_min_level,
+            "Only when the music is at least this loud compared to the last half minute. calm: always. "
+            "groove: not in the quiet parts. high / peak: only in the loudest ones.",
+        )
+        for combo in (self.seq_flash_strobe_placement_combo, self.seq_flash_strobe_level_combo):
+            combo.currentTextChanged.connect(self._on_sequencer_changed)
+
+        self.seq_flash_strobe_chance_slider = FloatSlider(
+            "Flash strobe chance", 0.0, 1.0, sq.flash_strobe_chance, decimals=2,
+            tooltip="Chance a white flash that qualifies becomes a strobe. 1 = every time (handy while "
+            "trying it out).",
+        )
+        self.seq_flash_strobe_gap_slider = FloatSlider(
+            "Flash strobe min gap", 0.0, 16.0, float(sq.flash_strobe_min_gap_bars), decimals=0, suffix=" bars",
+            tooltip="Never two flash strobes closer than this many bars, whatever the chance says. 0 = no "
+            "minimum.",
+        )
+        self.seq_flash_strobe_brightness_slider = FloatSlider(
+            "Flash strobe brightness", 0.3, 1.5, sq.flash_strobe_brightness, decimals=2, suffix=" x",
+            tooltip="Brightness of its flashes relative to the white flash it replaces, moment by moment "
+            "along that flash's attack, duration and release (it follows White brightness, the pulse "
+            "dynamics and the per-lamp multiplier). 1 = just as bright, so it blends in with the white "
+            "pulses; lower = subtler.",
+        )
+        for w in (
+            self.seq_flash_strobe_chance_slider,
+            self.seq_flash_strobe_gap_slider,
+            self.seq_flash_strobe_brightness_slider,
+        ):
+            w.valueChanged.connect(self._on_sequencer_changed)
+            layout.addWidget(w)
+
     def _on_strobe_test(self) -> None:
         self.seq_strobe_test_label.setText(self.controller.engine.trigger_strobe_test())
 
@@ -1693,6 +1776,12 @@ class ColorMappingTab(QWidget):
         sq.strobe_duty = self.seq_strobe_duty_slider.value()
         sq.strobe_brightness = self.seq_strobe_brightness_slider.value()
         sq.strobe_wave = self.seq_strobe_wave_combo.currentText()
+        sq.flash_strobe_enabled = self.seq_flash_strobe_checkbox.isChecked()
+        sq.flash_strobe_placement = self.seq_flash_strobe_placement_combo.currentText()
+        sq.flash_strobe_min_level = self.seq_flash_strobe_level_combo.currentText()
+        sq.flash_strobe_chance = self.seq_flash_strobe_chance_slider.value()
+        sq.flash_strobe_min_gap_bars = int(round(self.seq_flash_strobe_gap_slider.value()))
+        sq.flash_strobe_brightness = self.seq_flash_strobe_brightness_slider.value()
         self._update_beat_states()
         self.controller.apply_config_changes()
 

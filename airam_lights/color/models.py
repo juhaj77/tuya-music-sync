@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import colorsys
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Tuple
 
 
 def clip(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
@@ -164,9 +164,14 @@ class StrobeBurst:
     brightness: float  # 0..1 white brightness (of the brightest flash)
     temp: float = 1.0  # 0=warmest .. 1=coolest (cool white lights up fastest)
     wave: str = "off"  # see STROBE_WAVES: the brightness swells and fades over the burst
+    # Per flash, 0..1 of `brightness` - in place of the wave (a flash strobe
+    # following the white pulse it replaces). None = the wave.
+    levels: Optional[Tuple[float, ...]] = None
 
     def brightness_at(self, index: int) -> float:
         """White brightness of flash `index`."""
+        if self.levels:
+            return self.brightness * self.levels[max(0, min(len(self.levels) - 1, index))]
         return self.brightness * strobe_wave_level(index, self.flashes, self.wave)
 
     def index_at(self, now: float) -> int:

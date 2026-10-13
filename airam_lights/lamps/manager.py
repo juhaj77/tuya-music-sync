@@ -278,7 +278,9 @@ class LampWorker(threading.Thread):
         pulse_sequencer.strobe_plan), and nothing else is sent meanwhile.
 
         A flash this lamp is too late for is skipped rather than played
-        late, so it falls back in step with the others. Only for bulbs on
+        late, so it falls back in step with the others. A newer burst handed
+        over meanwhile (the bar's strobe after a flash strobe) takes over
+        before the next flash. Only for bulbs on
         the real-time control datapoint in its instant mode (see
         NetworkConfig.lamp_transitions "direct") - others ignore the burst."""
         try:
@@ -290,6 +292,9 @@ class LampWorker(threading.Thread):
                     continue
                 if not self._sleep_until(on_at):
                     return
+                with self._lock:
+                    if self._strobe is not burst:
+                        return  # a newer burst takes over
                 if not self._send_strobe_edge(burst, True, index):
                     return
                 self._sleep_until(off_at)  # even when stopping: never leave the white on

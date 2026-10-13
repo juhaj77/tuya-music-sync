@@ -645,6 +645,24 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   `ease_out` on the lighter beats, the fills and the doubles (percussive). It shapes the
   sequencer's flashes; the per-beat flashes without the sequencer fade out exponentially,
   and with `legacy` transitions the bulb fades on its own.
+- **Flash strobe** (optional, off by default) - now and then one of the group walk's
+  white flashes is played as a short **strobe on just that group** instead, so as the
+  white travels round the room a strobe shows up along the way - a stylish glitch, not
+  a room-filling effect: with several *White rotators* only the walk's own group
+  strobes, the others keep their plain white flash. It starts on the flash's
+  beat - with *placement* `bar_end` only the bar's last beat, a roll into the next bar;
+  with `beats` any beat but the downbeat - and **lasts as long as the white flash it
+  replaces** (attack + duration + release), never past the bar line, so the downbeat
+  lands clean. Its flashes **follow that white flash's brightness curve**: they rise
+  over the attack, stay full through the duration and fade over the release along its
+  release curve - with the attack, duration, release and peak the pulse dynamics picked
+  for that very flash, and the per-lamp multiplier - times *Flash strobe brightness*, so
+  it blends in with the white pulses instead of jumping out. A white flash too short for
+  two strobe flashes stays a plain flash. Loudness, chance and a minimum gap in bars keep
+  it occasional; the rate and on-time are the strobe's. The all-lamps strobe always
+  wins: none starts once it's announced, and one still running is cut short when it
+  begins. Like the strobe, it needs *Lamp transitions* `direct` or `smooth` - otherwise
+  the flash stays a plain white flash.
 
 The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
 The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -

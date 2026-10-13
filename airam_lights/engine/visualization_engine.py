@@ -56,7 +56,7 @@ from ..effects.pulse_sequencer import (
     PulseSequencer,
     metric_weight,
     phrase_progress,
-    release_level,
+    pulse_envelope,
     strobe_plan,
     strobe_steps,
 )
@@ -315,6 +315,10 @@ class VisualizationEngine:
         # Per lamp mid white flash: how far into it (see _under_white).
         self._under_white_fraction: Dict[str, float] = {}
         self._strobe_burst: Optional[StrobeBurst] = None
+        # Flash strobes (PulseSequencerConfig.flash_strobe_enabled) still
+        # playing, per lamp - for the preview, and so no white flash lands
+        # on a lamp in the middle of one.
+        self._lamp_strobes: Dict[str, StrobeBurst] = {}
         self.last_strobe: Optional[dict] = None
         self._perf_now = 0.0  # time.perf_counter() of the current visual tick
         self._white_targets_preselected = False
@@ -1081,11 +1085,22 @@ class VisualizationEngine:
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = self._white_pulse_temp(cfg, self._clock_beat, event)
         curve = event.release_curve if cfg.white_pulse_release_curve == "dynamic" else cfg.white_pulse_release_curve
+        lamps = [
+            lamp for lamp in lamps
+            if wall_now >= self._seq_white_until.get(lamp, 0.0)  # not still mid-flash
+            and wall_now - self._seq_white_started.get(lamp, -1e9) >= gap  # protect the bulb: not two back to back
+            and not self._lamp_strobing(lamp)
+        ]
+        if event.strobe_beats > 0.0 and event.group is not None and len(groups) >= 2:
+            # Only the walk's own group strobes - with several white rotators
+            # the others keep a plain flash: a glitch in one spot, not the room.
+            own = set(groups[event.group % len(groups)])
+            strobing = [lamp for lamp in lamps if lamp in own]
+            if self._start_flash_strobe(event, strobing, cfg, temp, (attack, hold, release, curve)):
+                for lamp in strobing:
+                    self._seq_white_started[lamp] = wall_now
+                lamps = [lamp for lamp in lamps if lamp not in own]
         for lamp in lamps:
-            if wall_now < self._seq_white_until.get(lamp, 0.0):
-                continue  # still mid-flash
-            if wall_now - self._seq_white_started.get(lamp, -1e9) < gap:
-                continue  # protect the bulb: not two flashes back to back
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
             self._seq_white_attack[lamp] = attack
@@ -1125,11 +1140,65 @@ class VisualizationEngine:
                 start, flash_period, on_s, flashes, clip(sq.strobe_brightness * mult), wave=sq.strobe_wave
             )
         self.lamp_manager.start_strobe(bursts)
+        self._lamp_strobes.clear()  # the workers drop a flash strobe for this one
         self._strobe_burst = StrobeBurst(
             start, flash_period, on_s, flashes, clip(sq.strobe_brightness), wave=sq.strobe_wave
         )
         self.last_strobe = {"flashes": flashes, "hz": 1.0 / flash_period}
         return self._strobe_burst
+
+    def _start_flash_strobe(self, event: PulseEvent, lamps, cfg, temp: float, shape: tuple) -> bool:
+        """Plays a white flash of the group walk as a short strobe on its
+        lamps instead (PulseSequencerConfig.flash_strobe_enabled), from the
+        flash's own spot on the grid and at its warm/cool. `shape`: the
+        flash's (attack, hold, release, release curve) in seconds - the
+        white pulse settings as the pulse dynamics shaped this flash. The
+        strobe lasts as long as the flash would (at most event.strobe_beats,
+        up to the bar line), and each of its flashes is as bright as the
+        white flash at that moment (times flash_strobe_brightness): it rises
+        over the attack, holds, and fades over the release along its curve.
+        The rate and on-time are the strobe's (a subdivision of the beat).
+        False when it can't be played (no instant lamp transitions, no
+        tempo, fewer than two flashes fit) - then it stays a plain flash."""
+        net, sq = self.config.network, self.config.sequencer
+        period = self._beat_clock.period_s
+        if net.lamp_transitions not in INSTANT_TRANSITIONS or not period:
+            return False
+        rate = strobe_plan(period, 1.0, sq.strobe_max_hz, sq.strobe_duty, net.lamp_command_rate_hz)
+        if rate is None:
+            return False
+        _, flash_period, on_s = rate
+        attack, hold, release, curve = shape
+        # As long as the white flash would last, but never past the bar line.
+        flashes = min(
+            int(round((attack + hold + release) / flash_period)),
+            int(math.floor(event.strobe_beats * period / flash_period + 0.01)),
+        )
+        if flashes < 2:
+            return False
+        # Each flash at the envelope's level in the middle of its on-time.
+        levels = tuple(
+            pulse_envelope(i * flash_period + 0.5 * on_s, attack, hold, release, curve) for i in range(flashes)
+        )
+        delay = 0.0
+        if self._seq_position is not None:
+            delay = (event.step / STEPS_PER_BEAT - self._seq_position) * period
+        start = time.perf_counter() + max(0.0, delay)  # a tick late at most: then right away
+        peak = cfg.white_pulse_white_brightness * event.brightness * sq.flash_strobe_brightness
+        if not lamps:
+            return True  # every lamp of the group still busy: no flash either way
+        bursts: Dict[str, StrobeBurst] = {}
+        for lamp in lamps:
+            effect = self.config.per_lamp_effects.get(lamp)
+            mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+            bursts[lamp] = StrobeBurst(start, flash_period, on_s, flashes, clip(peak * mult), temp=temp, levels=levels)
+        self.lamp_manager.start_strobe(bursts)
+        self._lamp_strobes.update(bursts)
+        return True
+
+    def _lamp_strobing(self, lamp: str) -> bool:
+        burst = self._lamp_strobes.get(lamp)
+        return burst is not None and self._perf_now < burst.end
 
     def trigger_strobe_test(self) -> str:
         """Plays one strobe burst on the selected lamps right away (the Test
@@ -1168,6 +1237,16 @@ class VisualizationEngine:
     def _preview_strobe(self, now: float) -> None:
         """Shows the strobe in the UI's lamp colours too (the lamps' workers
         play the real one - see _start_strobe)."""
+        if self._lamp_strobes:
+            self.latest_lamp_colors = dict(self.latest_lamp_colors)  # not the dict the lamps were sent
+        for lamp, lamp_burst in list(self._lamp_strobes.items()):
+            if now >= lamp_burst.end:
+                del self._lamp_strobes[lamp]
+            elif lamp_burst.is_on(now) and lamp in self.latest_lamp_colors:
+                self.latest_lamp_colors[lamp] = WhiteTarget(
+                    lamp_burst.brightness_at(lamp_burst.index_at(now)), lamp_burst.temp,
+                    under=self.latest_lamp_colors[lamp],
+                ).to_preview_color()
         burst = self._strobe_burst
         if burst is None:
             return
@@ -1209,7 +1288,7 @@ class VisualizationEngine:
     def _seq_white_envelope(self, lamp: str, wall_now: float, cfg) -> float:
         """0..1 brightness of a sequencer flash: ramps up over attack, holds,
         fades out over release along the flash's release curve (see
-        pulse_sequencer.release_level) - constant with legacy transitions (see
+        pulse_sequencer.pulse_envelope) - constant with legacy transitions (see
         the comment on shared_white_target in _tick_beat_sync_mode)."""
         peak = self._seq_white_brightness.get(lamp, 1.0)
         if self.config.network.lamp_transitions == "legacy":
@@ -1218,14 +1297,7 @@ class VisualizationEngine:
         attack = self._seq_white_attack.get(lamp, cfg.white_pulse_attack_ms / 1000.0)
         hold = self._seq_white_hold.get(lamp, cfg.white_pulse_duration_ms / 1000.0)
         release = self._seq_white_release.get(lamp, cfg.white_pulse_release_ms / 1000.0)
-        if attack > 0.0 and t < attack:
-            return peak * max(0.05, t / attack)
-        if t < attack + hold:
-            return peak
-        if release > 0.0:
-            curve = self._seq_white_curve.get(lamp, "linear")
-            return peak * max(0.0, release_level((t - attack - hold) / release, curve))
-        return 0.0
+        return peak * pulse_envelope(t, attack, hold, release, self._seq_white_curve.get(lamp, "linear"))
 
     def _seq_white_active(self, lamp: str, wall_now: float) -> bool:
         """Is this lamp mid sequencer flash - with the per-lamp version of the

@@ -1283,6 +1283,24 @@ class PulseSequencerConfig:
     # swells over the burst - from dark up to strobe_brightness in the middle
     # and back to dark - see color.models.strobe_wave_level.
     strobe_wave: str = "off"
+    # Flash strobe: now and then one of the group walk's white flashes is
+    # played as a short strobe on just that group instead - so a strobe shows
+    # up along the way as the white walks round the room (with several white
+    # rotators only the walk's own group, the others keep a plain flash). Only on a beat
+    # (never the downbeat, which lands clean) - with placement "bar_end" only
+    # on the bar's last beat, a roll into the next bar. It lasts as long as
+    # the white flash it replaces (attack + duration + release, as the pulse
+    # dynamics shaped that flash), up to the bar line at most, and its
+    # flashes follow that flash's brightness envelope (times
+    # flash_strobe_brightness) - so it doesn't stand out from the white
+    # pulses. The rate and on-time are the strobe's above. Same lamp
+    # transitions requirement as the strobe; otherwise it stays a plain flash.
+    flash_strobe_enabled: bool = False
+    flash_strobe_placement: str = "bar_end"  # see pulse_sequencer.FLASH_STROBE_PLACEMENTS
+    flash_strobe_chance: float = 0.3  # chance an eligible white flash becomes one
+    flash_strobe_min_gap_bars: int = 2  # never two closer than this many bars (0 = no minimum)
+    flash_strobe_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
+    flash_strobe_brightness: float = 1.0  # times the brightness of the white flash it replaces
 
     def to_dict(self) -> dict:
         return asdict(self)

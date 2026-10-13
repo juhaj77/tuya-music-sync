@@ -34,6 +34,11 @@ themselves. On top of that grid:
   minimum number of bars between two of them - all adjustable up to twice
   per bar. The flash rate is a subdivision of the beat (see strobe_plan),
   so the roll sits on the grid at any tempo.
+- Flash strobe (optional): now and then one of the group walk's white
+  flashes becomes a short strobe on just that group - on a beat, up to the
+  bar line at most, its flashes following the white flash's own attack,
+  hold and release - so a strobe shows up along the way as the white walks
+  round the room.
 
 Pure logic: returns events, never touches lamps. The engine turns events
 into lamp commands (see VisualizationEngine._apply_sequencer_events).
@@ -58,6 +63,9 @@ GROUP_WALKS = ("forward", "backward", "pingpong", "random", "all")
 # Where a strobe may end: on the bar line into a new phrase; also into the
 # phrase's second half; on any bar line; also at the middle of each bar.
 STROBE_PLACEMENTS = ("phrase", "half_phrase", "bars", "half_bars")
+# Which white flashes may become a flash strobe: the one on the bar's last
+# beat (a roll into the next bar); a flash on any beat but the downbeat.
+FLASH_STROBE_PLACEMENTS = ("bar_end", "beats")
 # Loudness levels, quietest first (see LoudnessTracker.level).
 LEVELS = ("calm", "groove", "high", "peak")
 # Flashes per beat a strobe may use: 8ths, 8th triplets, 16ths, 16th
@@ -105,6 +113,10 @@ class PulseEvent:
     # White: the release curve white_pulse_release_curve "dynamic" uses (see
     # release_curve_for) - one of RELEASE_CURVES.
     release_curve: str = "linear"
+    # White: above 0, play this flash as a strobe on its group instead (see
+    # PulseSequencerConfig.flash_strobe_enabled), for as long as the flash
+    # itself would last - but at most this many beats (up to the bar line).
+    strobe_beats: float = 0.0
 
 
 def metric_weight(bar_step: int, steps_per_bar: int) -> float:
@@ -184,6 +196,20 @@ def release_level(progress: float, curve: str) -> float:
     if curve == "ease_in_out":
         return 1.0 - x * x * (3.0 - 2.0 * x)
     return 1.0 - x
+
+
+def pulse_envelope(t: float, attack: float, hold: float, release: float, curve: str) -> float:
+    """How bright (0..1) a white flash is `t` seconds in: up over
+    `attack`, full for `hold`, then down over `release` along `curve` (see
+    release_level). Never quite dark during the attack, so a flash that
+    has started always shows."""
+    if attack > 0.0 and t < attack:
+        return max(0.05, t / attack)
+    if t < attack + hold:
+        return 1.0
+    if release > 0.0:
+        return max(0.0, release_level((t - attack - hold) / release, curve))
+    return 0.0
 
 
 def release_curve_for(reason: str, bar_step: int, steps_per_bar: int, intensity: float) -> str:
@@ -305,6 +331,7 @@ class PulseSequencer:
         self._strobe_from_step = 0
         self._strobe_until_step = 0
         self._last_strobe_start: Optional[int] = None  # the 16th the previous strobe started on
+        self._last_flash_strobe: Optional[int] = None  # the 16th the previous flash strobe started on
         self._phrase_origin_bar = 0
         self._loudness = LoudnessTracker()
         self._bar_intensities: List[float] = []  # this bar's intensity samples, for drop detection
@@ -403,13 +430,18 @@ class PulseSequencer:
                 white_reason = "double"
         self._pending_doubles.pop(step, None)
         if white_reason:
+            flash_strobe = 0
             if white_reason == "phrase" or cfg.group_walk == "all" or num_groups < 2:
                 white_group = None
             elif white_reason != "double":
                 white_group = self._next_group(num_groups)
-                if white_reason == "pattern" and self._roll("double", bar_step) < cfg.double_chance:
+                if white_reason == "pattern":
+                    flash_strobe = self._flash_strobe_steps(step, bar_step, steps_per_bar)
+                # (No second flash into a flash strobe: the group is still strobing.)
+                if white_reason == "pattern" and not flash_strobe and self._roll("double", bar_step) < cfg.double_chance:
                     self._pending_doubles[step + STEPS_PER_BEAT // 2] = white_group
             event = PulseEvent("white", white_group, 1.0, white_reason)
+            event.strobe_beats = flash_strobe / STEPS_PER_BEAT
             event.release_curve = release_curve_for(white_reason, bar_step, steps_per_bar, self.intensity)
             if cfg.pulse_dynamics:
                 event.brightness, event.attack, event.hold, event.release = flash_shape(
@@ -496,6 +528,36 @@ class PulseSequencer:
         return PulseEvent(
             "strobe", None, length_steps / STEPS_PER_BEAT, spot, lead=1.0 / STEPS_PER_BEAT
         )
+
+    def _flash_strobe_steps(self, step: int, bar_step: int, steps_per_bar: int) -> int:
+        """How many 16ths a flash strobe the walk's white flash on this step
+        may last at most (up to the bar line - its real length is the
+        flash's own, see the engine) - 0 for a plain flash. Every condition
+        has to hold: the flash is on a beat the placement allows (never the
+        downbeat), the previous flash strobe is far enough back, the bar's
+        strobe isn't about to start, the music is loud enough, and the
+        chance roll comes up. Never past the bar line, so the downbeat lands
+        clean. A bar's strobe decided later still comes: it takes over from
+        a flash strobe still running (see LampWorker._run_strobe)."""
+        cfg = self.config
+        if not cfg.flash_strobe_enabled or bar_step == 0 or bar_step % STEPS_PER_BEAT:
+            return 0
+        to_bar_line = steps_per_bar - bar_step
+        if cfg.flash_strobe_placement == "bar_end" and to_bar_line != STEPS_PER_BEAT:
+            return 0
+        length = to_bar_line
+        if self._strobe_from_step > step and step + length > self._strobe_from_step:
+            return 0  # the bar's strobe is about to start
+        last = self._last_flash_strobe
+        if last is not None and 0 <= step - last < max(0, int(cfg.flash_strobe_min_gap_bars)) * steps_per_bar:
+            return 0
+        min_level = cfg.flash_strobe_min_level if cfg.flash_strobe_min_level in LEVELS else LEVELS[0]
+        if LEVELS.index(self.level) < LEVELS.index(min_level):
+            return 0
+        if self._rng.random() >= cfg.flash_strobe_chance:
+            return 0
+        self._last_flash_strobe = step
+        return length
 
     def _white_steps(self, steps_per_bar: int) -> Set[int]:
         pattern = self.config.white_pattern

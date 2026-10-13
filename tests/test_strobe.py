@@ -394,6 +394,28 @@ def test_worker_returns_to_the_show_after_a_burst():
     assert worker._strobe is None
 
 
+def test_a_newer_burst_takes_over_from_a_running_one():
+    # A flash strobe still running when the bar's strobe comes: it stops at
+    # its next flash, and the new burst plays on its own times.
+    device = _FakeDevice()
+    worker = _start_worker(device)
+    try:
+        now = time.perf_counter()
+        old = StrobeBurst(now + 0.03, 0.1, 0.05, 6, 0.4)
+        worker.start_strobe(old)
+        time.sleep(0.03 + 0.1 + 0.07)  # two of its flashes played
+        new = StrobeBurst(time.perf_counter() + 0.05, 0.08, 0.04, 2, 0.9)
+        worker.start_strobe(new)
+        time.sleep(0.05 + 2 * 0.08 + 0.15)
+    finally:
+        _stop(worker)
+    whites = [(at, payload[0]) for at, kind, payload in device.sent if kind == "white"]
+    assert [b for _, b in whites] == [40, 40, 90, 90]
+    assert abs(whites[2][0] - new.on_time(0)) < 0.04
+    assert device.sent[-1][1] == "colour"  # never left on white
+    assert worker._strobe is None
+
+
 def test_worker_skips_flashes_it_is_too_late_for():
     device = _FakeDevice()
     worker = _start_worker(device)
@@ -628,3 +650,191 @@ def test_strobe_also_plays_with_smooth_transitions(monkeypatch):
     _run_engine(engine, clock, 12.0)
     assert lamps.strobes
     assert engine.trigger_strobe_test().startswith("Played")
+
+
+# -- flash strobe: one white flash of the walk played as a strobe on its group ------------
+
+
+def _flash_cfg(**kw):
+    base = dict(
+        strobe_enabled=False, white_pattern="beats", flash_strobe_enabled=True, flash_strobe_placement="beats",
+        flash_strobe_chance=1.0, flash_strobe_min_gap_bars=0, flash_strobe_min_level="calm",
+    )
+    base.update(kw)
+    return _seq_cfg(**base)
+
+
+def _flash_strobes(events):
+    return [e for e in events if e.kind == "white" and e.strobe_beats > 0.0]
+
+
+def test_flash_strobe_is_off_by_default():
+    assert PulseSequencerConfig().flash_strobe_enabled is False
+    events = _run_sequencer(PulseSequencer(_flash_cfg(flash_strobe_enabled=False), random.Random(1)), 8)
+    assert not _flash_strobes(events)
+
+
+def test_flash_strobe_on_the_bars_last_beat_rolls_into_the_next_bar():
+    events = _run_sequencer(PulseSequencer(_flash_cfg(flash_strobe_placement="bar_end"), random.Random(1)), 8)
+    strobes = _flash_strobes(events)
+    assert len(strobes) >= 7
+    for e in strobes:
+        assert e.bar_step == 12 and e.group is not None and e.reason == "pattern"
+        assert e.strobe_beats == pytest.approx(1.0)  # at most up to the bar line
+
+
+def test_flash_strobe_lands_on_beats_never_the_downbeat_nor_past_the_bar_line():
+    events = _run_sequencer(PulseSequencer(_flash_cfg(white_pattern="sixteenths"), random.Random(1)), 8)
+    strobes = _flash_strobes(events)
+    assert strobes
+    for e in strobes:
+        assert e.bar_step in (4, 8, 12)
+        assert e.bar_step + e.strobe_beats * 4 <= 16
+    # The walk goes on meanwhile: the other groups keep their white flashes.
+    e = strobes[0]
+    assert [w for w in events if w.kind == "white" and e.step < w.step < e.step + 4 and w.group != e.group]
+
+
+def test_flash_strobe_minimum_gap():
+    events = _run_sequencer(PulseSequencer(_flash_cfg(flash_strobe_min_gap_bars=2), random.Random(1)), 12)
+    strobes = _flash_strobes(events)
+    assert len(strobes) >= 4
+    for a, b in zip(strobes, strobes[1:]):
+        assert b.step - a.step >= 2 * 16
+
+
+def test_flash_strobe_needs_the_music_loud_enough_and_its_chance():
+    quiet = _run_sequencer(PulseSequencer(_flash_cfg(flash_strobe_min_level="high"), random.Random(1)), 8)
+    assert not _flash_strobes(quiet)  # a steady level is never among the loudest it's been
+    never = _run_sequencer(PulseSequencer(_flash_cfg(flash_strobe_chance=0.0), random.Random(1)), 8)
+    assert not _flash_strobes(never)
+
+
+def test_flash_strobe_never_blocks_the_bars_strobe_nor_starts_into_it():
+    # The bar's strobe is the big event: flash strobes don't take it away
+    # (a running one is cut short - see LampWorker._run_strobe), and none
+    # starts once the bar's strobe is announced.
+    def run(flash):
+        cfg = _flash_cfg(flash_strobe_enabled=flash, strobe_enabled=True, strobe_placement="bars", strobe_beats=1.0,
+                         strobe_chance=1.0, strobe_min_gap_bars=0, white_pattern="sixteenths")
+        return _run_sequencer(PulseSequencer(cfg, random.Random(4)), 12)
+
+    with_flash = run(True)
+    bar_strobes = [(e.step + 1, e.step + 1 + int(e.length * 4)) for e in with_flash if e.kind == "strobe"]
+    assert bar_strobes == [(e.step + 1, e.step + 1 + int(e.length * 4)) for e in run(False) if e.kind == "strobe"]
+    flash = _flash_strobes(with_flash)
+    assert flash
+    for start, end in bar_strobes:
+        assert not [e for e in flash if start - 1 <= e.step < end]
+
+
+def test_flash_strobe_settings_survive_a_save_and_load():
+    cfg = PulseSequencerConfig(
+        flash_strobe_enabled=True, flash_strobe_placement="beats", flash_strobe_chance=0.7,
+        flash_strobe_min_gap_bars=3, flash_strobe_min_level="high", flash_strobe_brightness=0.8,
+    )
+    assert PulseSequencerConfig.from_dict(cfg.to_dict()) == cfg
+    assert PulseSequencerConfig.from_dict({}).flash_strobe_enabled is False
+
+
+def _make_flash_engine(monkeypatch, transitions="direct", attack_ms=100.0, duration_ms=100.0, release_ms=300.0):
+    engine, clock, lamps = _make_engine(
+        monkeypatch, transitions=transitions, strobe_enabled=False, white_pattern="beats",
+        flash_strobe_enabled=True, flash_strobe_placement="beats", flash_strobe_chance=1.0,
+        flash_strobe_min_gap_bars=1, flash_strobe_brightness=0.75, pulse_dynamics=False, min_group_gap_ms=0.0,
+    )
+    bs = engine.config.color_mapping.beat_sync
+    bs.white_pulse_white_brightness = 0.8
+    bs.white_pulse_rotators = 1
+    bs.white_pulse_attack_ms, bs.white_pulse_duration_ms, bs.white_pulse_release_ms = attack_ms, duration_ms, release_ms
+    bs.white_pulse_release_curve = "linear"
+    return engine, clock, lamps
+
+
+def test_engine_plays_a_flash_strobe_on_the_walks_group_only(monkeypatch):
+    engine, clock, lamps = _make_flash_engine(monkeypatch)
+    _run_engine(engine, clock, 20.0)
+    assert len(lamps.strobes) >= 3
+    for handed_over, bursts in lamps.strobes:
+        assert set(bursts) in ({"a", "c"}, {"b", "d"})  # one group of the walk, not every lamp
+        for lamp, burst in bursts.items():
+            # 120 BPM, 20 commands/s: 16ths, 125 ms apart - as long as the white flash
+            # (100 + 100 + 300 ms = 500 ms): four flashes.
+            assert burst.flashes == 4 and burst.period_s == pytest.approx(PERIOD / 4, rel=0.05)
+            # The white flash's peak, times Flash strobe brightness (and the lamp's multiplier)...
+            expected = 0.8 * 0.75 * (0.5 if lamp == "d" else 1.0)
+            assert burst.brightness == pytest.approx(expected)
+            # ...and each flash along its envelope, sampled mid on-time (31, 156, 281, 406 ms):
+            # up over the 100 ms attack, full in the hold, down the 300 ms linear release.
+            levels = [burst.brightness_at(i) / expected for i in range(burst.flashes)]
+            assert levels == pytest.approx([0.3125, 1.0, 0.729, 0.3125], abs=0.03)
+            assert 0.0 <= burst.start - handed_over < TICK + 1e-6
+            # No white flash on that lamp while it strobes.
+            assert not [t for t, targets in lamps.white_calls if lamp in targets and burst.start <= t < burst.end]
+    assert lamps.white_calls  # the other flashes of the walk stay plain white flashes
+
+
+def test_with_two_white_rotators_only_the_walks_own_group_strobes(monkeypatch):
+    # Two opposite rotators: the walk's own group strobes, the opposite one
+    # keeps its plain white flash - a glitch in one spot, not the whole room.
+    engine, clock, lamps = _make_flash_engine(monkeypatch, attack_ms=50.0, duration_ms=100.0, release_ms=150.0)
+    engine.config.color_mapping.beat_sync.white_pulse_rotators = 2
+    _run_engine(engine, clock, 20.0)
+    assert len(lamps.strobes) >= 3
+    for handed_over, bursts in lamps.strobes:
+        assert set(bursts) in ({"a", "c"}, {"b", "d"})
+        other = {"a", "b", "c", "d"} - set(bursts)
+        flashed = [targets for t, targets in lamps.white_calls if handed_over <= t < handed_over + 0.2]
+        assert any(other <= set(targets) for targets in flashed)
+
+
+def test_engine_shows_the_flash_strobe_in_the_preview(monkeypatch):
+    engine, clock, lamps = _make_flash_engine(monkeypatch)
+    lit, dark = [], []
+    for _ in range(int(20.0 / TICK)):
+        engine.tick_visual()
+        if lamps.strobes:
+            lamp, burst = next(iter(lamps.strobes[-1][1].items()))
+            if burst.start <= clock.now < burst.end:
+                (lit if burst.is_on(clock.now) else dark).append(min(engine.latest_lamp_colors[lamp].to_rgb255()))
+        clock.now += TICK
+    assert lit and dark
+    assert sum(lit) / len(lit) > sum(dark) / len(dark)  # the white on top lifts every channel
+
+
+def test_flash_strobe_is_cut_at_the_bar_line(monkeypatch):
+    # A 2 s white flash on the bar's last beat: the strobe stops at the bar line.
+    engine, clock, lamps = _make_flash_engine(monkeypatch, attack_ms=50.0, duration_ms=1000.0, release_ms=950.0)
+    engine.config.sequencer.flash_strobe_placement = "bar_end"
+    _run_engine(engine, clock, 20.0)
+    assert lamps.strobes
+    for _, bursts in lamps.strobes:
+        burst = next(iter(bursts.values()))
+        assert burst.flashes == 4  # one beat of 16ths, not the 2 s of the white flash
+        assert burst.end - burst.start < PERIOD
+        assert burst.levels[-1] == 1.0  # still in the white flash's hold when the bar ends
+
+
+def test_a_white_flash_too_short_for_two_strobe_flashes_stays_a_flash(monkeypatch):
+    engine, clock, lamps = _make_flash_engine(monkeypatch, attack_ms=10.0, duration_ms=60.0, release_ms=100.0)
+    _run_engine(engine, clock, 12.0)
+    assert lamps.strobes == []
+    assert any(targets for _, targets in lamps.white_calls)
+
+
+def test_pulse_envelope_rises_holds_and_falls_along_the_curve():
+    from airam_lights.effects.pulse_sequencer import pulse_envelope
+
+    assert pulse_envelope(0.0, 0.1, 0.1, 0.3, "linear") == pytest.approx(0.05)  # never quite dark once started
+    assert pulse_envelope(0.05, 0.1, 0.1, 0.3, "linear") == pytest.approx(0.5)
+    assert pulse_envelope(0.15, 0.1, 0.1, 0.3, "linear") == 1.0
+    assert pulse_envelope(0.35, 0.1, 0.1, 0.3, "linear") == pytest.approx(0.5)
+    assert pulse_envelope(0.35, 0.1, 0.1, 0.3, "ease_out") == pytest.approx(0.25)
+    assert pulse_envelope(0.6, 0.1, 0.1, 0.3, "linear") == 0.0
+
+
+def test_flash_strobe_stays_a_plain_flash_without_instant_transitions(monkeypatch):
+    engine, clock, lamps = _make_flash_engine(monkeypatch, transitions="legacy")
+    _run_engine(engine, clock, 12.0)
+    assert lamps.strobes == []
+    assert any(targets for _, targets in lamps.white_calls)
