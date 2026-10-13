@@ -80,7 +80,7 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 ## Demo videos
 
 Videos recorded on real hardware - Chase and Group with **v1.14**, Mix with **v1.15**,
-Mix - hue from pitch with **v1.16**:
+Mix - hue from pitch and Deep Purple with **v1.16**:
 **8 Airam spots**, 4 in the ceiling and 4 along the walls, running in **Beat Sync**
 mode. The Chase and Group videos have
 the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mode at
@@ -109,6 +109,16 @@ the **strobe** effect in them, and they were filmed on a **Xiaomi 14T in Pro mod
   whole color circle - magenta, blue, red, orange, yellow, green and cyan. A **white
   pulse rotates** around the spots on top, and Chase's **Switch fade** is shorter than in
   the v1.15 clip. Back at **60 fps**.
+- [**Deep Purple**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Deep_Purple.mp4) -
+  a change from the more mainstream electronic music of the other clips (Amon Tobin):
+  **Deep Purple**, and the lights go along with the style surprisingly well. Same
+  version and settings as *Mix - hue from pitch* - the base color still steps by
+  **pitch** - but now **Chase** brings in its own **music-driven** hue step as well:
+  **2 rotators**, **width 2** lamps with a **linear** falloff, in **`hue_shift_relative`**
+  mode with *Hue shift step from* = **`intensity_brightness`** (between 34 and 151
+  degrees), so the louder and brighter the sound, the further the highlighted lamps turn
+  away from the room's base color. Group Switch (`complementary`) and the rotating white
+  pulses run on top as before. About a minute, filmed at **30 fps**.
 
 (The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
 to preview video files past a few MB, so they aren't committed directly into the repo.)
