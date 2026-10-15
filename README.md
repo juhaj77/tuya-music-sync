@@ -645,6 +645,19 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   wins: none starts once it's announced, and one still running is cut short when it
   begins. Like the strobe, it needs *Lamp transitions* `direct` or `smooth` - otherwise
   the flash stays a plain white flash.
+- **Color sweep** (optional, off by default) - now and then a **colour of its own**
+  (*Sweep colour*, saturation and brightness) runs once round the lamps in **Chase
+  order**, fast - over *Sweep length* (half a beat to 4 beats), each position lit in turn
+  for its share of it, on top of the show. It sits on the grid like the strobe: with
+  *placement* `phrase` it ends on the bar line into a new phrase (a run into the
+  phrase-start flash), with `bars` on any bar line, with `beats` it starts on any beat
+  and is over by the bar line - the downbeat always lands clean. *Rotators* sets how many
+  run at once, evenly spaced round the loop; each covers its own stretch, so every lamp
+  is still lit once per sweep. *Width* lights that many neighbouring positions at once -
+  a band of 2 or 3 spots moving round reads more clearly than a single one. Loudness, chance and a minimum gap in bars keep it
+  occasional; it never runs during the strobe (a strobe takes over from one still
+  running). It uses only its own settings - none of the Chase overlay's, which can stay
+  off - and works with any *Lamp transitions*, since it's on the RGB colour.
 
 The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
 The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -

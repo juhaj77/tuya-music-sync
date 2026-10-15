@@ -1301,6 +1301,30 @@ class PulseSequencerConfig:
     flash_strobe_min_gap_bars: int = 2  # never two closer than this many bars (0 = no minimum)
     flash_strobe_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
     flash_strobe_brightness: float = 1.0  # times the brightness of the white flash it replaces
+    # Color sweep: now and then a colour of its own (color_sweep_hue_deg)
+    # runs once round the lamps in Chase order (PerLampEffect.chase_order),
+    # fast - over color_sweep_beats beats - each position lit in turn for
+    # its share of the sweep, on top of the show. Placed like the strobe: it
+    # ends on a bar line (into a new phrase with placement "phrase") so the
+    # downbeat lands clean, or with "beats" starts on any beat; never while
+    # the strobe runs. Its own settings only - none of Chase's.
+    # color_sweep_rotators: how many run at once, evenly spaced round the
+    # loop - each covers its own share of it, so every lamp is lit once per
+    # sweep. color_sweep_width: how many neighbouring positions are lit at
+    # once - a band moving round instead of a single spot, so it reads more
+    # clearly; every lamp is still lit for the same share of the sweep.
+    color_sweep_enabled: bool = False
+    color_sweep_hue_deg: float = 200.0
+    color_sweep_saturation: float = 1.0
+    color_sweep_brightness: float = 1.0
+    color_sweep_beats: float = 1.0  # how long one sweep takes: 0.5, 1, 2 or 4 beats
+    color_sweep_rotators: int = 1
+    color_sweep_width: int = 1
+    color_sweep_direction: str = "forward"  # see pulse_sequencer.COLOR_SWEEP_DIRECTIONS
+    color_sweep_placement: str = "bars"  # see pulse_sequencer.COLOR_SWEEP_PLACEMENTS
+    color_sweep_chance: float = 0.3  # chance an eligible spot actually gets one
+    color_sweep_min_gap_bars: int = 4  # never two closer than this many bars (0 = no minimum)
+    color_sweep_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
 
     def to_dict(self) -> dict:
         return asdict(self)

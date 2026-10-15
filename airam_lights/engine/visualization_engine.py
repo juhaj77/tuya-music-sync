@@ -323,6 +323,10 @@ class VisualizationEngine:
         # playing, per lamp - for the preview, and so no white flash lands
         # on a lamp in the middle of one.
         self._lamp_strobes: Dict[str, StrobeBurst] = {}
+        # The sequencer's color sweep running now (see _apply_color_sweep):
+        # its start on the clock (beats), length in beats and the last step
+        # of it lit so far - None when there's none.
+        self._color_sweep: Optional[dict] = None
         self.last_strobe: Optional[dict] = None
         self._perf_now = 0.0  # time.perf_counter() of the current visual tick
         self._white_targets_preselected = False
@@ -541,7 +545,9 @@ class VisualizationEngine:
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
-        if self._beat_sync_white_targets and (self.config.chase.enabled or self.config.group_switch.enabled):
+        swept = bool(colors) and mode == "beat_sync" and self._apply_color_sweep(colors, selected_ids)
+
+        if self._beat_sync_white_targets and (self.config.chase.enabled or self.config.group_switch.enabled or swept):
             self._recolor_under_white(colors)
         self._restrict_white_targets_to_moving_lamps(selected_ids)
 
@@ -1068,6 +1074,9 @@ class VisualizationEngine:
             if cfg.dark_pulse_enabled and self._beat_dark_until is None and cfg.dark_pulse_duration_ms > 0.0:
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0 * event.length
             return
+        if event.kind == "sweep":
+            self._color_sweep = {"start": event.step / STEPS_PER_BEAT, "beats": event.length, "last": -1}
+            return
         if event.kind == "strobe":
             # Announced ahead of time (event.lead): it starts when the clock
             # reaches that position, so the burst sits on the beat grid.
@@ -1236,6 +1245,56 @@ class VisualizationEngine:
                 f"of at least {needed}/s (now {self.config.network.lamp_command_rate_hz:g}/s)."
             )
         return message
+
+    def _apply_color_sweep(self, colors: Dict[str, Color], selected_ids) -> bool:
+        """Paints the sequencer's color sweep (PulseSequencerConfig.
+        color_sweep_enabled) over `colors`, in place: the sweep's colour
+        runs once round the Chase order positions over its length on the
+        clock, each position lit for its share of it - with several rotators
+        each covers its own stretch of the loop, so every lamp is lit once.
+        With color_sweep_width above 1 a band of that many neighbouring
+        positions moves round instead of one: it slides in at the start and
+        out at the end of its stretch, so every position stays lit for the
+        same share of the sweep. A position whose share fell between two ticks still gets this one, so
+        none is skipped at fast tempos. Ends early when the clock loses lock
+        or the strobe takes over, or the grid jumps back. True when it lit something this tick."""
+        sweep = self._color_sweep
+        if sweep is None:
+            return False
+        position = self._seq_position
+        if not self._sequencing or position is None or self._strobe_running():
+            self._color_sweep = None
+            return False
+        progress = (position - sweep["start"]) / max(1e-6, sweep["beats"])
+        positions = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        if progress >= 1.0 or not positions:
+            self._color_sweep = None
+            return False
+        if progress < 0.0:
+            return False
+        sq = self.config.sequencer
+        n = len(positions)
+        count = max(1, min(int(sq.color_sweep_rotators), n))
+        steps = int(math.ceil(n / count))
+        width = max(1, min(int(sq.color_sweep_width), steps))
+        travel = steps + width - 1  # the band's front, from the first position until its back leaves the last
+        index = min(travel - 1, int(progress * travel))
+        if index < sweep["last"]:
+            self._color_sweep = None  # the grid jumped back (bar start re-estimated): don't replay it
+            return False
+        first = sweep["last"] + 1 if sweep["last"] < index else index
+        sweep["last"] = index
+        lit: Set[str] = set()
+        for i in range(max(0, first - width + 1), min(steps - 1, index) + 1):
+            k = (-i) % n if sq.color_sweep_direction == "backward" else i
+            lit.update(spread_positions(positions, k, count))
+        color = Color.from_hsv(sq.color_sweep_hue_deg, sq.color_sweep_saturation, sq.color_sweep_brightness)
+        swept = False
+        for device_id in lit:
+            if device_id in colors:
+                colors[device_id] = color
+                swept = True
+        return swept
 
     def _strobe_running(self) -> bool:
         burst = self._strobe_burst

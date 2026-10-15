@@ -26,6 +26,8 @@ from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.chase import get_chase_groups, get_group_switch_groups
 from ...effects.pulse_sequencer import (
+    COLOR_SWEEP_DIRECTIONS,
+    COLOR_SWEEP_PLACEMENTS,
     DARK_PATTERNS,
     FLASH_STROBE_PLACEMENTS,
     GROUP_WALKS,
@@ -1051,6 +1053,16 @@ class ColorMappingTab(QWidget):
             seq_off if not sequencing else not_direct if not direct
             else "White pulses are off." if not white else "Flash strobe is off.",
         )
+        # Color sweep: on the RGB colour, so any lamp transitions do.
+        set_active([self.seq_sweep_checkbox], sequencing, seq_off)
+        set_active(
+            [self.seq_sweep_hue_slider, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider,
+             self.seq_sweep_length_combo, self.seq_sweep_rotators_spin, self.seq_sweep_width_spin, self.seq_sweep_direction_combo,
+             self.seq_sweep_placement_combo, self.seq_sweep_level_combo, self.seq_sweep_chance_slider,
+             self.seq_sweep_gap_slider],
+            sequencing and sq.color_sweep_enabled,
+            seq_off if not sequencing else "Color sweep is off.",
+        )
         if sequencing and not direct:
             show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box): only then "
                       "do the bulbs take a change instantly and show white and colour at the same time.")
@@ -1666,6 +1678,7 @@ class ColorMappingTab(QWidget):
         layout.addLayout(test_row)
 
         self._build_flash_strobe_controls(layout, sq)
+        self._build_color_sweep_controls(layout, sq)
 
     def _build_flash_strobe_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
         self.seq_flash_strobe_checkbox = QCheckBox(
@@ -1729,6 +1742,99 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_sequencer_changed)
             layout.addWidget(w)
 
+    def _build_color_sweep_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        self.seq_sweep_checkbox = QCheckBox(
+            "Color sweep (now and then a colour of its own runs fast round the lamps in Chase order)"
+        )
+        self.seq_sweep_checkbox.setChecked(sq.color_sweep_enabled)
+        self.seq_sweep_checkbox.setToolTip(
+            "Now and then the colour below runs once round the lamps in Chase order ('Chase order' in the "
+            "Per-Lamp table - lamps without one are left out), fast: over the Sweep length, each position "
+            "lit in turn for its share of it, on top of the show. Placed on the beat grid like the strobe: "
+            "it ends on a bar line, so the downbeat lands clean, and never runs during the strobe (a strobe "
+            "takes over from one still running). Uses only its own settings below - none of the Chase "
+            "overlay's (Chase itself can stay off)."
+        )
+        self.seq_sweep_checkbox.toggled.connect(self._on_sequencer_changed)
+        layout.addWidget(self.seq_sweep_checkbox)
+
+        self.seq_sweep_hue_slider = HueSlider("Sweep colour", sq.color_sweep_hue_deg)
+        self.seq_sweep_saturation_slider = FloatSlider(
+            "Sweep saturation", 0.0, 1.0, sq.color_sweep_saturation, decimals=2,
+            tooltip="1 = the full colour, lower = paler (0 = white from the RGB LEDs).",
+        )
+        self.seq_sweep_brightness_slider = FloatSlider(
+            "Sweep brightness", 0.1, 1.0, sq.color_sweep_brightness, decimals=2,
+            tooltip="Brightness of the lit lamp.",
+        )
+        for w in (self.seq_sweep_hue_slider, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider):
+            w.valueChanged.connect(self._on_sequencer_changed)
+            layout.addWidget(w)
+
+        length_row = QHBoxLayout()
+        length_row.addWidget(QLabel("Sweep length:"))
+        self.seq_sweep_length_combo = choice_combo(
+            [(0.5, "half a beat"), (1.0, "1 beat"), (2.0, "2 beats"), (4.0, "4 beats")], sq.color_sweep_beats,
+            "How long one sweep round the lamps takes (at most the whole bar). Very short sweeps on many lamps "
+            "light each one for only a tick or two.",
+        )
+        self.seq_sweep_length_combo.currentIndexChanged.connect(self._on_sequencer_changed)
+        length_row.addWidget(self.seq_sweep_length_combo)
+        length_row.addWidget(QLabel("Rotators:"))
+        self.seq_sweep_rotators_spin = QSpinBox()
+        self.seq_sweep_rotators_spin.setRange(1, 16)
+        self.seq_sweep_rotators_spin.setValue(sq.color_sweep_rotators)
+        self.seq_sweep_rotators_spin.setToolTip(
+            "How many run round at once, evenly spaced round the loop: 2 = from opposite sides, 3 = thirds. "
+            "Each covers its own stretch, so every lamp is still lit once per sweep."
+        )
+        self.seq_sweep_rotators_spin.valueChanged.connect(self._on_sequencer_changed)
+        length_row.addWidget(self.seq_sweep_rotators_spin)
+        length_row.addWidget(QLabel("Width:"))
+        self.seq_sweep_width_spin = QSpinBox()
+        self.seq_sweep_width_spin.setRange(1, 8)
+        self.seq_sweep_width_spin.setValue(sq.color_sweep_width)
+        self.seq_sweep_width_spin.setSuffix(" spots")
+        self.seq_sweep_width_spin.setToolTip(
+            "How many neighbouring Chase order positions are lit at once: 1 = a single spot running round, "
+            "2 or more = a band of that many, easier to follow. Every lamp is still lit for the same share "
+            "of the sweep, and the sweep takes the same Sweep length."
+        )
+        self.seq_sweep_width_spin.valueChanged.connect(self._on_sequencer_changed)
+        length_row.addWidget(self.seq_sweep_width_spin)
+        length_row.addStretch(1)
+        layout.addLayout(length_row)
+
+        self.seq_sweep_direction_combo = self._labeled_combo(
+            layout, "Sweep direction:", COLOR_SWEEP_DIRECTIONS, sq.color_sweep_direction,
+            "forward: up the Chase order. backward: down it.",
+        )
+        self.seq_sweep_placement_combo = self._labeled_combo(
+            layout, "Sweep placement:", COLOR_SWEEP_PLACEMENTS, sq.color_sweep_placement,
+            "Where a sweep may happen, from rarest to most frequent. phrase: ending on the bar line into a "
+            "new phrase - a run into the phrase-start flash. bars: ending on any bar line. beats: starting on "
+            "any beat (and over by the bar line).",
+        )
+        self.seq_sweep_level_combo = self._labeled_combo(
+            layout, "Sweep from loudness:", LEVELS, sq.color_sweep_min_level,
+            "Only when the music is at least this loud compared to the last half minute. calm: always. "
+            "groove: not in the quiet parts. high / peak: only in the loudest ones.",
+        )
+        for combo in (self.seq_sweep_direction_combo, self.seq_sweep_placement_combo, self.seq_sweep_level_combo):
+            combo.currentTextChanged.connect(self._on_sequencer_changed)
+
+        self.seq_sweep_chance_slider = FloatSlider(
+            "Sweep chance", 0.0, 1.0, sq.color_sweep_chance, decimals=2,
+            tooltip="Chance a spot that qualifies gets a sweep. 1 = every time (handy while trying it out).",
+        )
+        self.seq_sweep_gap_slider = FloatSlider(
+            "Sweep min gap", 0.0, 16.0, float(sq.color_sweep_min_gap_bars), decimals=0, suffix=" bars",
+            tooltip="Never two sweeps closer than this many bars, whatever the chance says. 0 = no minimum.",
+        )
+        for w in (self.seq_sweep_chance_slider, self.seq_sweep_gap_slider):
+            w.valueChanged.connect(self._on_sequencer_changed)
+            layout.addWidget(w)
+
     def _on_strobe_test(self) -> None:
         self.seq_strobe_test_label.setText(self.controller.engine.trigger_strobe_test())
 
@@ -1782,6 +1888,18 @@ class ColorMappingTab(QWidget):
         sq.flash_strobe_chance = self.seq_flash_strobe_chance_slider.value()
         sq.flash_strobe_min_gap_bars = int(round(self.seq_flash_strobe_gap_slider.value()))
         sq.flash_strobe_brightness = self.seq_flash_strobe_brightness_slider.value()
+        sq.color_sweep_enabled = self.seq_sweep_checkbox.isChecked()
+        sq.color_sweep_hue_deg = self.seq_sweep_hue_slider.value()
+        sq.color_sweep_saturation = self.seq_sweep_saturation_slider.value()
+        sq.color_sweep_brightness = self.seq_sweep_brightness_slider.value()
+        sq.color_sweep_beats = self.seq_sweep_length_combo.currentData()
+        sq.color_sweep_rotators = self.seq_sweep_rotators_spin.value()
+        sq.color_sweep_width = self.seq_sweep_width_spin.value()
+        sq.color_sweep_direction = self.seq_sweep_direction_combo.currentText()
+        sq.color_sweep_placement = self.seq_sweep_placement_combo.currentText()
+        sq.color_sweep_min_level = self.seq_sweep_level_combo.currentText()
+        sq.color_sweep_chance = self.seq_sweep_chance_slider.value()
+        sq.color_sweep_min_gap_bars = int(round(self.seq_sweep_gap_slider.value()))
         self._update_beat_states()
         self.controller.apply_config_changes()
 
