@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QGroupBox,
@@ -783,6 +784,13 @@ class ColorMappingTab(QWidget):
 
         sub_tabs.insertTab(2, peak_widget, "Peak Flash")
         sub_tabs.setCurrentIndex(0)
+        # A tab widget makes every page as tall as the tallest one (Beat Sync's):
+        # without a stretch at the end, a shorter page spreads its rows over
+        # that whole height, with big gaps between them.
+        for index in range(sub_tabs.count()):
+            page_layout = sub_tabs.widget(index).layout()
+            if isinstance(page_layout, QBoxLayout):
+                page_layout.addStretch(1)
 
         # -- global ---------------------------------------------------------------------
         global_box = QGroupBox("Global")
@@ -794,7 +802,7 @@ class ColorMappingTab(QWidget):
         self.curve_combo.setCurrentText(cm.response_curve)
         self.curve_combo.setToolTip(
             "Reshapes the raw 0..1 audio level BEFORE it becomes brightness/hue, in RGB Frequency, "
-            "Custom, HSV Music, and 8-Band Spectrum modes only (Beat Sync, Peak Flash, and Beat Sync "
+            "Custom and HSV Music modes only (Beat Sync, Peak Flash, and Beat Sync "
             "White don't use this at all - they react to individual detected hits instead of a "
             "continuous level). linear: unchanged. log: boosts quiet detail, so quieter passages still "
             "show visible variation instead of looking flat/dark. exp2: the opposite - suppresses quiet "
@@ -870,7 +878,7 @@ class ColorMappingTab(QWidget):
         apply_builtin_btn = QPushButton("Apply")
         apply_builtin_btn.setToolTip(
             "Sets the shared beat clock, Beat Sync, Chase and Group Switch together (Chase and Group "
-            "Switch are on the 8-Band && Per-Lamp tab). Leaves your lamp groups, Chase width/intensity, "
+            "Switch are on the Chase & Group Switch tab). Leaves your lamp groups, Chase width/intensity, "
             "Group Switch intensity, beat detection band/sensitivity, lead time and true-white "
             "depth/brightness/cool ratio as they are."
         )
@@ -1035,11 +1043,17 @@ class ColorMappingTab(QWidget):
             sequencing and direct and sq.strobe_enabled,
             seq_off if not sequencing else not_direct if not direct else "The strobe is off.",
         )
-        # These shape the Test button's burst too, so they stay usable without the sequencer.
         set_active(
-            [self.seq_strobe_length_combo, self.seq_strobe_wave_combo, self.seq_strobe_rate_slider,
-             self.seq_strobe_duty_slider, self.seq_strobe_brightness_slider, self.seq_strobe_test_button],
-            direct, not_direct,
+            [self.seq_strobe_length_combo, self.seq_strobe_wave_combo, self.seq_strobe_brightness_slider,
+             self.seq_strobe_test_button],
+            sequencing and direct and sq.strobe_enabled,
+            seq_off if not sequencing else not_direct if not direct else "The strobe is off.",
+        )
+        # The rate and on-time are the flash strobe's too.
+        set_active(
+            [self.seq_strobe_rate_slider, self.seq_strobe_duty_slider],
+            sequencing and direct and (sq.strobe_enabled or sq.flash_strobe_enabled),
+            seq_off if not sequencing else not_direct if not direct else "The strobe and the flash strobe are off.",
         )
         set_active(
             [self.seq_flash_strobe_checkbox], sequencing and direct and white,
@@ -1285,7 +1299,7 @@ class ColorMappingTab(QWidget):
             "Group Switch all move on the same beats instead of each reacting to different hits. It "
             "locks onto the tempo, ignores off-beat hits (hi-hats, vocals), fills in a missed kick, and "
             "counts bars so slower layers can change on bar starts. Chase / Group Switch follow it with "
-            "Speed source 'clock' (8-Band && Per-Lamp tab)."
+            "Speed source 'clock' (Chase & Group Switch tab)."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -1403,12 +1417,8 @@ class ColorMappingTab(QWidget):
         self.rhythm_fallback_checkbox.toggled.connect(self._on_rhythm_changed)
         layout.addWidget(self.rhythm_fallback_checkbox)
 
-        self.rhythm_status_label = QLabel()
-        layout.addWidget(self.rhythm_status_label)
-        self._rhythm_timer = QTimer(self)
-        self._rhythm_timer.timeout.connect(self._refresh_rhythm_status)
-        self._rhythm_timer.start(200)
-        self._refresh_rhythm_status()
+        # The clock's state (tempo, lock, beat, phrase, loudness) shows in the
+        # info panel along the bottom of the window.
         return box
 
     # -- pulse sequencer ---------------------------------------------------------------------
@@ -1951,30 +1961,3 @@ class ColorMappingTab(QWidget):
                 "(the rest from intensity+brightness)"
             )
         self.beat_spectrum_status_label.setText(text)
-
-    def _refresh_rhythm_status(self) -> None:
-        engine = self.controller.engine
-        if not engine.running or not engine.clock_active:
-            self.rhythm_status_label.setText("Clock: idle (not running, or nothing is following it)")
-            return
-        beat = engine.latest_clock_beat
-        tempo = f"{beat.bpm:.0f} BPM" if beat.bpm else "finding tempo..."
-        if beat.coasting:
-            lock = "coasting on last tempo"
-        elif beat.source == "flow":
-            lock = "following the notes (no beat)"
-        elif beat.source == "free":
-            lock = "free pace (no steady tempo)"
-        else:
-            lock = "locked" if beat.locked else "not locked"
-        bar = self.controller.config.rhythm.beats_per_bar
-        text = f"Clock: {tempo}, {lock}, beat {beat.bar_position + 1}/{bar}"
-        features = engine.latest_features
-        if features.harmonic is not None:
-            text += f", drums {features.percussive_share:.0%}"
-        seq = engine.sequencer_status
-        if seq is not None:
-            text += f"  |  phrase bar {seq['phrase_bar'] + 1}/{seq['phrase_bars']}, loudness: {seq['level']}"
-            if seq.get("strobe"):
-                text += f"  |  last strobe: {seq['strobe']['flashes']} flashes at {seq['strobe']['hz']:.1f}/s"
-        self.rhythm_status_label.setText(text)

@@ -27,7 +27,6 @@ from airam_lights.config.schema import (
     PerLampEffect,
     RGBModeConfig,
     SmoothingConfig,
-    SpectrumModeConfig,
     WhiteChaseEffectConfig,
 )
 from airam_lights.config.store import ConfigStore
@@ -46,10 +45,6 @@ def _build_fully_populated_config() -> AppConfig:
     hsv = HSVModeConfig(
         hue_min_deg=11.0, hue_max_deg=222.0, brightness_min=0.11, brightness_max=0.88,
         saturation_base=0.44, saturation_contrast_gain=0.33, sensitivity=1.11,
-    )
-    spectrum = SpectrumModeConfig(
-        base_hue_deg=99.0, hue_step_deg=12.5, saturation=0.77, min_brightness=0.02,
-        max_brightness=0.98, sensitivity=1.44, drive_saturation_too=True,
     )
     beat_sync = BeatSyncModeConfig(
         detect_low_hz=41.0, detect_high_hz=201.0, sensitivity=1.7, min_interval_ms=121.0,
@@ -80,16 +75,15 @@ def _build_fully_populated_config() -> AppConfig:
     smoothing = SmoothingConfig(attack_ms=61.0, release_ms=301.0, min_change_threshold=0.016)
 
     color_mapping = ColorMappingConfig(
-        mode="beat_sync_white", rgb=rgb, custom=rgb, hsv=hsv, spectrum=spectrum,
+        mode="beat_sync_white", rgb=rgb, custom=rgb, hsv=hsv,
         beat_sync=beat_sync, peak_flash=peak_flash, beat_sync_white=beat_sync_white,
         smoothing=smoothing, brightness=0.87, saturation=0.86, response_curve="log",
         invert_brightness=True,
     )
 
     effect = PerLampEffect(
-        device_id="dev-1", band_gains={"Band 1": 1.5}, phase_offset_ms=123.0,
-        brightness_mult=1.4, saturation_mult=1.3, hue_offset_deg=45.0, sensitivity_mult=1.2,
-        band_index=3, chase_order=2, chase_dwell_mult=2.5, effect_group=1,
+        device_id="dev-1", phase_offset_ms=123.0, chase_order=2, chase_dwell_mult=2.5, effect_group=1,
+        white_pulse_brightness_mult=0.7,
     )
 
     chase = ChaseEffectConfig(
@@ -132,7 +126,6 @@ def _build_fully_populated_config() -> AppConfig:
         devices=[device],
         groups={"Test Group": ["dev-1"]},
         bands_3=[band],
-        bands_8=[band] * 8,
         color_mapping=color_mapping,
         per_lamp_effects={"dev-1": effect},
         chase=chase,
@@ -198,7 +191,6 @@ def test_every_field_is_actually_different_from_default():
     fresh_default.per_lamp_effects = populated.per_lamp_effects
     fresh_default.presets = populated.presets
     fresh_default.bands_3 = populated.bands_3
-    fresh_default.bands_8 = populated.bands_8
     assert populated.color_mapping != fresh_default.color_mapping
     assert populated.chase != fresh_default.chase
     assert populated.group_switch != fresh_default.group_switch
@@ -219,3 +211,22 @@ def test_fresh_install_starts_with_the_default_look():
     assert AppConfig().sequencer.enabled is False
     # And the look survives a save/load round trip.
     assert AppConfig.from_dict(cfg.to_dict()).to_dict() == cfg.to_dict()
+
+
+def test_removed_8band_mode_and_per_lamp_multipliers_load_cleanly():
+    """A config saved by an older version: the 8-Band Spectrum mode falls
+    back to Beat Sync, and the dropped per-lamp settings are just ignored."""
+    old = AppConfig().to_dict()
+    old["color_mapping"]["mode"] = "8band_spectrum"
+    old["color_mapping"]["spectrum"] = {"base_hue_deg": 99.0}
+    old["bands_8"] = [{"name": "Band 1", "low_hz": 20, "high_hz": 60}]
+    old["per_lamp_effects"] = {
+        "dev-1": {
+            "device_id": "dev-1", "brightness_mult": 0.4, "hue_offset_deg": 90.0, "band_index": 3,
+            "sensitivity_mult": 1.5, "saturation_mult": 0.5, "band_gains": {"R": 2.0}, "chase_order": 2,
+        }
+    }
+    cfg = AppConfig.from_dict(old)
+    assert cfg.color_mapping.mode == "beat_sync"
+    assert cfg.per_lamp_effects["dev-1"].chase_order == 2
+    assert "bands_8" not in cfg.to_dict() and "spectrum" not in cfg.to_dict()["color_mapping"]

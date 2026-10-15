@@ -135,6 +135,11 @@ class LampWorker(threading.Thread):
         self._last_sent_color: Optional[Color] = None
         self._last_sent_white: Optional[WhiteTarget] = None
         self._last_send_time = 0.0
+        # What the lamp shows now, as far as this app knows: the last colour
+        # (or, for white, a preview colour of it) a send succeeded with - for
+        # the lamp tiles' swatches, so they show the light rather than the
+        # engine's wish (which the command rate thins out).
+        self.shown_color: Optional[Color] = None
         self._consecutive_failures = 0
         self._colour_mode_ensured = False
         self._white_mode_ensured = False
@@ -338,9 +343,11 @@ class LampWorker(threading.Thread):
                     transition="direct", under_rgb=rgb,
                 )
                 self._log_send("white", None, reported=False)
+                self.shown_color = WhiteTarget(burst.brightness_at(index), burst.temp, color).to_preview_color()
             else:
                 self.device.set_color(*rgb, wait_for_ack=False, transition="direct")
                 self._log_send("colour", color.to_hsv(), reported=False)
+                self.shown_color = color
             self._last_sent_color = color
             self._last_sent_white = None
             self._on_send_success()
@@ -680,6 +687,7 @@ class LampWorker(threading.Thread):
                     self._white_mode_ensured = False
                 self.device.set_color(r, g, b, wait_for_ack=False)
                 self._log_send("colour", color.to_hsv())
+            self.shown_color = color
             self._last_sent_color = color
             self._last_sent_white = None
             self._on_send_success()
@@ -704,6 +712,7 @@ class LampWorker(threading.Thread):
                     self._colour_mode_ensured = False
                 self.device.set_white(target.brightness * 100.0, target.temp * 100.0, wait_for_ack=False)
                 self._log_send("white", None)
+            self.shown_color = target.to_preview_color()
             self._last_sent_white = target
             self._last_sent_color = None
             self._consecutive_white_failures = 0
@@ -806,6 +815,14 @@ class LampManager:
             w.update_network_config(network_cfg, min_change_threshold)
 
     # -- selection ---------------------------------------------------------------
+
+    def shown_colors(self) -> Dict[str, Color]:
+        """Per lamp, the colour it shows now as far as the app knows (see
+        LampWorker.shown_color) - lamps nothing was sent to yet left out."""
+        return {
+            device_id: worker.shown_color for device_id, worker in self.workers.items()
+            if worker.shown_color is not None
+        }
 
     def selected_device_ids(self) -> List[str]:
         return [d.config.id for d in self.devices.values() if d.config.enabled and d.config.selected]

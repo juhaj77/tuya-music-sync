@@ -15,7 +15,6 @@ from .schema import (
     PerLampEffect,
     RGBModeConfig,
     SmoothingConfig,
-    SpectrumModeConfig,
     WhiteChaseEffectConfig,
 )
 from .store import ConfigStore, default_config_path
@@ -37,7 +36,6 @@ __all__ = [
     "PerLampEffect",
     "RGBModeConfig",
     "SmoothingConfig",
-    "SpectrumModeConfig",
     "WhiteChaseEffectConfig",
     "ConfigStore",
     "default_config_path",

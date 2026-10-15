@@ -353,6 +353,18 @@ class PulseSequencer:
     def update_config(self, config: PulseSequencerConfig) -> None:
         self.config = config
 
+    @property
+    def white_pattern_now(self) -> str:
+        """The white pattern playing now ("auto" resolved by the loudness)."""
+        pattern = self.config.white_pattern
+        return _AUTO_WHITE[self.level] if pattern == "auto" else pattern
+
+    @property
+    def dark_patterns_now(self) -> tuple:
+        """The dark patterns playing now ("auto" resolved by the loudness)."""
+        pattern = self.config.dark_pattern
+        return _AUTO_DARK[self.level] if pattern == "auto" else (pattern,)
+
     # -- main entry point ---------------------------------------------------------------
 
     def tick(

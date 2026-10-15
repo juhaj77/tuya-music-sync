@@ -1,17 +1,19 @@
-"""Main application window: tabbed UI wired to a single AppController."""
+"""Main application window: tabbed UI wired to a single AppController, with
+the info panel (what the music sync hears and does) along the bottom."""
 from __future__ import annotations
 
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget
+from PySide6.QtWidgets import QMainWindow, QMessageBox, QTabWidget, QVBoxLayout, QWidget
 
 from .controller import AppController
-from .tabs.band_mode_tab import BandModeTab
 from .tabs.color_mapping_tab import ColorMappingTab
 from .tabs.devices_tab import DevicesTab
 from .tabs.diagnostics_tab import DiagnosticsTab
+from .tabs.overlays_tab import OverlaysTab
 from .tabs.visualizer_tab import VisualizerTab
+from .widgets.info_panel import InfoPanel
 
 logger = logging.getLogger("airam_lights.ui")
 
@@ -24,13 +26,21 @@ class MainWindow(QMainWindow):
 
         self.controller = AppController()
 
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         self.tabs = QTabWidget()
-        self.setCentralWidget(self.tabs)
+        layout.addWidget(self.tabs, stretch=1)
+        # Outside the tabs, so it never scrolls away and shows on every tab.
+        self.info_panel = InfoPanel(self.controller)
+        layout.addWidget(self.info_panel)
+        self.setCentralWidget(central)
 
         self.tabs.addTab(VisualizerTab(self.controller), "Visualizer")
         self.tabs.addTab(DevicesTab(self.controller), "Devices && Setup")
         self.tabs.addTab(ColorMappingTab(self.controller), "Color Mapping")
-        self.tabs.addTab(BandModeTab(self.controller), "8-Band && Per-Lamp")
+        self.tabs.addTab(OverlaysTab(self.controller), "Chase && Group Switch")
         self.tabs.addTab(DiagnosticsTab(self.controller), "Diagnostics")
 
         self.controller.audioError.connect(self._on_audio_error)
@@ -44,7 +54,7 @@ class MainWindow(QMainWindow):
         current = self.tabs.currentIndex()
         for index, tab_class, title in (
             (2, ColorMappingTab, "Color Mapping"),
-            (3, BandModeTab, "8-Band && Per-Lamp"),
+            (3, OverlaysTab, "Chase && Group Switch"),
         ):
             old = self.tabs.widget(index)
             self.tabs.removeTab(index)

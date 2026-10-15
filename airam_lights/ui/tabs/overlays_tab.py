@@ -1,91 +1,30 @@
-"""8-Band Spectrum mode tab: per-band frequency ranges (one band per lamp by
-default), spectrum-mode color parameters, and the per-lamp effects table
-(band assignment, phase offset, brightness/saturation/hue/sensitivity
-multipliers) that turns a set of identical bulbs into a coordinated
-installation instead of identical copies of the same signal.
-
-Split into inner sub-tabs (Bands & Spectrum / Per-Lamp Effects / Chase
-Overlay) rather than one long scrolling page - the Chase overlay alone has
-~20 controls, which used to force a single giant column everything else sat
-below, and the per-lamp table was squeezed down to a sizeHint of just a row
-or two (its own inner scrollbar buried inside the page's outer one). Giving
-each concern its own page keeps any one page's scroll distance short, and
-lets the per-lamp table claim real vertical space the same way the Devices
-& Setup tab's lamp list does."""
+"""Chase & Group Switch tab: the two overlays that run on top of the colour
+mode - Chase (a highlight travelling round the lamps in their Chase order)
+and Group Switch (one lamp group active at a time) - each on its own inner
+sub-tab, since either one alone has ~20 controls. Which lamps take part, and
+where, is set per lamp on the Devices & Setup tab (Chase order, Effect
+group)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QDoubleSpinBox,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QScrollArea,
-    QSizePolicy,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
-from ...config.schema import BandDefinition, PerLampEffect
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import beat_divisions, choice_combo, inactive_note, set_active, show_note
 from ..widgets.param_slider import FloatSlider
-
-_BAND_COLUMNS = ["Name", "Low (Hz)", "High (Hz)"]
-_EFFECT_COLUMNS = [
-    "Lamp",
-    "Band",
-    "Phase offset (ms)",
-    "Brightness x",
-    "Saturation x",
-    "Hue offset (deg)",
-    "Sensitivity x",
-    "Chase order",
-    "Chase dwell x",
-    "Effect group",
-    "True white x",
-]
-# Header tooltips, same order as _EFFECT_COLUMNS.
-_EFFECT_COLUMN_TOOLTIPS = [
-    "The lamp's name (set on the Devices tab).",
-    "8-Band Spectrum mode only: which frequency band this lamp shows. Auto = assigned in "
-    "selection order.",
-    "Delays this lamp's reaction by this many milliseconds relative to the music, so lamps "
-    "with staggered offsets form a wave. Beat Sync's true-white flash ignores it (always "
-    "synchronized).",
-    "Multiplies this lamp's final output brightness, after the color mode has done its work "
-    "- 0.5 = half as bright, 1.0 = unchanged. Use it to balance a lamp that's physically "
-    "brighter/closer than the others.",
-    "Multiplies this lamp's color saturation - below 1.0 = more pastel/whiter, above 1.0 = "
-    "more vivid (up to fully saturated).",
-    "Rotates this lamp's hue around the color wheel by this many degrees, e.g. 180 = always "
-    "the opposite color of the rest.",
-    "Multiplies the music-driven level going INTO the color mode (input gain), before it's "
-    "turned into a color - above 1.0 = this lamp reacts more strongly to quieter sounds and "
-    "reaches its peak sooner, below 1.0 = it reacts less. Unlike Brightness x, which just "
-    "scales the finished output. (In RGB Frequency / 8-Band modes it's applied together "
-    "with the per-band gains.)",
-    "This lamp's position in the Chase overlay's rotation, 0-based. Lamps with the same "
-    "number light up together as one position. Off = not part of the chase.",
-    "How long the Chase highlight lingers at this lamp's position relative to others - "
-    "lower it for a position with several lamps (e.g. a multi-spot ceiling fixture) if the "
-    "highlight seems to dwell there too long. 1.0 = default.",
-    "This lamp's group for the Group Switch overlay (independent of Chase order). Lamps with "
-    "the same number switch together. Off = not part of any group.",
-    "Multiplies Beat Sync's true-white flash brightness for this lamp - 0.5 = half, 1.0 = "
-    "unchanged. Give every lamp in a group the same value to balance groups against each "
-    "other (e.g. wall spots vs. ceiling).",
-]
-
 
 def _scroll_page() -> "tuple[QWidget, QVBoxLayout]":
     """A tab page that's just a QScrollArea wrapping a QVBoxLayout - the
@@ -102,7 +41,7 @@ def _scroll_page() -> "tuple[QWidget, QVBoxLayout]":
     return page, QVBoxLayout(inner)
 
 
-class BandModeTab(QWidget):
+class OverlaysTab(QWidget):
     def __init__(self, controller: AppController, parent=None):
         super().__init__(parent)
         self.controller = controller
@@ -112,97 +51,11 @@ class BandModeTab(QWidget):
         sub_tabs = QTabWidget()
         outer.addWidget(sub_tabs)
 
-        bands_page, bands_root = _scroll_page()
-        sub_tabs.addTab(bands_page, "Bands && Spectrum")
-
-        effects_page = QWidget()
-        effects_root = QVBoxLayout(effects_page)
-        sub_tabs.addTab(effects_page, "Per-Lamp Effects")
-
         chase_page, chase_root = _scroll_page()
         sub_tabs.addTab(chase_page, "Chase Overlay")
 
         group_switch_page, group_switch_root = _scroll_page()
         sub_tabs.addTab(group_switch_page, "Group Switch")
-
-        # -- band definitions -------------------------------------------------------
-        band_box = QGroupBox("8-Band definitions (default: one band per lamp)")
-        band_layout = QVBoxLayout(band_box)
-        self.band_table = QTableWidget(len(controller.config.bands_8), len(_BAND_COLUMNS))
-        self.band_table.setHorizontalHeaderLabels(_BAND_COLUMNS)
-        self.band_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # A QTableWidget's sizeHint doesn't grow with its row count, so
-        # without this it defaults to showing only ~5 of the 8 bands behind
-        # its own inner scrollbar - Expanding + a layout stretch factor
-        # below lets it actually claim the page's spare vertical space.
-        self.band_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self._populate_band_table()
-        band_layout.addWidget(self.band_table)
-        bands_root.addWidget(band_box, stretch=1)
-
-        # -- spectrum mode color params -----------------------------------------------
-        color_box = QGroupBox("Spectrum mode appearance")
-        color_layout = QVBoxLayout(color_box)
-        spec = controller.config.color_mapping.spectrum
-        self.base_hue_slider = HueSlider("Base hue", spec.base_hue_deg)
-        self.hue_step_slider = FloatSlider("Hue step across bands", -60.0, 60.0, spec.hue_step_deg, decimals=0, suffix=" deg")
-        self.saturation_slider = FloatSlider("Saturation", 0.0, 1.0, spec.saturation)
-        self.min_bright_slider = FloatSlider("Min brightness", 0.0, 1.0, spec.min_brightness)
-        self.max_bright_slider = FloatSlider("Max brightness", 0.0, 1.0, spec.max_brightness)
-        self.spec_sensitivity_slider = FloatSlider("Sensitivity", 0.1, 4.0, spec.sensitivity)
-        for w in (
-            self.base_hue_slider,
-            self.hue_step_slider,
-            self.saturation_slider,
-            self.min_bright_slider,
-            self.max_bright_slider,
-            self.spec_sensitivity_slider,
-        ):
-            w.valueChanged.connect(self._on_spectrum_changed)
-            color_layout.addWidget(w)
-        self.drive_sat_checkbox = QCheckBox("Band level also modulates saturation")
-        self.drive_sat_checkbox.setChecked(spec.drive_saturation_too)
-        self.drive_sat_checkbox.toggled.connect(self._on_spectrum_changed)
-        color_layout.addWidget(self.drive_sat_checkbox)
-        bands_root.addWidget(color_box)
-
-        # -- per-lamp effects -----------------------------------------------------------
-        # Own page, given stretch=1 below (not squeezed inside a scroll area
-        # alongside everything else) so it actually claims the page's full
-        # height, the same way the Devices & Setup tab's lamp list does -
-        # showing every lamp at once instead of one row behind an inner
-        # scrollbar.
-        effects_box = QGroupBox("Per-lamp effects (applies in every mode)")
-        effects_layout = QVBoxLayout(effects_box)
-        effects_label = QLabel(
-            "Set band assignment (8-Band mode), a small delay for wave/chase effects, "
-            "per-lamp brightness/saturation/hue/sensitivity multipliers, 'Chase dwell x' "
-            "- how long the Chase overlay's highlight lingers at this lamp's chase position "
-            "relative to others (1.0 = default; lower it for a position with several lamps "
-            "at once, e.g. a multi-spot ceiling fixture, if the highlight feels like it's "
-            "dwelling there too long) - and 'Effect group', a separate, independent grouping "
-            "used by the Group Switch tab (a lamp can have a Chase order, an Effect group, "
-            "both, or neither). 'True white x' multiplies the Beat Sync true-white flash "
-            "brightness for this lamp (1.0 = unchanged, 0.5 = half) - give every lamp in a group "
-            "the same value to balance e.g. wall spots against the ceiling group."
-        )
-        effects_label.setWordWrap(True)
-        effects_layout.addWidget(effects_label)
-        self.effects_table = QTableWidget(0, len(_EFFECT_COLUMNS))
-        self.effects_table.setHorizontalHeaderLabels(_EFFECT_COLUMNS)
-        for col, tooltip in enumerate(_EFFECT_COLUMN_TOOLTIPS):
-            self.effects_table.horizontalHeaderItem(col).setToolTip(tooltip)
-        self.effects_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # With this many columns, equal-share Stretch can squeeze a numeric
-        # column below the width a spinbox needs to show its up/down
-        # buttons - they'd still work via scroll wheel or typing, but be
-        # invisible/undiscoverable. Floor every column's width so the
-        # buttons always have room; the table scrolls horizontally instead
-        # of ever going narrower than that.
-        self.effects_table.horizontalHeader().setMinimumSectionSize(70)
-        self.effects_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        effects_layout.addWidget(self.effects_table)
-        effects_root.addWidget(effects_box, stretch=1)
 
         # -- chase / rotating light overlay ----------------------------------------------
         self.chase_white_note = inactive_note()
@@ -210,7 +63,7 @@ class BandModeTab(QWidget):
         self.chase_box = chase_box = QGroupBox("Chase / Rotating Light overlay (works on top of every RGB mode)")
         chase_outer_layout = QVBoxLayout(chase_box)
         chase_intro_label = QLabel(
-            "Set 'Chase order' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
+            "Set 'Chase order' (0, 1, 2, ...) on the lamps on the Devices & Setup tab to include "
             "them in the rotation, in that order - a moving highlight travels through them, "
             "overlaid on whatever the active mode is already showing."
         )
@@ -240,7 +93,7 @@ class BandModeTab(QWidget):
         self.chase_enabled_checkbox.setChecked(ch.enabled)
         self.chase_enabled_checkbox.setToolTip(
             "Turns the whole Chase overlay on or off - when off, whichever color mode is active "
-            "(RGB, HSV, 8-Band, Beat Sync, etc.) shows with no traveling highlight layered on top."
+            "(RGB, HSV, Beat Sync, etc.) shows with no traveling highlight layered on top."
         )
         self.chase_enabled_checkbox.toggled.connect(self._on_chase_changed)
         speed_col.addWidget(self.chase_enabled_checkbox)
@@ -534,7 +387,7 @@ class BandModeTab(QWidget):
         self.gs_box = gs_box = QGroupBox("Group Switch (discrete alternative to Chase - one active group at a time)")
         gs_outer_layout = QVBoxLayout(gs_box)
         gs_intro_label = QLabel(
-            "Set 'Effect group' (0, 1, 2, ...) on the lamps in the Per-Lamp Effects tab to include "
+            "Set 'Effect group' (0, 1, 2, ...) on the lamps on the Devices & Setup tab to include "
             "them here, in that order - a SEPARATE grouping from Chase's 'Chase order' above, so a "
             "lamp can be in the Chase, in a Group Switch group, both, or neither. Unlike Chase, "
             "exactly one group is 'active' at a time and shows the target color at full strength - "
@@ -825,145 +678,11 @@ class BandModeTab(QWidget):
 
         group_switch_root.addWidget(gs_box)
 
-        self._populated_lamps = None
-        controller.lampsChanged.connect(self._populate_effects_table)
-        self._populate_effects_table()
         self._update_overlay_states()
 
         self._hue_step_timer = QTimer(self)
         self._hue_step_timer.timeout.connect(self._refresh_hue_step_status)
         self._hue_step_timer.start(200)
-
-    # -- band definitions --------------------------------------------------------------
-
-    def _populate_band_table(self) -> None:
-        self.band_table.blockSignals(True)
-        for row, band in enumerate(self.controller.config.bands_8):
-            name_item = QTableWidgetItem(band.name)
-            self.band_table.setItem(row, 0, name_item)
-
-            low_spin = QSpinBox()
-            low_spin.setRange(1, 20000)
-            low_spin.setValue(int(band.low_hz))
-            low_spin.valueChanged.connect(self._on_band_table_changed)
-            self.band_table.setCellWidget(row, 1, low_spin)
-
-            high_spin = QSpinBox()
-            high_spin.setRange(1, 20000)
-            high_spin.setValue(int(band.high_hz))
-            high_spin.valueChanged.connect(self._on_band_table_changed)
-            self.band_table.setCellWidget(row, 2, high_spin)
-        self.band_table.blockSignals(False)
-        self.band_table.itemChanged.connect(self._on_band_table_changed)
-
-    def _on_band_table_changed(self, *_args) -> None:
-        bands = []
-        for row in range(self.band_table.rowCount()):
-            name_item = self.band_table.item(row, 0)
-            low_widget = self.band_table.cellWidget(row, 1)
-            high_widget = self.band_table.cellWidget(row, 2)
-            if name_item is None or low_widget is None or high_widget is None:
-                continue
-            bands.append(BandDefinition(name=name_item.text() or f"Band {row+1}", low_hz=low_widget.value(), high_hz=high_widget.value()))
-        if bands:
-            self.controller.config.bands_8 = bands
-            self.controller.apply_config_changes()
-
-    # -- spectrum params ------------------------------------------------------------------
-
-    def _on_spectrum_changed(self, *_args) -> None:
-        spec = self.controller.config.color_mapping.spectrum
-        spec.base_hue_deg = self.base_hue_slider.value()
-        spec.hue_step_deg = self.hue_step_slider.value()
-        spec.saturation = self.saturation_slider.value()
-        spec.min_brightness = self.min_bright_slider.value()
-        spec.max_brightness = self.max_bright_slider.value()
-        spec.sensitivity = self.spec_sensitivity_slider.value()
-        spec.drive_saturation_too = self.drive_sat_checkbox.isChecked()
-        self.controller.apply_config_changes()
-
-    # -- per-lamp effects table -------------------------------------------------------------
-
-    def _populate_effects_table(self) -> None:
-        devices = list(self.controller.lamp_manager.devices.values())
-        # lampsChanged also fires every few seconds from the periodic lamp
-        # status refresh - rebuilding the cell widgets then would destroy a
-        # spinbox mid-edit (focus lost, typed text gone), so only rebuild
-        # when the lamp list itself has actually changed.
-        lamps = [(dev.config.id, dev.config.name) for dev in devices]
-        if lamps == self._populated_lamps:
-            return
-        self._populated_lamps = lamps
-        self.effects_table.setRowCount(len(devices))
-        num_bands = len(self.controller.config.bands_8)
-
-        for row, dev in enumerate(devices):
-            effect = self.controller.get_or_create_effect(dev.config.id)
-
-            name_item = QTableWidgetItem(dev.config.name)
-            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
-            self.effects_table.setItem(row, 0, name_item)
-
-            band_combo = QComboBox()
-            band_combo.addItem("Auto", None)
-            for i in range(num_bands):
-                band_combo.addItem(f"Band {i+1}", i)
-            if effect.band_index is not None:
-                idx = band_combo.findData(effect.band_index)
-                if idx >= 0:
-                    band_combo.setCurrentIndex(idx)
-            band_combo.currentIndexChanged.connect(lambda _i, d=dev.config.id, c=band_combo: self._on_effect_changed(d, "band_index", c.currentData()))
-            self.effects_table.setCellWidget(row, 1, band_combo)
-
-            self._add_spin(row, 2, dev.config.id, "phase_offset_ms", -500.0, 500.0, effect.phase_offset_ms, step=5.0)
-            self._add_spin(row, 3, dev.config.id, "brightness_mult", 0.0, 2.0, effect.brightness_mult)
-            self._add_spin(row, 4, dev.config.id, "saturation_mult", 0.0, 2.0, effect.saturation_mult)
-            self._add_spin(row, 5, dev.config.id, "hue_offset_deg", -180.0, 180.0, effect.hue_offset_deg, step=5.0)
-            self._add_spin(row, 6, dev.config.id, "sensitivity_mult", 0.0, 2.0, effect.sensitivity_mult)
-
-            chase_spin = QSpinBox()
-            chase_spin.setRange(-1, max(7, len(devices) - 1))
-            chase_spin.setSpecialValueText("Off")
-            chase_spin.setValue(effect.chase_order if effect.chase_order is not None else -1)
-            chase_spin.valueChanged.connect(
-                lambda v, d=dev.config.id: self._on_effect_changed(d, "chase_order", (v if v >= 0 else None))
-            )
-            self.effects_table.setCellWidget(row, 7, chase_spin)
-
-            self._add_spin(row, 8, dev.config.id, "chase_dwell_mult", 0.1, 10.0, effect.chase_dwell_mult)
-
-            group_spin = QSpinBox()
-            group_spin.setRange(-1, max(7, len(devices) - 1))
-            group_spin.setSpecialValueText("Off")
-            group_spin.setValue(effect.effect_group if effect.effect_group is not None else -1)
-            group_spin.valueChanged.connect(
-                lambda v, d=dev.config.id: self._on_effect_changed(d, "effect_group", (v if v >= 0 else None))
-            )
-            self.effects_table.setCellWidget(row, 9, group_spin)
-
-            self._add_spin(
-                row, 10, dev.config.id, "white_pulse_brightness_mult", 0.0, 2.0, effect.white_pulse_brightness_mult
-            )
-
-    def _add_spin(
-        self, row: int, col: int, device_id: str, attr: str, lo: float, hi: float, value: float, step: float = 0.05
-    ) -> None:
-        spin = QDoubleSpinBox()
-        spin.setRange(lo, hi)
-        spin.setDecimals(2)
-        spin.setSingleStep(step)
-        spin.setValue(value)
-        # Explicit (Qt's default already, but stated here so it's obvious and
-        # never silently lost) - these are always visibly clickable, not just
-        # scroll-wheel/type-only.
-        spin.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
-        spin.valueChanged.connect(lambda v, d=device_id, a=attr: self._on_effect_changed(d, a, v))
-        self.effects_table.setCellWidget(row, col, spin)
-
-    def _on_effect_changed(self, device_id: str, attr: str, value) -> None:
-        effect = self.controller.get_or_create_effect(device_id)
-        setattr(effect, attr, value)
-        self.controller.apply_config_changes()
 
     @staticmethod
     def _hue_step_controls(layout: QVBoxLayout, cfg, on_change):

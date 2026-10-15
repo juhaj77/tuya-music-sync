@@ -1,7 +1,7 @@
 """Main visualizer tab: audio device, level meter, spectrum, mode selection,
 and the most commonly-tweaked controls (sensitivity/brightness/saturation/
 attack/release). Detailed per-mode configuration lives in the Color Mapping
-and 8-Band tabs."""
+and Chase & Group Switch tabs."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -29,7 +29,6 @@ _MODES = [
     ("peak_flash", "Peak Flash"),
     ("rgb_freq", "RGB Frequency"),
     ("hsv_music", "HSV Music"),
-    ("8band_spectrum", "8-Band Spectrum"),
     ("custom", "Custom"),
 ]
 
@@ -248,7 +247,6 @@ class VisualizerTab(QWidget):
         cm.rgb.sensitivity = value
         cm.custom.sensitivity = value
         cm.hsv.sensitivity = value
-        cm.spectrum.sensitivity = value
         self.controller.apply_config_changes()
 
     def _on_brightness(self, value: float) -> None:

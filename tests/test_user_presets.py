@@ -44,9 +44,9 @@ def test_preset_restores_chase_and_group_layout():
 def test_preset_leaves_other_per_lamp_settings_alone():
     cfg = _config()
     preset = snapshot_preset(cfg)
-    cfg.per_lamp_effects["a"].brightness_mult = 0.4
+    cfg.per_lamp_effects["a"].white_pulse_brightness_mult = 0.4
     apply_preset(cfg, preset)
-    assert cfg.per_lamp_effects["a"].brightness_mult == 0.4
+    assert cfg.per_lamp_effects["a"].white_pulse_brightness_mult == 0.4
 
 
 def test_old_preset_with_chase_orders_only_still_loads():

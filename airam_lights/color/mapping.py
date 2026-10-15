@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-from ..config.schema import ColorMappingConfig, ChannelMap, HSVModeConfig, PerLampEffect, RGBModeConfig, SpectrumModeConfig
+from ..config.schema import ColorMappingConfig, ChannelMap, HSVModeConfig, RGBModeConfig
 from .models import Color, clip, lerp
 
 
@@ -103,29 +103,6 @@ class ColorMappingEngine:
 
         return self.apply_global(Color.from_hsv(hue, sat, value))
 
-    # -- 8-Band Spectrum mode --------------------------------------------------
-
-    def compute_band_color(
-        self,
-        band_level: float,
-        band_index: int,
-        base_hue_override: "float | None" = None,
-        cfg: "SpectrumModeConfig | None" = None,
-    ) -> Color:
-        cfg = cfg or self.config.spectrum
-        curve = self.config.response_curve
-        level = apply_response_curve(clip(band_level) * cfg.sensitivity, curve)
-
-        hue = base_hue_override if base_hue_override is not None else cfg.base_hue_deg
-        hue = (hue + band_index * cfg.hue_step_deg) % 360.0
-
-        sat = cfg.saturation
-        if cfg.drive_saturation_too:
-            sat = clip(sat * (0.35 + 0.65 * level))
-
-        value = lerp(cfg.min_brightness, cfg.max_brightness, level)
-        return self.apply_global(Color.from_hsv(hue, sat, value))
-
     # -- Beat Sync mode ---------------------------------------------------------
 
     def compute_beat_sync(self, hue_deg: float, saturation: float, value: float) -> Color:
@@ -143,11 +120,11 @@ class ColorMappingEngine:
         self-documenting wrapper consistent with every other mode."""
         return self.apply_global(Color.from_hsv(hue_deg, saturation, value))
 
-    # -- global + per-lamp post-processing -------------------------------------
+    # -- global post-processing -------------------------------------
 
     def apply_global(self, color: Color) -> Color:
         """Called as the last step by every single mode's compute_*() method
-        (RGB, HSV, 8-band, Beat Sync, Peak Flash) - so global settings here
+        (RGB, HSV, Beat Sync, Peak Flash) - so global settings here
         apply uniformly across all of them without each mode needing its own
         copy of this logic."""
         h, s, v = color.to_hsv()
@@ -160,12 +137,3 @@ class ColorMappingEngine:
         v = clip(v * self.config.brightness)
         return Color.from_hsv(h, s, v)
 
-
-def apply_per_lamp_effect(color: Color, effect: PerLampEffect) -> Color:
-    """Applies a lamp's hue offset / brightness / saturation multipliers on
-    top of an already fully color-mapped value."""
-    h, s, v = color.to_hsv()
-    h = (h + effect.hue_offset_deg) % 360.0
-    s = clip(s * effect.saturation_mult)
-    v = clip(v * effect.brightness_mult)
-    return Color.from_hsv(h, s, v)

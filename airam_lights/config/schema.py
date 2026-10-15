@@ -68,19 +68,6 @@ def default_3band() -> List[BandDefinition]:
     ]
 
 
-def default_8band() -> List[BandDefinition]:
-    return [
-        BandDefinition("Band 1", 20, 60),
-        BandDefinition("Band 2", 60, 120),
-        BandDefinition("Band 3", 120, 250),
-        BandDefinition("Band 4", 250, 500),
-        BandDefinition("Band 5", 500, 1000),
-        BandDefinition("Band 6", 1000, 2000),
-        BandDefinition("Band 7", 2000, 5000),
-        BandDefinition("Band 8", 5000, 12000),
-    ]
-
-
 # ---------------------------------------------------------------------------
 # Smoothing
 # ---------------------------------------------------------------------------
@@ -201,35 +188,6 @@ class HSVModeConfig:
             saturation_base=float(d.get("saturation_base", 0.6)),
             saturation_contrast_gain=float(d.get("saturation_contrast_gain", 0.5)),
             sensitivity=float(d.get("sensitivity", 1.0)),
-        )
-
-
-@dataclass
-class SpectrumModeConfig:
-    """'8-Band Spectrum' mode: one band drives one lamp's brightness/saturation
-    around a user-chosen base hue."""
-
-    base_hue_deg: float = 260.0  # used when a lamp has no per-lamp hue offset
-    hue_step_deg: float = 0.0  # optional hue rotation across bands 1..8 (rainbow look)
-    saturation: float = 0.9
-    min_brightness: float = 0.04
-    max_brightness: float = 1.0
-    sensitivity: float = 1.0
-    drive_saturation_too: bool = False  # if True, band level also modulates saturation
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "SpectrumModeConfig":
-        return cls(
-            base_hue_deg=float(d.get("base_hue_deg", 260.0)),
-            hue_step_deg=float(d.get("hue_step_deg", 0.0)),
-            saturation=float(d.get("saturation", 0.9)),
-            min_brightness=float(d.get("min_brightness", 0.04)),
-            max_brightness=float(d.get("max_brightness", 1.0)),
-            sensitivity=float(d.get("sensitivity", 1.0)),
-            drive_saturation_too=bool(d.get("drive_saturation_too", False)),
         )
 
 
@@ -596,16 +554,18 @@ class BeatSyncWhiteModeConfig:
         )
 
 
+COLOR_MODES = ("rgb_freq", "hsv_music", "custom", "beat_sync", "peak_flash", "beat_sync_white")
+
+
 @dataclass
 class ColorMappingConfig:
     # "beat_sync" is the default: a percussive, obviously rhythm-locked flash
     # on every beat reads as far more "alive" in practice than the smoothly
     # continuous blending the other modes do - see README.md.
-    mode: str = "beat_sync"  # "rgb_freq" | "hsv_music" | "custom" | "8band_spectrum" | "beat_sync" | "peak_flash" | "beat_sync_white"
+    mode: str = "beat_sync"  # see COLOR_MODES
     rgb: RGBModeConfig = field(default_factory=RGBModeConfig)
     custom: RGBModeConfig = field(default_factory=RGBModeConfig)
     hsv: HSVModeConfig = field(default_factory=HSVModeConfig)
-    spectrum: SpectrumModeConfig = field(default_factory=SpectrumModeConfig)
     beat_sync: BeatSyncModeConfig = field(default_factory=BeatSyncModeConfig)
     peak_flash: PeakFlashModeConfig = field(default_factory=PeakFlashModeConfig)
     beat_sync_white: BeatSyncWhiteModeConfig = field(default_factory=BeatSyncWhiteModeConfig)
@@ -621,7 +581,6 @@ class ColorMappingConfig:
             "rgb": self.rgb.to_dict(),
             "custom": self.custom.to_dict(),
             "hsv": self.hsv.to_dict(),
-            "spectrum": self.spectrum.to_dict(),
             "beat_sync": self.beat_sync.to_dict(),
             "peak_flash": self.peak_flash.to_dict(),
             "beat_sync_white": self.beat_sync_white.to_dict(),
@@ -635,11 +594,11 @@ class ColorMappingConfig:
     @classmethod
     def from_dict(cls, d: dict) -> "ColorMappingConfig":
         return cls(
-            mode=d.get("mode", "rgb_freq"),
+            # A mode that's gone (the old "8band_spectrum") falls back to the default.
+            mode=d.get("mode", "rgb_freq") if d.get("mode", "rgb_freq") in COLOR_MODES else "beat_sync",
             rgb=RGBModeConfig.from_dict(d.get("rgb", {})),
             custom=RGBModeConfig.from_dict(d.get("custom", {})),
             hsv=HSVModeConfig.from_dict(d.get("hsv", {})),
-            spectrum=SpectrumModeConfig.from_dict(d.get("spectrum", {})),
             beat_sync=BeatSyncModeConfig.from_dict(d.get("beat_sync", {})),
             peak_flash=PeakFlashModeConfig.from_dict(d.get("peak_flash", {})),
             beat_sync_white=BeatSyncWhiteModeConfig.from_dict(d.get("beat_sync_white", {})),
@@ -652,21 +611,16 @@ class ColorMappingConfig:
 
 
 # ---------------------------------------------------------------------------
-# Per-lamp effects (optional variation across the 8 lamps)
+# Per-lamp layout: each lamp's place in the Chase / Group Switch overlays
 # ---------------------------------------------------------------------------
 
 @dataclass
 class PerLampEffect:
     device_id: str
-    band_gains: Dict[str, float] = field(default_factory=dict)  # band name -> multiplier
+    # The manual control app's Ambient scene only (manual_control.py): this
+    # lamp's delay along the slow drift, so lamps with staggered offsets
+    # form a wave. The music app doesn't use it.
     phase_offset_ms: float = 0.0
-    brightness_mult: float = 1.0
-    saturation_mult: float = 1.0
-    hue_offset_deg: float = 0.0
-    sensitivity_mult: float = 1.0
-    # For 8-band spectrum mode: which band index (0-based) this lamp shows.
-    # None = assign automatically in selection order.
-    band_index: Optional[int] = None
     # For the Chase overlay (applies regardless of mode - see ChaseEffectConfig):
     # this lamp's position in the rotation order, 0-based. None = not part of
     # the chase. The chase's actual lamp order is derived by sorting all
@@ -699,13 +653,7 @@ class PerLampEffect:
     def from_dict(cls, d: dict) -> "PerLampEffect":
         return cls(
             device_id=d["device_id"],
-            band_gains=dict(d.get("band_gains", {})),
             phase_offset_ms=float(d.get("phase_offset_ms", 0.0)),
-            brightness_mult=float(d.get("brightness_mult", 1.0)),
-            saturation_mult=float(d.get("saturation_mult", 1.0)),
-            hue_offset_deg=float(d.get("hue_offset_deg", 0.0)),
-            sensitivity_mult=float(d.get("sensitivity_mult", 1.0)),
-            band_index=d.get("band_index", None),
             chase_order=d.get("chase_order", None),
             chase_dwell_mult=float(d.get("chase_dwell_mult", 1.0)),
             effect_group=d.get("effect_group", None),
@@ -722,7 +670,7 @@ class ChaseEffectConfig:
     """A moving highlight rotates through a chosen, ordered subset of lamps
     (each lamp's position comes from its PerLampEffect.chase_order), creating
     a spinning/chasing light effect - independent of, and layered on top of,
-    whichever color mode is currently active (RGB/HSV/8-Band/Beat Sync/Peak
+    whichever color mode is currently active (RGB/HSV/Beat Sync/Peak
     Flash/Custom all get this overlay the same way).
 
     Speed is either a constant number of full rotations per second
@@ -759,7 +707,7 @@ class ChaseEffectConfig:
     # rotating complementary-color highlight on top of Beat Sync (also the
     # default mode) is the combination this app looks best with out of the
     # box. Only actually visible once lamps have a chase_order assigned
-    # (Per-Lamp Effects tab), so this is harmless on a fresh install with no
+    # (Devices & Setup tab), so this is harmless on a fresh install with no
     # lamps configured yet.
     enabled: bool = True
 
@@ -1434,7 +1382,6 @@ class AppConfig:
     devices: List[DeviceConfig] = field(default_factory=list)
     groups: Dict[str, List[str]] = field(default_factory=dict)  # name -> device ids
     bands_3: List[BandDefinition] = field(default_factory=default_3band)
-    bands_8: List[BandDefinition] = field(default_factory=default_8band)
     color_mapping: ColorMappingConfig = field(default_factory=ColorMappingConfig)
     rhythm: RhythmConfig = field(default_factory=RhythmConfig)
     sequencer: PulseSequencerConfig = field(default_factory=PulseSequencerConfig)
@@ -1453,7 +1400,6 @@ class AppConfig:
             "devices": [d.to_dict() for d in self.devices],
             "groups": self.groups,
             "bands_3": [b.to_dict() for b in self.bands_3],
-            "bands_8": [b.to_dict() for b in self.bands_8],
             "color_mapping": self.color_mapping.to_dict(),
             "rhythm": self.rhythm.to_dict(),
             "sequencer": self.sequencer.to_dict(),
@@ -1474,7 +1420,6 @@ class AppConfig:
             devices=[DeviceConfig.from_dict(x) for x in d.get("devices", [])],
             groups=dict(d.get("groups", {})),
             bands_3=[BandDefinition.from_dict(x) for x in d.get("bands_3", [])] or default_3band(),
-            bands_8=[BandDefinition.from_dict(x) for x in d.get("bands_8", [])] or default_8band(),
             color_mapping=ColorMappingConfig.from_dict(d.get("color_mapping", {})),
             rhythm=RhythmConfig.from_dict(d.get("rhythm", {})),
             sequencer=PulseSequencerConfig.from_dict(d.get("sequencer", {})),

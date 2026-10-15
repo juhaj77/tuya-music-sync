@@ -1,8 +1,8 @@
 """Unit tests for the color mapping engine - pure functions, no audio or
 network dependencies (this is the whole point of the module split)."""
-from airam_lights.color.mapping import ColorMappingEngine, apply_per_lamp_effect
+from airam_lights.color.mapping import ColorMappingEngine
 from airam_lights.color.models import Color
-from airam_lights.config.schema import ColorMappingConfig, PerLampEffect
+from airam_lights.config.schema import ColorMappingConfig
 
 
 def test_rgb_mode_is_continuous_not_discrete():
@@ -29,24 +29,6 @@ def test_hsv_mode_low_freq_vs_high_freq_hue_differs():
     h_low, _, _ = low.to_hsv()
     h_high, _, _ = high.to_hsv()
     assert h_low != h_high
-
-
-def test_band_color_brightness_follows_level():
-    engine = ColorMappingEngine(ColorMappingConfig())
-    dim = engine.compute_band_color(0.1, band_index=0)
-    bright = engine.compute_band_color(0.9, band_index=0)
-    _, _, v_dim = dim.to_hsv()
-    _, _, v_bright = bright.to_hsv()
-    assert v_bright > v_dim
-
-
-def test_per_lamp_hue_offset_rotates_hue():
-    base = Color.from_hsv(100.0, 1.0, 1.0)
-    effect = PerLampEffect(device_id="x", hue_offset_deg=50.0)
-    shifted = apply_per_lamp_effect(base, effect)
-    h_base, _, _ = base.to_hsv()
-    h_shifted, _, _ = shifted.to_hsv()
-    assert abs((h_shifted - h_base) - 50.0) < 1.0
 
 
 def test_color_rgb255_roundtrip():
@@ -86,18 +68,16 @@ def test_invert_brightness_flips_value_for_every_mode():
     _, _, v_bright_input = bright_input.to_hsv()
     assert v_dark_input > v_bright_input  # inverted: input 0 -> bright, input 1 -> dark
 
-    # Same check for 8-band mode.
-    dim = engine.compute_band_color(0.0, band_index=0)
-    bright = engine.compute_band_color(1.0, band_index=0)
-    _, _, v_dim = dim.to_hsv()
-    _, _, v_bright = bright.to_hsv()
+    # Same check for Beat Sync: its value 0 now shows bright.
+    _, _, v_dim = engine.compute_beat_sync(0.0, 1.0, 0.0).to_hsv()
+    _, _, v_bright = engine.compute_beat_sync(0.0, 1.0, 1.0).to_hsv()
     assert v_dim > v_bright
 
 
 def test_invert_brightness_off_by_default_is_normal():
     engine = ColorMappingEngine(ColorMappingConfig())  # invert_brightness defaults False
-    dark = engine.compute_band_color(0.0, band_index=0)
-    bright = engine.compute_band_color(1.0, band_index=0)
+    dark = engine.compute_beat_sync(0.0, 1.0, 0.0)
+    bright = engine.compute_beat_sync(0.0, 1.0, 1.0)
     _, _, v_dark = dark.to_hsv()
     _, _, v_bright = bright.to_hsv()
     assert v_bright > v_dark  # normal (non-inverted) behavior

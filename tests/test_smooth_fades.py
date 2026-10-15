@@ -3,21 +3,15 @@
 - hue, saturation and value go out at the datapoint's own resolution, not
   rounded through 8-bit RGB first;
 - lamp_transitions "smooth": big changes jump, small steps use the bulb's
-  own short fade, so the bulb glides from one command to the next;
-- a hue crossing 0/360 is interpolated the short way round in the history
-  the per-lamp phase offset samples from.
+  own short fade, so the bulb glides from one command to the next.
 
 No network, bulbs or audio: tinytuya.BulbDevice is a recorder.
 """
 import threading
 from types import SimpleNamespace
 
-import numpy as np
-import pytest
-
 from airam_lights.color.models import Color, WhiteTarget
 from airam_lights.config.schema import INSTANT_TRANSITIONS, LAMP_TRANSITIONS, NetworkConfig
-from airam_lights.engine.visualization_engine import TimeSeriesBuffer
 from airam_lights.lamps.manager import _SMOOTH_MAX_STEP, LampWorker
 from airam_lights.lamps.tuya_device import LampDevice, LampStatus
 
@@ -116,25 +110,6 @@ def test_direct_and_gradient_do_not_decide_per_command():
         worker._send_color(Color.from_hsv(0.0, 1.0, 1.0))
         worker._send_color(Color.from_hsv(0.0, 1.0, 0.95))
         assert [_decode(v)[0] for _, v in bulb.writes] == [mode] * 3
-
-
-# -- history interpolation ----------------------------------------------------------------------------
-
-
-def test_history_interpolates_a_hue_the_short_way_round():
-    history = TimeSeriesBuffer(circular_index=0)  # [hue, value, saturation]
-    history.push(10.0, np.array([350.0, 0.2, 1.0]))
-    history.push(10.1, np.array([10.0, 0.6, 1.0]))
-    hue, value, saturation = history.sample_at(10.05)
-    assert hue == pytest.approx(0.0, abs=1e-6) or hue == pytest.approx(360.0, abs=1e-6)  # not 180
-    assert value == pytest.approx(0.4) and saturation == pytest.approx(1.0)
-    hue, _, _ = history.sample_at(10.025)
-    assert hue == pytest.approx(355.0)
-    # Other histories (plain levels) stay plain linear.
-    levels = TimeSeriesBuffer()
-    levels.push(1.0, np.array([350.0]))
-    levels.push(2.0, np.array([10.0]))
-    assert levels.sample_at(1.5)[0] == pytest.approx(180.0)
 
 
 # -- the colour under a white flash follows the overlays ----------------------------------------------

@@ -65,7 +65,7 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 > change gliding over 140 ms, and a *Lamp command rate* of 50/s so those glides stay
 > smooth. The **Chase / Rotating Light overlay** ships switched off but already set up to
 > match - turn it on and it fits the rest. Until you assign Group Switch groups (and a
-> Chase order) in the Per-Lamp tab, the white flashes land on every lamp at once. **If
+> Chase order) to the lamps on the Devices & Setup tab, the white flashes land on every lamp at once. **If
 > all your lamps are in one group, switch Group Switch off** (its own sub-tab) - it is
 > on by default, and with a single group there is nothing to switch between. See
 > [section 5](#5-running-the-full-application) for the full writeup, or jump straight to
@@ -114,10 +114,12 @@ to preview video files past a few MB, so they aren't committed directly into the
   companion app needed once set up.
 - **Six color-mapping modes**: **Beat Sync** - the main mode, with the shared beat clock,
   the pulse sequencer, optional **dark pulses** and **white pulses** - then Beat Sync
-  White, Peak Flash, RGB Frequency, HSV Music and 8-Band Spectrum, plus a Custom mode for
-  arbitrary frequency ranges.
-- **Per-lamp control**: band assignment, phase offset, and independent
-  brightness/saturation/hue/sensitivity multipliers for every lamp.
+  White, Peak Flash, RGB Frequency and HSV Music, plus a Custom mode for arbitrary
+  frequency ranges.
+- **Every lamp's place in the effects**, right in the lamp list: its Chase order, Chase
+  dwell, Effect group and true-white brightness.
+- **Info panel** along the bottom of the window: tempo, beat, phrase, loudness, note and
+  key - and, while the pulse sequencer runs, a live timeline of its pulses.
 - **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
   width/speed/falloff curve, optionally beat- or peak-synced) layered on top of any
   mode - set up but switched off in a fresh install (see above).
@@ -168,14 +170,14 @@ niitä ei ole vielä testattu. Valmis Windows-versio löytyy
 ## 1. How this works (architecture)
 
 ```
- WASAPI loopback -> FFT / DSP -> Color Mapping -> Per-Lamp Effects -> Lamp Manager -> N Airam bulbs (LAN)
+ WASAPI loopback -> FFT / DSP -> Color Mapping -> Overlays / Sequencer -> Lamp Manager -> N Airam bulbs (LAN)
    (audio/)         (dsp/)        (color/)          (engine/)          (lamps/)
 ```
 
 - **audio/** - WASAPI loopback capture ("what you hear"), decoupled ring buffer.
 - **dsp/** - windowed FFT, configurable frequency-band energy extraction, spectral
   centroid/contrast, attack/release smoothing. Pure numpy, no UI/network dependency.
-- **color/** - RGB / HSV / 8-band color mapping. Pure functions on floats, no
+- **color/** - RGB / HSV / Beat Sync / Peak Flash color mapping. Pure functions on floats, no
   dependency on audio or Tuya code, so it can be (and is) unit-tested in isolation.
 - **lamps/** - local Tuya (tinytuya) device control, LAN discovery, one worker thread
   per lamp with independent rate limiting and change-thresholding.
@@ -187,7 +189,7 @@ niitä ei ole vielä testattu. Valmis Windows-versio löytyy
 - **config/** - JSON configuration (devices, groups, presets, DSP/color settings).
 - **diagnostics/** - logging + runtime rate/latency metrics, shown in the Diagnostics tab.
 - **ui/** - PySide6 desktop UI (5 tabs: Visualizer, Devices & Setup, Color Mapping,
-  8-Band & Per-Lamp, Diagnostics).
+  Chase & Group Switch, Diagnostics - and the info panel under them).
 
 The DSP/color engine has **zero import dependency** on the lamp/Tuya layer, and vice
 versa - you can develop/test the visualization math with `pytest` alone, no bulbs
@@ -418,8 +420,25 @@ Visualization**.
 Add lamps manually (or via **Scan Network** for IP/ID, then fill in the key), test
 connection/RGB/power per device, rename them, select exactly which ones participate
 in visualization, and save/apply named groups (e.g. "All Lamps", "Ceiling", "Left side").
-The lamp list, chase rotators, and every per-lamp table scale to however many devices
-you've added - there is no fixed lamp count anywhere in the app.
+The lamp list and chase rotators scale to however many devices you've added - there is
+no fixed lamp count anywhere in the app.
+
+Each row also sets the lamp's **place in the effects** (hover a column title for the
+details):
+
+- **Chase order** - its position in the Chase overlay's rotation (and the sequencer's
+  color sweep and Chase-order white walk), 0-based; lamps with the same number act as one
+  position. Off = not in the chase.
+- **Chase dwell x** - how long the Chase highlight lingers at this position (1.0 =
+  default; lower it for a position with several lamps).
+- **Effect group** - its group for Group Switch and the sequencer's white walk. Off = in
+  no group.
+- **True white x** - multiplies the true-white flash brightness for this lamp (white
+  pulses, sequencer flashes and strobes): 0.5 = half.
+
+The **Now** swatch shows the colour each lamp was last actually sent, updated many times
+a second - what the lamp shows, not just what the engine wanted (the lamp command rate
+thins that out). True white shows as a pale tint over the colour.
 
 **When one lamp won't respond** (but still works in the phone app - which goes through
 the Tuya cloud, not your LAN): the app first rebuilds the connection itself; if that
@@ -551,8 +570,8 @@ What follows the clock:
 - **Chase / Group Switch** - Speed source `clock`, moving every N beats counted from the
   bar start (e.g. Chase every beat, Group Switch once per bar).
 
-The status line under the Rhythm box shows the detected tempo, whether it's locked, and
-the current beat in the bar.
+The **info panel** along the bottom of the window shows the detected tempo, whether it's
+locked, and the current beat in the bar (see *Info panel* below).
 
 Settings that don't do anything in the current combination are **greyed out**, with the
 reason in their tooltip and a short note next to them - e.g. Beat Sync's own detection
@@ -659,7 +678,8 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   running). It uses only its own settings - none of the Chase overlay's, which can stay
   off - and works with any *Lamp transitions*, since it's on the RGB colour.
 
-The Rhythm status line shows where it is: `beat 2/4 | phrase bar 7/8, loudness: high`.
+The info panel shows where it is: `beat 2/4 · phrase bar 7/8, loudness high`, with a
+live timeline of the pulses under it (see *Info panel* below).
 The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -
 in most dance music that's where the kick is strongest, so it lines up with the real
 bar start after a few bars of listening.
@@ -715,8 +735,7 @@ faint brightness ripple. Three ways to pick the new hue each beat:
 
 `sensitivity` / `min_interval_ms` / `min_energy` tune how trigger-happy the detector
 is; `hue snap speed` / `brightness attack` / `brightness decay` tune how sharp vs.
-smooth the flash feels. Per-lamp phase offset (8-Band & Per-Lamp tab) still works here
-too - stagger it across lamps for a chase/wave effect on every beat.
+smooth the flash feels.
 
 **Dark pulses**: toggled via `dark_pulse_enabled` (on by default), `dark_pulse_probability`
 (0..1) is the chance that a given beat first dips toward black for `dark_pulse_duration_ms`
@@ -827,22 +846,15 @@ min interval, flash/sustain brightness, dark pulses) works exactly like Beat Syn
 > unlike RGB, has **not yet been independently verified against the physical bulbs** -
 > see `DEVICE_NOTES.md`. Test it via the manual app's White Balance tab first.
 
-### 8-Band & Per-Lamp tab
-Split into three inner sub-tabs: **Bands & Spectrum**, **Per-Lamp Effects**, and
-**Chase Overlay** (a fourth, **Group Switch**, holds that overlay's settings - see
-below). Bands & Spectrum edits the 8 frequency bands (defaults to the 20 Hz-12 kHz
-split from the spec, one band per lamp) and 8-band appearance (base hue, hue step for a
-rainbow look, saturation, brightness range). Per-Lamp Effects has the **per-lamp
-effects table**: band assignment, temporal/phase offset (for wave/chase effects),
-brightness/saturation/hue/sensitivity multipliers, **chase order**, and **effect group**
-(for Group Switch, see below) per lamp - this is what turns a set of identical bulbs
-into a coordinated light installation instead of identical copies of the same signal,
-and it applies in every mode, not just 8-band.
+### Chase & Group Switch tab
+Two inner sub-tabs, one per overlay: **Chase Overlay** and **Group Switch**. Which lamps
+take part, and where, is set per lamp on the Devices & Setup tab (*Chase order*, *Chase
+dwell x*, *Effect group*).
 
 #### Chase / Rotating Light overlay
 An overlay effect layered on top of **whichever color mode is active** (RGB, HSV,
-8-Band, Beat Sync, Peak Flash, Custom - every RGB mode), **enabled by default**: give a
-lamp a **chase order** (0, 1, 2, ...) in the per-lamp effects table to include it in the
+Beat Sync, Peak Flash, Custom - every RGB mode), **enabled by default**: give a
+lamp a **chase order** (0, 1, 2, ...) in the Devices & Setup lamp list to include it in the
 rotation, then a moving highlight travels through them in that order, creating a
 spinning/chasing light effect on top of whatever colors the active mode is already
 producing. The one exception is **Beat Sync White**: it drives the lamps' white mode
@@ -891,7 +903,7 @@ active mode.
   noise, atonal passages), the step glides over to intensity_brightness and back. The
   line under the sliders shows the current step, note, key and the pitch's share.
   Music app only: the manual app has no audio, so it always uses the fixed step.
-- **Chase dwell x** (per-lamp effects table, one column per lamp): how long the
+- **Chase dwell x** (a column of the Devices & Setup lamp list): how long the
   highlight lingers at *this lamp's* chase position relative to the others - 1.0 is
   the default/uniform speed. Lower it for a position that has several physical lamps
   sharing one chase order (e.g. a multi-spot ceiling fixture) if the highlight feels
@@ -902,7 +914,7 @@ active mode.
 #### Group Switch overlay
 A **discrete alternative** to the Chase overlay above, in its own sub-tab: instead of a
 highlight that gradually blends across neighboring lamps, lamps are grouped by
-**effect group** (0, 1, 2, ... - set in the per-lamp effects table, a separate grouping
+**effect group** (0, 1, 2, ... - set in the Devices & Setup lamp list, a separate grouping
 from Chase's own **chase order**, so a lamp can be in either, both, or neither), and
 **one group is fully active at a time** (or several, see *Active groups at once*
 below) with a hard, instant switch - no
@@ -950,6 +962,21 @@ part of the way. **Hue shift step from** is the same as Chase's too (`fixed`,
 out afresh every tick and only ever turns that tick's own colors, so the shifts never
 build up: with both overlays in `hue_shift_relative`, a lamp is at most Chase's step plus
 Group Switch's step away from the base color, however long the show runs.
+
+### Info panel
+Along the bottom of the window, under every tab (it never scrolls away):
+
+- **First row** - the beats of the bar as dots (the current one lit, the downbeat
+  bigger and golden), the tempo and whether the clock is locked, the phrase bar and
+  loudness (while the sequencer runs), the drums share, the note and key (while
+  something follows the pitch), and the colour mode.
+- **Second row, while the pulse sequencer runs** - a timeline of the last two bars on
+  the clock's grid, scrolling left as the music plays (the bright line is now, the beats
+  coming up to its right): **White** flashes (the walk's with their group's number, full
+  height when every lamp flashes, yellow when played as a flash strobe), **Dark** pulses,
+  **Strobe** bursts and color **Sweeps** in their colour; grey lines are bar lines, the
+  golden one a phrase start. Under it, the patterns playing now (`auto` resolved by the
+  loudness) and the latest pulses in words.
 
 ### Diagnostics tab
 Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /
@@ -1059,7 +1086,7 @@ drift apart into two different implementations.
 ### Chase / Rotating Light overlay (shared by both apps)
 
 Give a lamp a **chase position** (0, 1, 2, ...) - in the manual app's Chase tab, or in
-the music app's 8-Band & Per-Lamp tab's per-lamp effects table - to include it in the
+the Devices & Setup lamp list (both apps) - to include it in the
 rotation, in that order. **Lamps that share the same position number animate
 together, as one group** - this matters because your physical lamp layout is usually
 not a single ring; e.g. give the two lamps on each of four walls the same position

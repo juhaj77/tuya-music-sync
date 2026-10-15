@@ -37,7 +37,6 @@ class AppController(QObject):
     spectrumUpdated = Signal(object)  # dsp.fft_engine.SpectrumFrame
     levelUpdated = Signal(float, float)  # rms, peak
     band3Updated = Signal(dict)
-    band8Updated = Signal(list)
     lampsChanged = Signal()  # device list / status changed - refresh lamp widgets
     runningChanged = Signal(bool)
     logChanged = Signal()
@@ -246,7 +245,6 @@ class AppController(QObject):
             if self.engine.latest_frame is not None:
                 self.spectrumUpdated.emit(self.engine.latest_frame)
         self.band3Updated.emit(self.engine.latest_band3_levels)
-        self.band8Updated.emit(self.engine.latest_band8_levels)
 
     # -- shutdown -----------------------------------------------------------------
 

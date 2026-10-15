@@ -1,10 +1,12 @@
-"""Devices & Setup tab: the lamp list, selection, groups, and add/edit/scan."""
+"""Devices & Setup tab: the lamp list (with each lamp's place in the effects:
+Chase order, Chase dwell, Effect group, True white brightness), selection,
+groups, and add/edit/scan."""
 from __future__ import annotations
 
 import logging
 import threading
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QGroupBox,
@@ -22,7 +24,7 @@ from ...color.models import Color
 from ...config.schema import DeviceConfig
 from ..controller import AppController
 from ..widgets.device_dialog import DeviceDialog
-from ..widgets.lamp_tile import LampTile
+from ..widgets.lamp_tile import LampListHeader, LampTile
 
 logger = logging.getLogger("airam_lights.ui")
 
@@ -44,6 +46,8 @@ class DevicesTab(QWidget):
         scroll.setWidgetResizable(True)
         self._list_container = QWidget()
         self._list_layout = QVBoxLayout(self._list_container)
+        # Inside the list, so it has the rows' own margins and lines up with them.
+        self._list_layout.addWidget(LampListHeader())
         self._list_layout.addStretch(1)
         scroll.setWidget(self._list_container)
         list_layout.addWidget(scroll)
@@ -111,8 +115,16 @@ class DevicesTab(QWidget):
 
         self._current_selected_id: "str | None" = None
         controller.lampsChanged.connect(self.refresh)
+        if hasattr(controller, "configReplaced"):  # the music app's: a preset may set the Chase order etc.
+            controller.configReplaced.connect(self.refresh)
         self.refresh()
         self._rebuild_groups()
+
+        # The swatches follow what the lamps were last sent, many times a
+        # second (the rest of the row only changes with the status refresh).
+        self._color_timer = QTimer(self)
+        self._color_timer.timeout.connect(self._refresh_colors)
+        self._color_timer.start(33)
 
     # -- rendering ------------------------------------------------------------------
 
@@ -122,6 +134,7 @@ class DevicesTab(QWidget):
             if tile is None:
                 tile = LampTile(device_id, dev.config.name)
                 tile.selectionChanged.connect(self._on_tile_selection)
+                tile.effectChanged.connect(self._on_effect_changed)
                 tile.mousePressEvent = self._make_select_handler(device_id, tile)
                 self._tiles[device_id] = tile
                 self._list_layout.insertWidget(self._list_layout.count() - 1, tile)
@@ -130,16 +143,26 @@ class DevicesTab(QWidget):
             tile.set_selected(dev.config.selected)
             tile.set_online(dev.status.online, dev.status.last_error or "")
             tile.set_latency(dev.status.last_latency_ms)
-            color = self.controller.engine.latest_lamp_colors.get(device_id)
-            if color:
-                r, g, b = color.to_rgb255()
-                tile.set_color(r, g, b)
+            tile.set_effect(self.controller.get_or_create_effect(device_id))
+        self._refresh_colors()
 
         for device_id in list(self._tiles.keys()):
             if device_id not in self.controller.lamp_manager.devices:
                 self._list_layout.removeWidget(self._tiles[device_id])
                 self._tiles[device_id].deleteLater()
                 del self._tiles[device_id]
+
+    def _refresh_colors(self) -> None:
+        if not self.isVisible():
+            return
+        for device_id, color in self.controller.lamp_manager.shown_colors().items():
+            tile = self._tiles.get(device_id)
+            if tile is not None:
+                tile.set_color(*color.to_rgb255())
+
+    def _on_effect_changed(self, device_id: str, attr: str, value) -> None:
+        setattr(self.controller.get_or_create_effect(device_id), attr, value)
+        self.controller.apply_config_changes()
 
     def _make_select_handler(self, device_id: str, tile: LampTile):
         def handler(event):
