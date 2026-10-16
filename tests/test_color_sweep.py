@@ -262,7 +262,9 @@ def test_test_button_plays_four_sweeps_right_away_even_without_the_sequencer(mon
     for _ in range(int(1.0 / TICK)):
         engine.tick_visual()
         clock.now += TICK
-    assert engine.trigger_color_sweep_test().startswith("Playing 4 sweeps")
+    message = engine.trigger_color_sweep_test()
+    assert message.startswith("Playing the sweep 4 times in a row: 1 beats")
+    assert "1 rotator(s), width 1, forward, colour custom" in message
     ticks = []
     for _ in range(int(3.0 / TICK)):
         engine.tick_visual()

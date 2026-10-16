@@ -1256,8 +1256,9 @@ class VisualizationEngine:
             "last": -1, "hue": self._next_sweep_hue(),
         }
         return (
-            f"Playing {repeats} sweeps of {beats:g} beats round {len(positions)} Chase positions, "
-            f"{beats * period:.2f} s each{note}."
+            f"Playing the sweep {repeats} times in a row: {beats:g} beats ({beats * period:.2f} s) round "
+            f"{len(positions)} Chase positions, {sq.color_sweep_rotators} rotator(s), width "
+            f"{sq.color_sweep_width}, {sq.color_sweep_direction}, colour {sq.color_sweep_color}{note}."
         )
 
     def _end_color_sweep(self, position: Optional[float]) -> None:
