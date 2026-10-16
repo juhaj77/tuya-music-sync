@@ -224,6 +224,44 @@ def pulse_envelope(t: float, attack: float, hold: float, release: float, curve: 
     return 0.0
 
 
+def _release_area(progress: float, curve: str) -> float:
+    """The integral of release_level from 0 to `progress` (0..1): how much
+    light the release has given so far, as a share of a full-brightness
+    release. Over the whole release (progress 1): linear and ease_in_out
+    1/2, ease_in 2/3, ease_out 1/3."""
+    x = max(0.0, min(1.0, progress))
+    if curve == "ease_in":
+        return x - x ** 3 / 3.0
+    if curve == "ease_out":
+        return (1.0 - (1.0 - x) ** 3) / 3.0
+    if curve == "ease_in_out":
+        return x - x ** 3 + x ** 4 / 2.0
+    return x - x * x / 2.0
+
+
+def light_share(t: float, attack: float, hold: float, release: float, curve: str) -> float:
+    """How much of a white flash's light (the area under pulse_envelope)
+    has been given `t` seconds in, 0..1 - so 0.5 is the moment half its
+    light is out. The attack ramp gives attack/2, the hold its length, the
+    release release * its curve's area (see _release_area): all exact, no
+    sampling. A hybrid flash's temperature follows this, so the change
+    happens while the flash is bright enough to see it."""
+    total = attack / 2.0 + hold + release * _release_area(1.0, curve)
+    if total <= 0.0:
+        return 1.0 if t > 0.0 else 0.0
+    if t <= 0.0:
+        return 0.0
+    if attack > 0.0 and t < attack:
+        area = t * t / (2.0 * attack)
+    elif t < attack + hold:
+        area = attack / 2.0 + (t - attack)
+    elif release > 0.0:
+        area = attack / 2.0 + hold + release * _release_area((t - attack - hold) / release, curve)
+    else:
+        area = total
+    return max(0.0, min(1.0, area / total))
+
+
 def release_curve_for(reason: str, bar_step: int, steps_per_bar: int, intensity: float) -> str:
     """The release curve that suits a sequencer flash (white_pulse_release_curve
     "dynamic"), the way an instrument's sound decays:

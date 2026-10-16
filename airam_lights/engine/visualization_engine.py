@@ -54,6 +54,7 @@ from ..effects.pulse_sequencer import (
     PulseEvent,
     PulseSequencer,
     dynamic_sweep_hue,
+    light_share,
     metric_weight,
     phrase_progress,
     pulse_envelope,
@@ -165,6 +166,9 @@ class VisualizationEngine:
         # for RGB hue - so it varies beat to beat instead of always looking
         # the same, without flickering mid-flash.
         self._beat_white_pulse_temp = 1.0
+        # The per-beat flash's: its end temperature when it's a hybrid, and when it started.
+        self._beat_white_pulse_temp_end: Optional[float] = None
+        self._beat_white_pulse_started = 0.0
         # Last tick's smoothed white-pulse amount (see _smoother_beat_white
         # above and the comment on white_ready in _tick_beat_sync_mode) - a
         # new true-white flash may only START once the previous one has
@@ -252,6 +256,8 @@ class VisualizationEngine:
         self._seq_white_until: Dict[str, float] = {}
         self._seq_white_started: Dict[str, float] = {}
         self._seq_white_temp: Dict[str, float] = {}
+        # A hybrid flash's temperature at its end (see white_pulse_hybrid_chance) - absent = fixed.
+        self._seq_white_temp_end: Dict[str, float] = {}
         self._seq_white_hold: Dict[str, float] = {}
         self._seq_white_attack: Dict[str, float] = {}
         self._seq_white_release: Dict[str, float] = {}
@@ -722,6 +728,10 @@ class VisualizationEngine:
                 # Warm vs cool for THIS flash, rolled once here (not per
                 # tick) so it stays constant for the flash's whole duration.
                 self._beat_white_pulse_temp = self._white_pulse_temp(cfg, clock)
+                self._beat_white_pulse_temp, self._beat_white_pulse_temp_end = self._hybrid_temps(
+                    cfg, self._beat_white_pulse_temp
+                )
+                self._beat_white_pulse_started = wall_now
 
         if sequencer_on:
             self._run_sequencer(frame, dt, wall_now, selected_ids, cfg)
@@ -860,7 +870,13 @@ class VisualizationEngine:
         shared_white_target = (
             WhiteTarget(
                 brightness=cfg.white_pulse_white_brightness * (white_amount if shaped else 1.0),
-                temp=self._beat_white_pulse_temp,
+                # (The per-beat flash's own envelope is smoothed, not shaped: its
+                # attack/duration/release with an ease_out tail are close to it.)
+                temp=self._glide_temp(
+                    self._beat_white_pulse_temp, self._beat_white_pulse_temp_end, wall_now - self._beat_white_pulse_started,
+                    (cfg.white_pulse_attack_ms / 1000.0, cfg.white_pulse_duration_ms / 1000.0,
+                     cfg.white_pulse_release_ms / 1000.0, "ease_out"),
+                ),
             ).clamped()
             if use_true_white_now
             else None
@@ -879,7 +895,12 @@ class VisualizationEngine:
                 level = self._seq_white_envelope(device_id, wall_now, cfg)
                 white_targets[device_id] = WhiteTarget(
                     brightness=cfg.white_pulse_white_brightness * level * white_mult,
-                    temp=self._seq_white_temp.get(device_id, 1.0),
+                    temp=self._glide_temp(
+                        self._seq_white_temp.get(device_id, 1.0), self._seq_white_temp_end.get(device_id),
+                        wall_now - self._seq_white_started.get(device_id, wall_now),
+                        (self._seq_white_attack.get(device_id, 0.0), self._seq_white_hold.get(device_id, 0.0),
+                         self._seq_white_release.get(device_id, 0.0), self._seq_white_curve.get(device_id, "linear")),
+                    ),
                     under=self._under_white(color, level / peak if peak > 0.0 else 1.0, device_id),
                 ).clamped()
             elif shared_white_target is not None:
@@ -977,7 +998,8 @@ class VisualizationEngine:
             if period and self._seq_position is not None and not self._strobe_running():
                 delay = (event.step / STEPS_PER_BEAT + event.lead - self._seq_position) * period
                 if self._start_strobe(event.length, delay, period, selected_ids) is not None:
-                    self._log_seq_event(event, length=event.length)
+                    entry = self._log_seq_event(event, length=event.length)
+                    self._cut_flash_strobes_at(entry["pos"])
             return
         if not cfg.white_pulse_enabled:
             return
@@ -1012,12 +1034,15 @@ class VisualizationEngine:
                 for lamp in strobing:
                     self._seq_white_started[lamp] = wall_now
                 lamps = [lamp for lamp in lamps if lamp not in own]
+        # A hybrid glides over the plain flash only - a flash strobe keeps its temperature.
+        temp_start, temp_end = self._hybrid_temps(cfg, temp) if lamps else (temp, None)
         if lamps or flash_strobe:
             period = self._beat_clock.period_s or 0.5
             # The flash's envelope in beats, for the info panel's timeline.
             self._log_seq_event(
                 event, length=length / period, flash_strobe=flash_strobe,
                 attack=attack / period, hold=hold / period, release=release / period, curve=curve,
+                temp=temp_start if lamps else temp, temp_end=temp_end,
             )
         for lamp in lamps:
             self._seq_white_started[lamp] = wall_now
@@ -1027,7 +1052,11 @@ class VisualizationEngine:
             self._seq_white_release[lamp] = release
             self._seq_white_curve[lamp] = curve
             self._seq_white_brightness[lamp] = event.brightness
-            self._seq_white_temp[lamp] = temp
+            self._seq_white_temp[lamp] = temp_start
+            if temp_end is None:
+                self._seq_white_temp_end.pop(lamp, None)
+            else:
+                self._seq_white_temp_end[lamp] = temp_end
 
     def _log_seq_event(self, event: PulseEvent, length: float, **extra) -> dict:
         """Remembers a pulse the sequencer actually played, where it sits on
@@ -1124,7 +1153,21 @@ class VisualizationEngine:
             bursts[lamp] = StrobeBurst(start, flash_period, on_s, flashes, clip(peak * mult), temp=temp, levels=levels)
         self.lamp_manager.start_strobe(bursts)
         self._lamp_strobes.update(bursts)
+        # On the info panel's Strobe lane too: each flash at its level of the
+        # white flash's envelope, its times in beats.
+        self._log_seq_event(
+            event, kind="flash_strobe", length=flashes * flash_period / period,
+            flash_period=flash_period / period, flash_on=on_s / period, levels=levels,
+            brightness=event.brightness * sq.flash_strobe_brightness,
+        )
         return True
+
+    def _cut_flash_strobes_at(self, pos: float) -> None:
+        """The bar's strobe takes over from a flash strobe still running (see
+        LampWorker._run_strobe) - so it ends there on the timeline too."""
+        for entry in self.seq_events:
+            if entry["kind"] == "flash_strobe" and entry["pos"] < pos < entry["pos"] + entry["length"]:
+                entry["length"] = pos - entry["pos"]
 
     def _lamp_strobing(self, lamp: str) -> bool:
         burst = self._lamp_strobes.get(lamp)
@@ -1324,6 +1367,28 @@ class VisualizationEngine:
                     return metric_weight(bar_step, steps_per_bar)
                 return phrase_progress(phrase_bar, phrase_bars, bar_step, steps_per_bar)
         return 1.0 if random.random() < cfg.white_pulse_cool_ratio else 0.0
+
+    @staticmethod
+    def _hybrid_temps(cfg, temp: float) -> "Tuple[float, Optional[float]]":
+        """(start, end) temperature of a new white flash: (temp, None) for a
+        plain one; with chance white_pulse_hybrid_chance a hybrid that glides
+        from one end of warm..cool to the other over the whole flash - from
+        cool to warm when the flash came out cool (temp >= 0.5), else from
+        warm to cool."""
+        if cfg.white_pulse_hybrid_chance <= 0.0 or random.random() >= cfg.white_pulse_hybrid_chance:
+            return temp, None
+        return (1.0, 0.0) if temp >= 0.5 else (0.0, 1.0)
+
+    @staticmethod
+    def _glide_temp(start: float, end: Optional[float], elapsed_s: float, shape: tuple) -> float:
+        """A flash's temperature `elapsed_s` into it: `start` throughout for a
+        plain one; for a hybrid, on its way to `end` as far as the flash's
+        light is (pulse_sequencer.light_share of its (attack, hold, release,
+        curve) `shape`, in seconds) - half the light out, half the change made
+        - so it changes while the flash is bright, not in the dim tail."""
+        if end is None:
+            return start
+        return lerp(start, end, light_share(elapsed_s, *shape))
 
     def _seq_white_envelope(self, lamp: str, wall_now: float, cfg) -> float:
         """0..1 brightness of a sequencer flash: ramps up over attack, holds,

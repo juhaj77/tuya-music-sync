@@ -358,6 +358,10 @@ class BeatSyncModeConfig:
     #   first flash is cool, then back to warm.
     # "bar"/"phrase" need the shared beat clock; without it they act as "random".
     white_pulse_temp_mode: str = "random"
+    # Chance a flash is a "hybrid": its colour temperature glides over the
+    # whole flash (attack, duration, release) from one end to the other -
+    # a flash that came out cool glides to warm, a warm one to cool. 0 = never.
+    white_pulse_hybrid_chance: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -410,6 +414,7 @@ class BeatSyncModeConfig:
             white_pulse_white_brightness=float(d.get("white_pulse_white_brightness", 0.3)),
             white_pulse_cool_ratio=float(d.get("white_pulse_cool_ratio", 0.5)),
             white_pulse_temp_mode=d.get("white_pulse_temp_mode") if d.get("white_pulse_temp_mode") in WHITE_TEMP_MODES else "random",
+            white_pulse_hybrid_chance=float(d.get("white_pulse_hybrid_chance", 0.0)),
         )
 
 

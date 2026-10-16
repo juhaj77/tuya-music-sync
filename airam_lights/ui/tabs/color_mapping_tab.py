@@ -574,6 +574,17 @@ class ColorMappingTab(QWidget):
             "phrase's first flash is cool, then back to warm (phrase length: see the Pulse sequencer).",
         )
         self.beat_white_temp_combo.currentTextChanged.connect(self._on_beat_changed)
+        self.beat_white_hybrid_slider = FloatSlider(
+            "Hybrid warm/cool", 0.0, 1.0, bs.white_pulse_hybrid_chance, decimals=2,
+            tooltip="Chance a flash is a hybrid: its colour temperature glides from one end to the other - "
+            "following the flash's light, not the clock: halfway through its light, halfway through the "
+            "change, so it happens while the flash is bright. A flash Warm/cool picked cool glides from "
+            "cool to warm, a warm one from warm to cool. 0 = never, 1 = every flash. A flash "
+            "strobe keeps one temperature. The info panel's timeline shows each flash in its warm/cool, "
+            "a hybrid as a gradient.",
+        )
+        self.beat_white_hybrid_slider.valueChanged.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_white_hybrid_slider)
         self.beat_white_temp_note = inactive_note()
         beat_layout.addWidget(self.beat_white_temp_note)
 
@@ -973,7 +984,7 @@ class ColorMappingTab(QWidget):
             (bs.white_pulse_enabled, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo,
              [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
               self.beat_white_pulse_release_slider, self.beat_white_pulse_white_brightness_slider,
-              self.beat_white_temp_combo], self.beat_white_note, "White"),
+              self.beat_white_temp_combo, self.beat_white_hybrid_slider], self.beat_white_note, "White"),
         ):
             off_reason = f"{name} pulses are switched off."
             set_active(others, enabled, off_reason)
@@ -1167,6 +1178,7 @@ class ColorMappingTab(QWidget):
         bs.white_pulse_white_brightness = self.beat_white_pulse_white_brightness_slider.value()
         bs.white_pulse_cool_ratio = self.beat_white_pulse_cool_ratio_slider.value()
         bs.white_pulse_temp_mode = self.beat_white_temp_combo.currentText()
+        bs.white_pulse_hybrid_chance = self.beat_white_hybrid_slider.value()
         self._update_beat_states()
         self.controller.apply_config_changes()
 
@@ -1737,7 +1749,12 @@ class ColorMappingTab(QWidget):
         )
         parent_layout.addWidget(section)
         layout = section.content_layout()
-        layout.addWidget(self._intro("Now and then one group's white flash becomes a short strobe."))
+        layout.addWidget(self._intro(
+            "Now and then one group's white flash becomes a short strobe. It uses that white pulse's "
+            "brightness curve: its flashes rise over the attack, stay full through the duration and fade "
+            "over the release along the release curve (White pulses section), as the pulse dynamics shaped "
+            "that flash - times Flash strobe brightness below."
+        ))
         self.seq_flash_strobe_checkbox = section.toggle
         self.seq_flash_strobe_checkbox.toggled.connect(self._on_sequencer_changed)
 

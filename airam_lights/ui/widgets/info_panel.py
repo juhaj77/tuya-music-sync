@@ -21,10 +21,10 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
-from ...effects.pulse_sequencer import release_level
+from ...effects.pulse_sequencer import light_share, release_level
 from .. import theme
 
 _MODE_NAMES = {
@@ -43,11 +43,13 @@ _BEAT_LINE = QColor(theme.BORDER_SOFT)
 _BAR_LINE = QColor("#3a4454")
 _PHRASE = QColor(theme.WARN)
 _NOW = QColor(235, 238, 244)
-_WHITE = QColor(245, 247, 250)
+_WARM = QColor(255, 170, 80)  # a warm white flash
+_COOL = QColor(175, 215, 255)  # a cool one
 _FLASH_STROBE = QColor(255, 213, 74)
 _DARK = QColor(124, 104, 255)
 _STROBE = QColor(77, 208, 225)
 _LANES = ("White", "Dark", "Strobe", "Sweep")
+_LANE_OF = {"white": "White", "dark": "Dark", "strobe": "Strobe", "flash_strobe": "Strobe", "sweep": "Sweep"}
 _LANE_LABEL_W = 52
 _WINDOW_BARS = 2
 _NOW_AT = 0.85  # where "now" sits across the timeline: the rest shows the beats coming up
@@ -154,11 +156,12 @@ class SequencerTimeline(QWidget):
                 painter.setPen(QPen(_BAR_LINE, 1.2))
             painter.drawLine(int(x), 1, int(x), rect.height() - 2)
 
-        for e in list(self.engine.seq_events):
+        # The bar's strobe last, over any flash strobe it took over from.
+        for e in sorted(self.engine.seq_events, key=lambda e: e["kind"] == "strobe"):
             pos, length = e["pos"], max(0.0, e["length"])
             if pos > now + 0.5 or pos + length < start:
                 continue  # from before the grid jumped, or scrolled out
-            lane = _LANES.index({"white": "White", "dark": "Dark", "strobe": "Strobe", "sweep": "Sweep"}[e["kind"]])
+            lane = _LANES.index(_LANE_OF[e["kind"]])
             top = 2 + lane * lane_h + 2
             h = lane_h - 4
             x = x_of(pos)
@@ -167,7 +170,10 @@ class SequencerTimeline(QWidget):
                 self._draw_white(painter, e, x, top, h, scale)
             elif e["kind"] == "dark":
                 painter.fillRect(QRectF(x, top, w, h), _DARK)
+            elif e["kind"] == "flash_strobe":
+                self._draw_flash_strobe(painter, e, x, top, h, scale)
             elif e["kind"] == "strobe":
+                painter.fillRect(QRectF(x, top, w, h), _BG)  # covers a flash strobe underneath
                 painter.setPen(QPen(_STROBE, 1.0))
                 painter.drawRect(QRectF(x, top, w, h))
                 step = max(2.0, scale / 4.0)
@@ -189,12 +195,35 @@ class SequencerTimeline(QWidget):
         self._border(painter, rect)
 
     @staticmethod
+    def _draw_flash_strobe(painter: QPainter, e: dict, x: float, top: float, h: float, scale: float) -> None:
+        """A flash strobe on the Strobe lane, in the flash strobe's colour:
+        each of its flashes a bar as long as its on-time and as tall as the
+        white flash's envelope at that moment - it follows the same curve."""
+        end = x + max(0.0, e["length"]) * scale  # shorter when the bar's strobe took over
+        color = QColor(_FLASH_STROBE)
+        color.setAlphaF(0.85)
+        painter.setPen(QPen(color, 1.0))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawRect(QRectF(x, top, max(3.0, end - x), h))
+        bottom = top + h
+        peak = max(0.25, min(1.0, e["brightness"]))
+        on_w = max(1.5, e.get("flash_on", 0.0) * scale)
+        for i, level in enumerate(e.get("levels", ())):
+            fx = x + i * e.get("flash_period", 0.0) * scale
+            if fx >= end:
+                break
+            bar_h = (h - 2) * peak * max(0.08, level)
+            painter.fillRect(QRectF(fx, bottom - 1 - bar_h, min(on_w, end - fx), bar_h), color)
+
+    @staticmethod
     def _draw_white(painter: QPainter, e: dict, x: float, top: float, h: float, scale: float) -> None:
         """A white flash as its envelope: up over the attack, flat through
         the hold (its duration), down over the release along its release
         curve - as tall as it is bright. The walk's flashes carry their
         group's number; a flash on every lamp (the phrase start) is outlined
-        in gold; a flash strobe is yellow."""
+        in gold; a flash strobe is yellow. The fill is the flash's warm/cool
+        white - amber for warm, blue-white for cool - and a hybrid's a
+        gradient from its start to its end temperature."""
         attack, hold, release = (max(0.0, e.get(k, 0.0)) * scale for k in ("attack", "hold", "release"))
         if attack + hold + release < 3.0:
             hold = 3.0  # too short to see its shape: at least a sliver
@@ -207,9 +236,24 @@ class SequencerTimeline(QWidget):
             points.append(QPointF(x + attack + hold + release * t, bottom - (bottom - peak) * release_level(t, curve)))
         points.append(QPointF(x + attack + hold + release, bottom))
         everywhere = e["group"] is None or e["reason"] == "phrase"
-        fill = QColor(_FLASH_STROBE) if e.get("flash_strobe") else QColor(_WHITE)
-        fill.setAlphaF(0.75 if e.get("flash_strobe") else 0.55)
-        painter.setBrush(fill)
+        if e.get("flash_strobe"):
+            fill = QColor(_FLASH_STROBE)
+            fill.setAlphaF(0.75)
+            painter.setBrush(fill)
+        else:
+            fill = _temp_color(e.get("temp", 1.0))
+            end = e.get("temp_end")
+            if end is None:
+                painter.setBrush(fill)
+            else:  # a hybrid: its temperature follows the flash's light (see light_share)
+                total = max(1.0, attack + hold + release)
+                gradient = QLinearGradient(x, 0.0, x + total, 0.0)
+                start_temp = e.get("temp", 1.0)
+                for k in range(13):
+                    f = k / 12.0
+                    share = light_share(f * total, attack, hold, release, curve)
+                    gradient.setColorAt(f, _temp_color(start_temp + (end - start_temp) * share))
+                painter.setBrush(gradient)
         painter.setPen(QPen(_PHRASE if everywhere else fill.lighter(), 1.0))
         painter.drawPolygon(QPolygonF(points))
         painter.setBrush(Qt.NoBrush)
@@ -222,6 +266,18 @@ class SequencerTimeline(QWidget):
         painter.setPen(_BORDER)
         painter.setBrush(Qt.NoBrush)
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+
+def _temp_color(temp: float) -> QColor:
+    """A white flash's colour on the timeline: amber (warm, 0) .. blue-white (cool, 1)."""
+    t = max(0.0, min(1.0, float(temp)))
+    color = QColor(
+        int(_WARM.red() + (_COOL.red() - _WARM.red()) * t),
+        int(_WARM.green() + (_COOL.green() - _WARM.green()) * t),
+        int(_WARM.blue() + (_COOL.blue() - _WARM.blue()) * t),
+    )
+    color.setAlphaF(0.8)
+    return color
 
 
 class InfoPanel(QFrame):
@@ -251,8 +307,11 @@ class InfoPanel(QFrame):
             "The pulse sequencer, the last two bars on the beat clock's grid (now = the bright line, the "
             "beats coming up to its right). White: the white flashes as their envelope - up over the "
             "attack, flat through the duration, down over the release along its curve, as tall as they "
-            "are bright; the walk's with their group's number, outlined in gold when every lamp flashes "
-            "(the phrase start), yellow when played as a flash strobe. Dark: the dark pulses. Strobe: the bursts. Sweep: the color sweeps, in their "
+            "are bright, in their warm (amber) or cool (blue-white) white, a hybrid as a gradient from "
+            "its start to its end; the walk's with their group's number, outlined in gold when every lamp "
+            "flashes (the phrase start), yellow when played as a flash strobe. Dark: the dark pulses. Strobe: the "
+            "bursts in cyan; a flash strobe in yellow, each flash as tall as the white flash's envelope at "
+            "that moment - a burst drawn over it took over from it. Sweep: the color sweeps, in their "
             "colour. Grey lines are bar lines, the golden one a phrase start."
         )
         seq_layout.addWidget(self.timeline)

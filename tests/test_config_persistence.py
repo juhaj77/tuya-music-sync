@@ -209,6 +209,7 @@ def test_fresh_install_starts_with_the_default_look():
     assert cfg.sequencer.color_sweep_enabled is True and cfg.sequencer.flash_strobe_enabled is True
     assert cfg.network.lamp_command_rate_hz == 50.0
     assert cfg.color_mapping.rgb.r.gain == 4.0  # nested settings (a channel) apply too
+    assert cfg.color_mapping.beat_sync.white_pulse_hybrid_chance == 0.5
     # The neutral dataclass defaults underneath are untouched.
     assert AppConfig().sequencer.enabled is False
     # And the look survives a save/load round trip.

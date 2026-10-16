@@ -680,7 +680,10 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   it occasional; the rate and on-time are the strobe's. The all-lamps strobe always
   wins: none starts once it's announced, and one still running is cut short when it
   begins. Like the strobe, it needs *Lamp transitions* `direct` or `smooth` - otherwise
-  the flash stays a plain white flash.
+  the flash stays a plain white flash. On the info panel's timeline it shows twice: as a
+  yellow white flash on the White lane, and on the Strobe lane in yellow (the strobe is
+  cyan), each flash as tall as the white flash's curve at that moment - a strobe drawn
+  over it is the one that took over.
 - **Color sweep** (optional, off by default) - now and then a **colour of its own**
   (*Sweep colour* `custom` - your own hue - or `dynamic`, then saturation and brightness)
   runs once round the lamps in **Chase
@@ -803,7 +806,15 @@ bar's middle beat half-cool, the other beats warmer, flashes between beats warme
 heavy beats stand out), `alternate` (cool, warm, cool...), `loudness` (warm in the quiet
 parts of a song, cool in the loud ones) or `phrase` (cooling down over each phrase toward
 its end; the new phrase's first flash is cool, then back to warm). `bar` and `phrase` need
-the shared beat clock to know where the bar is. It then switches
+the shared beat clock to know where the bar is. **Hybrid warm/cool** (0 = off) is the chance
+that a flash is a hybrid instead: its colour temperature glides from one end to the other,
+cool to warm when Warm/cool picked cool for it, warm to cool when it picked warm (a flash
+strobe keeps one temperature). The glide follows the flash's **light**, not the clock: when
+half the light under its brightness curve is out, the temperature is halfway - so the change
+happens while the flash is bright, and the dim tail barely moves. (The light is the area
+under the curve, exact: attack/2 + duration + release x 1/2 for linear and ease_in_out, 2/3
+for ease_in, 1/3 for ease_out.) The info panel's timeline shows each white flash in its warm (amber) or cool
+(blue-white) white, and a hybrid as a gradient. It then switches
 back to RGB colour mode once the pulse ends and resumes
 wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
 show continues exactly where it left off, it's just been briefly interrupted by a real
