@@ -1249,7 +1249,8 @@ class PulseSequencerConfig:
     flash_strobe_min_gap_bars: int = 2  # never two closer than this many bars (0 = no minimum)
     flash_strobe_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
     flash_strobe_brightness: float = 1.0  # times the brightness of the white flash it replaces
-    # Color sweep: now and then a colour of its own (color_sweep_hue_deg)
+    # Color sweep: now and then a colour of its own (color_sweep_hue_deg, or
+    # with color_sweep_color "dynamic" a bright one picked per sweep)
     # runs once round the lamps in Chase order (PerLampEffect.chase_order),
     # fast - over color_sweep_beats beats - each position lit in turn for
     # its share of the sweep, on top of the show. Placed like the strobe: it
@@ -1262,6 +1263,7 @@ class PulseSequencerConfig:
     # once - a band moving round instead of a single spot, so it reads more
     # clearly; every lamp is still lit for the same share of the sweep.
     color_sweep_enabled: bool = False
+    color_sweep_color: str = "custom"  # "custom" = color_sweep_hue_deg; "dynamic" - see pulse_sequencer.dynamic_sweep_hue
     color_sweep_hue_deg: float = 200.0
     color_sweep_saturation: float = 1.0
     color_sweep_brightness: float = 1.0

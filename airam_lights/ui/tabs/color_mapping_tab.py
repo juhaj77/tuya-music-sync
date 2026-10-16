@@ -27,6 +27,7 @@ from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...effects.chase import get_chase_groups, get_group_switch_groups
 from ...effects.pulse_sequencer import (
+    COLOR_SWEEP_COLORS,
     COLOR_SWEEP_DIRECTIONS,
     COLOR_SWEEP_PLACEMENTS,
     DARK_PATTERNS,
@@ -1070,12 +1071,17 @@ class ColorMappingTab(QWidget):
         # Color sweep: on the RGB colour, so any lamp transitions do.
         set_active([self.seq_sweep_checkbox], sequencing, seq_off)
         set_active(
-            [self.seq_sweep_hue_slider, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider,
+            [self.seq_sweep_color_combo, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider,
              self.seq_sweep_length_combo, self.seq_sweep_rotators_spin, self.seq_sweep_width_spin, self.seq_sweep_direction_combo,
              self.seq_sweep_placement_combo, self.seq_sweep_level_combo, self.seq_sweep_chance_slider,
              self.seq_sweep_gap_slider],
             sequencing and sq.color_sweep_enabled,
             seq_off if not sequencing else "Color sweep is off.",
+        )
+        set_active(
+            [self.seq_sweep_hue_slider], sequencing and sq.color_sweep_enabled and sq.color_sweep_color == "custom",
+            seq_off if not sequencing else "Color sweep is off." if not sq.color_sweep_enabled
+            else "Sweep colour is 'dynamic'.",
         )
         if sequencing and not direct:
             show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box): only then "
@@ -1768,7 +1774,15 @@ class ColorMappingTab(QWidget):
         self.seq_sweep_checkbox.toggled.connect(self._on_sequencer_changed)
         layout.addWidget(self.seq_sweep_checkbox)
 
-        self.seq_sweep_hue_slider = HueSlider("Sweep colour", sq.color_sweep_hue_deg)
+        self.seq_sweep_color_combo = self._labeled_combo(
+            layout, "Sweep colour:", COLOR_SWEEP_COLORS, sq.color_sweep_color,
+            "custom: the hue below. dynamic: a new colour for every sweep, one of the brightest the bulbs "
+            "make (red, yellow, green, cyan, blue, magenta) - one of the two farthest from the colour the "
+            "lamps show at that moment, so it stands out from the show, and never the previous sweep's. "
+            "The info panel's timeline shows each sweep in its colour.",
+        )
+        self.seq_sweep_color_combo.currentTextChanged.connect(self._on_sequencer_changed)
+        self.seq_sweep_hue_slider = HueSlider("Custom hue", sq.color_sweep_hue_deg)
         self.seq_sweep_saturation_slider = FloatSlider(
             "Sweep saturation", 0.0, 1.0, sq.color_sweep_saturation, decimals=2,
             tooltip="1 = the full colour, lower = paler (0 = white from the RGB LEDs).",
@@ -1899,6 +1913,7 @@ class ColorMappingTab(QWidget):
         sq.flash_strobe_min_gap_bars = int(round(self.seq_flash_strobe_gap_slider.value()))
         sq.flash_strobe_brightness = self.seq_flash_strobe_brightness_slider.value()
         sq.color_sweep_enabled = self.seq_sweep_checkbox.isChecked()
+        sq.color_sweep_color = self.seq_sweep_color_combo.currentText()
         sq.color_sweep_hue_deg = self.seq_sweep_hue_slider.value()
         sq.color_sweep_saturation = self.seq_sweep_saturation_slider.value()
         sq.color_sweep_brightness = self.seq_sweep_brightness_slider.value()

@@ -73,6 +73,11 @@ FLASH_STROBE_PLACEMENTS = ("bar_end", "beats")
 # ending on any bar line; starting on any beat.
 COLOR_SWEEP_PLACEMENTS = ("phrase", "bars", "beats")
 COLOR_SWEEP_DIRECTIONS = ("forward", "backward")
+# The sweep's colour: its own hue (color_sweep_hue_deg), or "dynamic" - one
+# of SWEEP_PALETTE picked per sweep (see dynamic_sweep_hue).
+COLOR_SWEEP_COLORS = ("custom", "dynamic")
+# The brightest colours the bulbs make: the primaries and secondaries.
+SWEEP_PALETTE = (0.0, 60.0, 120.0, 180.0, 240.0, 300.0)  # red, yellow, green, cyan, blue, magenta
 # Loudness levels, quietest first (see LoudnessTracker.level).
 LEVELS = ("calm", "groove", "high", "peak")
 # Flashes per beat a strobe may use: 8ths, 8th triplets, 16ths, 16th
@@ -239,6 +244,22 @@ def release_curve_for(reason: str, bar_step: int, steps_per_bar: int, intensity:
     if metric_weight(bar_step, steps_per_bar) >= 0.65:
         return "ease_in"
     return "ease_out"
+
+
+def _hue_distance(a: float, b: float) -> float:
+    return abs((a - b + 180.0) % 360.0 - 180.0)
+
+
+def dynamic_sweep_hue(current_hue: Optional[float], last_hue: Optional[float], rng: random.Random) -> float:
+    """A color sweep's colour with color_sweep_color "dynamic": one of the
+    two SWEEP_PALETTE colours farthest from the colour the lamps show now
+    (`current_hue`), so the sweep stands out from the show - never the same
+    as the previous sweep's (`last_hue`), so they vary."""
+    choices = [h for h in SWEEP_PALETTE if last_hue is None or _hue_distance(h, last_hue) > 1.0]
+    if current_hue is not None:
+        choices.sort(key=lambda h: -_hue_distance(h, current_hue))
+        choices = choices[:2]
+    return rng.choice(choices)
 
 
 def strobe_steps(beats: float, steps_per_bar: int) -> int:

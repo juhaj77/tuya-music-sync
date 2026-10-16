@@ -665,7 +665,8 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   begins. Like the strobe, it needs *Lamp transitions* `direct` or `smooth` - otherwise
   the flash stays a plain white flash.
 - **Color sweep** (optional, off by default) - now and then a **colour of its own**
-  (*Sweep colour*, saturation and brightness) runs once round the lamps in **Chase
+  (*Sweep colour* `custom` - your own hue - or `dynamic`, then saturation and brightness)
+  runs once round the lamps in **Chase
   order**, fast - over *Sweep length* (half a beat to 4 beats), each position lit in turn
   for its share of it, on top of the show. It sits on the grid like the strobe: with
   *placement* `phrase` it ends on the bar line into a new phrase (a run into the
@@ -676,7 +677,11 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   a band of 2 or 3 spots moving round reads more clearly than a single one. Loudness, chance and a minimum gap in bars keep it
   occasional; it never runs during the strobe (a strobe takes over from one still
   running). It uses only its own settings - none of the Chase overlay's, which can stay
-  off - and works with any *Lamp transitions*, since it's on the RGB colour.
+  off - and works with any *Lamp transitions*, since it's on the RGB colour. With
+  `dynamic` every sweep gets a new colour, one of the brightest the bulbs make (red,
+  yellow, green, cyan, blue, magenta): one of the two farthest from the colour the lamps
+  show at that moment, so it stands out, and never the previous sweep's. The info panel's
+  timeline shows each sweep in its colour.
 
 The info panel shows where it is: `beat 2/4 · phrase bar 7/8, loudness high`, with a
 live timeline of the pulses under it (see *Info panel* below).

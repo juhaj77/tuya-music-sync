@@ -13,7 +13,7 @@ import random
 
 from airam_lights.color.models import Color
 from airam_lights.config.schema import PulseSequencerConfig
-from airam_lights.effects.pulse_sequencer import PulseSequencer
+from airam_lights.effects.pulse_sequencer import SWEEP_PALETTE, PulseSequencer, dynamic_sweep_hue
 from test_strobe import PERIOD, TICK, _make_engine, _run_sequencer, _seq_cfg
 
 GREEN = Color.from_hsv(120.0, 1.0, 1.0)
@@ -93,7 +93,7 @@ def test_color_sweep_settings_survive_a_save_and_load():
         color_sweep_enabled=True, color_sweep_hue_deg=30.0, color_sweep_saturation=0.8,
         color_sweep_brightness=0.6, color_sweep_beats=2.0, color_sweep_rotators=2, color_sweep_width=3,
         color_sweep_direction="backward", color_sweep_placement="phrase", color_sweep_chance=0.7,
-        color_sweep_min_gap_bars=3, color_sweep_min_level="high",
+        color_sweep_min_gap_bars=3, color_sweep_min_level="high", color_sweep_color="dynamic",
     )
     assert PulseSequencerConfig.from_dict(cfg.to_dict()) == cfg
     assert PulseSequencerConfig.from_dict({}).color_sweep_enabled is False
@@ -218,3 +218,36 @@ def test_engine_sweep_colour_stays_exact_over_chase_and_group_switch(monkeypatch
     assert len(laps) >= 2 and all(set(lap) == {"a", "b", "c", "d"} for lap in laps)
     # ...and the overlays' own colours come back once it's past.
     assert any(not lit for _, lit in ticks)
+
+
+# -- dynamic colour ------------------------------------------------------------------------------------
+
+
+def test_dynamic_hue_is_a_bright_colour_far_from_the_show_and_never_the_last_one():
+    rng = random.Random(1)
+    last = None
+    for current in range(0, 360, 15):
+        for _ in range(20):
+            hue = dynamic_sweep_hue(float(current), last, rng)
+            assert hue in SWEEP_PALETTE
+            assert hue != last
+            assert abs((hue - current + 180.0) % 360.0 - 180.0) >= 90.0  # stands out: at least a quarter turn away
+            last = hue
+
+
+def test_engine_dynamic_sweep_colour_varies_and_shows_on_the_timeline(monkeypatch):
+    random.seed(2)
+    engine, clock = _make_sweep_engine(monkeypatch, color_sweep_color="dynamic")
+    lit_colours = []
+    for _ in range(int(20.0 / TICK)):
+        engine.tick_visual()
+        sweep = engine._color_sweep
+        if sweep is not None:
+            colour = Color.from_hsv(sweep["hue"], 1.0, 1.0)
+            if any(c == colour for c in engine.latest_lamp_colors.values()):
+                lit_colours.append(sweep["hue"])
+        clock.now += TICK
+    hues = [e["hue"] for e in engine.seq_events if e["kind"] == "sweep"]
+    assert len(hues) >= 3 and all(h in SWEEP_PALETTE for h in hues)
+    assert all(a != b for a, b in zip(hues, hues[1:]))  # a new colour every sweep
+    assert set(lit_colours) <= set(hues) and lit_colours  # the lamps show the logged colour

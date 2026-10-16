@@ -53,6 +53,7 @@ from ..effects.pulse_sequencer import (
     LoudnessTracker,
     PulseEvent,
     PulseSequencer,
+    dynamic_sweep_hue,
     metric_weight,
     phrase_progress,
     pulse_envelope,
@@ -274,6 +275,7 @@ class VisualizationEngine:
         # its start on the clock (beats), length in beats and the last step
         # of it lit so far - None when there's none.
         self._color_sweep: Optional[dict] = None
+        self._last_sweep_hue: Optional[float] = None  # for color_sweep_color "dynamic"
         # The pulses the sequencer played lately (see _log_seq_event), newest
         # last - for the info panel.
         self.seq_events: Deque[dict] = collections.deque(maxlen=256)
@@ -957,10 +959,14 @@ class VisualizationEngine:
         if event.kind == "sweep":
             if self._strobe_running():
                 return  # (the clock re-estimated the bar start mid-strobe) - the strobe has the stage
-            self._color_sweep = {"start": event.step / STEPS_PER_BEAT, "beats": event.length, "last": -1}
-            self._color_sweep["log"] = self._log_seq_event(
-                event, length=event.length, hue=self.config.sequencer.color_sweep_hue_deg
-            )
+            sq = self.config.sequencer
+            if sq.color_sweep_color == "dynamic":
+                hue = dynamic_sweep_hue(self._beat_target_hue, self._last_sweep_hue, random)
+            else:
+                hue = sq.color_sweep_hue_deg
+            self._last_sweep_hue = hue
+            self._color_sweep = {"start": event.step / STEPS_PER_BEAT, "beats": event.length, "last": -1, "hue": hue}
+            self._color_sweep["log"] = self._log_seq_event(event, length=event.length, hue=hue)
             return
         if event.kind == "strobe":
             # Announced ahead of time (event.lead): it starts when the clock
@@ -1190,7 +1196,7 @@ class VisualizationEngine:
         for i in range(max(0, first - width + 1), min(steps - 1, index) + 1):
             k = (-i) % n if sq.color_sweep_direction == "backward" else i
             lit.update(spread_positions(positions, k, count))
-        color = Color.from_hsv(sq.color_sweep_hue_deg, sq.color_sweep_saturation, sq.color_sweep_brightness)
+        color = Color.from_hsv(sweep["hue"], sq.color_sweep_saturation, sq.color_sweep_brightness)
         swept = False
         for device_id in lit:
             if device_id in colors:
