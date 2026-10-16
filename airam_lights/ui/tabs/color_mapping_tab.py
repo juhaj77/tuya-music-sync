@@ -57,6 +57,7 @@ from ..widgets.musical import (
     set_active,
     show_note,
 )
+from ..quick_settings import QUICK_SETTINGS, get_value, link_slider
 from ..widgets.param_slider import FloatSlider
 from ..widgets.section import CollapsibleSection
 
@@ -78,7 +79,10 @@ class RGBModeEditor(QWidget):
             row.addWidget(e)
         layout.addLayout(row)
 
-        self.sensitivity_slider = FloatSlider("Sensitivity", 0.1, 4.0, cfg.sensitivity)
+        self.sensitivity_slider = FloatSlider(
+            "Level sensitivity (gain)", 0.1, 4.0, cfg.sensitivity,
+            tooltip="How strongly the band levels turn into light - a gain: higher = brighter, livelier.",
+        )
         self.sensitivity_slider.valueChanged.connect(self._emit)
         layout.addWidget(self.sensitivity_slider)
 
@@ -112,13 +116,16 @@ class ColorMappingTab(QWidget):
 
         sub_tabs = QTabWidget()
         root.addWidget(sub_tabs)
+        self.sub_tabs = sub_tabs
 
         # -- RGB Frequency mode -----------------------------------------------------
         self.rgb_editor = RGBModeEditor(cm.rgb, self._on_rgb_changed)
+        self.rgb_attack_slider, self.rgb_release_slider = self._add_smoothing_sliders(self.rgb_editor.layout())
         sub_tabs.addTab(self.rgb_editor, "RGB Frequency")
 
         # -- Custom mode --------------------------------------------------------------
         self.custom_editor = RGBModeEditor(cm.custom, self._on_custom_changed)
+        self.custom_attack_slider, self.custom_release_slider = self._add_smoothing_sliders(self.custom_editor.layout())
         sub_tabs.addTab(self.custom_editor, "Custom")
 
         # -- HSV mode -------------------------------------------------------------------
@@ -131,7 +138,10 @@ class ColorMappingTab(QWidget):
         self.bright_max_slider = FloatSlider("Brightness max", 0.0, 1.0, hsv.brightness_max)
         self.sat_base_slider = FloatSlider("Saturation base", 0.0, 1.0, hsv.saturation_base)
         self.sat_contrast_slider = FloatSlider("Saturation from contrast", 0.0, 1.0, hsv.saturation_contrast_gain)
-        self.hsv_sensitivity_slider = FloatSlider("Sensitivity", 0.1, 4.0, hsv.sensitivity)
+        self.hsv_sensitivity_slider = FloatSlider(
+            "Level sensitivity (gain)", 0.1, 4.0, hsv.sensitivity,
+            tooltip="How strongly the sound level turns into light - a gain: higher = brighter, livelier.",
+        )
         for w in (
             self.hue_min_slider,
             self.hue_max_slider,
@@ -143,6 +153,7 @@ class ColorMappingTab(QWidget):
         ):
             w.valueChanged.connect(self._on_hsv_changed)
             hsv_layout.addWidget(w)
+        self.hsv_attack_slider, self.hsv_release_slider = self._add_smoothing_sliders(hsv_layout)
         hsv_desc_label = QLabel(
             "Hue follows the spectral centroid (frequency distribution), brightness "
             "follows overall energy, saturation follows spectral contrast (peaky vs. flat)."
@@ -199,7 +210,7 @@ class ColorMappingTab(QWidget):
         beat_layout.addWidget(self.beat_detect_note)
 
         self.beat_sensitivity_slider = FloatSlider(
-            "Sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2,
+            "Beat detector sensitivity", 1.05, 4.0, bs.sensitivity, decimals=2,
             tooltip="Higher = only very sharp, obvious hits register as a beat at all, so every hue/"
             "brightness snap and both pulse types below fire less often but more confidently.",
         )
@@ -625,7 +636,11 @@ class ColorMappingTab(QWidget):
         bsw_detect_row.addStretch(1)
         bsw_layout.addLayout(bsw_detect_row)
 
-        self.bsw_sensitivity_slider = FloatSlider("Sensitivity", 1.05, 4.0, bsw.sensitivity, decimals=2)
+        self.bsw_sensitivity_slider = FloatSlider(
+            "Beat detector sensitivity", 1.05, 4.0, bsw.sensitivity, decimals=2,
+            tooltip="Beat Sync White's own beat detector - used only when it doesn't follow the shared beat "
+            "clock (Rhythm box). Higher = only sharp, obvious hits count as a beat.",
+        )
         self.bsw_min_interval_slider = FloatSlider("Min interval", 30.0, 1000.0, bsw.min_interval_ms, decimals=0, suffix=" ms")
         self.bsw_min_energy_slider = FloatSlider("Min energy floor", 0.0, 1.0, bsw.min_energy)
         for w in (self.bsw_sensitivity_slider, self.bsw_min_interval_slider, self.bsw_min_energy_slider):
@@ -715,7 +730,11 @@ class ColorMappingTab(QWidget):
         peak_detect_row.addStretch(1)
         peak_layout.addLayout(peak_detect_row)
 
-        self.peak_sensitivity_slider = FloatSlider("Sensitivity", 1.05, 4.0, pf.sensitivity, decimals=2)
+        self.peak_sensitivity_slider = FloatSlider(
+            "Peak sensitivity", 1.05, 4.0, pf.sensitivity, decimals=2,
+            tooltip="Peak Flash's own peak detector (it doesn't use the shared beat clock): higher = only "
+            "the strongest peaks flash.",
+        )
         self.peak_min_interval_slider = FloatSlider("Min interval", 20.0, 1000.0, pf.min_interval_ms, decimals=0, suffix=" ms")
         self.peak_min_energy_slider = FloatSlider("Min energy floor", 0.0, 1.0, pf.min_energy)
         for w in (self.peak_sensitivity_slider, self.peak_min_interval_slider, self.peak_min_energy_slider):
@@ -802,6 +821,15 @@ class ColorMappingTab(QWidget):
 
         sub_tabs.insertTab(2, peak_widget, "Peak Flash")
         sub_tabs.setCurrentIndex(0)
+        self._mode_pages = {
+            "beat_sync": beat_widget,
+            "beat_sync_white": bsw_widget,
+            "peak_flash": peak_widget,
+            "rgb_freq": self.rgb_editor,
+            "hsv_music": hsv_widget,
+            "custom": self.custom_editor,
+        }
+        self._link_quick_settings()
         # A tab widget makes every page as tall as the tallest one (Beat Sync's):
         # without a stretch at the end, a shorter page spreads its rows over
         # that whole height, with big gaps between them.
@@ -1113,7 +1141,60 @@ class ColorMappingTab(QWidget):
         else:
             show_note(self.seq_strobe_note, "")
 
+    def _add_smoothing_sliders(self, layout) -> "tuple[FloatSlider, FloatSlider]":
+        """Attack/Release of the level smoothing - one setting shared by RGB
+        Frequency, Custom and HSV Music, so each of their pages has a copy
+        (kept in step through _link_quick_settings())."""
+        sliders = []
+        for setting in (s for s in QUICK_SETTINGS["rgb_freq"] if ".smoothing." in s.path):
+            slider = FloatSlider(
+                setting.label, setting.minimum, setting.maximum, get_value(self.controller.config, setting.path),
+                decimals=setting.decimals, suffix=setting.suffix, tooltip=setting.tooltip,
+            )
+            slider.valueChanged.connect(lambda v, name=setting.path.split(".")[-1]: self._on_smoothing_changed(name, v))
+            layout.addWidget(slider)
+            sliders.append(slider)
+        return sliders[0], sliders[1]
+
+    def _link_quick_settings(self) -> None:
+        """The sliders the Visualizer tab's Quick Controls also show: each
+        follows the other copies of its setting (see ui/quick_settings.py)."""
+        links = {
+            "rhythm.sensitivity": [self.rhythm_sensitivity_slider],
+            "color_mapping.beat_sync.sensitivity": [self.beat_sensitivity_slider],
+            "color_mapping.beat_sync.sustain_brightness": [self.beat_sustain_slider],
+            "color_mapping.beat_sync.brightness_release_ms": [self.beat_bright_release_slider],
+            "color_mapping.beat_sync.hue_attack_ms": [self.beat_hue_attack_slider],
+            "color_mapping.beat_sync_white.sensitivity": [self.bsw_sensitivity_slider],
+            "color_mapping.beat_sync_white.sustain_brightness": [self.bsw_sustain_slider],
+            "color_mapping.beat_sync_white.brightness_release_ms": [self.bsw_bright_release_slider],
+            "color_mapping.beat_sync_white.temp_attack_ms": [self.bsw_temp_attack_slider],
+            "color_mapping.peak_flash.sensitivity": [self.peak_sensitivity_slider],
+            "color_mapping.peak_flash.flash_release_ms": [self.peak_flash_release_slider],
+            "color_mapping.peak_flash.treble_white_amount": [self.peak_white_amount_slider],
+            "color_mapping.peak_flash.hue_flow_ms": [self.peak_hue_flow_slider],
+            "color_mapping.peak_flash.baseline_min_brightness": [self.peak_baseline_min_slider],
+            "color_mapping.rgb.sensitivity": [self.rgb_editor.sensitivity_slider],
+            "color_mapping.custom.sensitivity": [self.custom_editor.sensitivity_slider],
+            "color_mapping.hsv.sensitivity": [self.hsv_sensitivity_slider],
+            "color_mapping.smoothing.attack_ms": [self.rgb_attack_slider, self.custom_attack_slider, self.hsv_attack_slider],
+            "color_mapping.smoothing.release_ms": [self.rgb_release_slider, self.custom_release_slider, self.hsv_release_slider],
+        }
+        for path, sliders in links.items():
+            for slider in sliders:
+                link_slider(self.controller, path, slider)
+
+    def show_mode(self, mode: str) -> None:
+        """Brings up `mode`'s page (the Quick Controls' "more settings" link)."""
+        page = self._mode_pages.get(mode)
+        if page is not None:
+            self.sub_tabs.setCurrentWidget(page)
+
     # -- handlers -----------------------------------------------------------------------
+
+    def _on_smoothing_changed(self, name: str, value: float) -> None:
+        setattr(self.controller.config.color_mapping.smoothing, name, value)
+        self.controller.apply_config_changes()
 
     def _on_rgb_changed(self, cfg: RGBModeConfig) -> None:
         self.controller.config.color_mapping.rgb = cfg
@@ -1371,7 +1452,7 @@ class ColorMappingTab(QWidget):
             spin.valueChanged.connect(self._on_rhythm_changed)
 
         self.rhythm_sensitivity_slider = FloatSlider(
-            "Sensitivity", 1.01, 2.0, rh.sensitivity, decimals=2,
+            "Beat clock sensitivity", 1.01, 2.0, rh.sensitivity, decimals=2,
             tooltip="How far above the recent average a kick must rise to count. The level is in dB, so "
             "small values are already selective - around 1.08-1.15 suits most music. Once the tempo "
             "is locked, missed kicks are filled in anyway, so erring on the high side is fine.",

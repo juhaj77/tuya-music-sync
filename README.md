@@ -424,14 +424,34 @@ device, no microphone involved; WASAPI loopback on Windows, the output's monitor
 Linux) or **Microphone** (a real recording device, for testing
 how the lights react to actual room/ambient sound - has its own sensitivity/gain
 control, since mics are usually much quieter than a loopback tap). Watch the level
-meter and spectrum to confirm audio capture works, choose a mode, tweak
-sensitivity/brightness/saturation/attack/release, and press **Start Music
-Visualization**.
+meter and spectrum to confirm audio capture works, choose a mode, tweak the
+**Quick Controls**, and press **Start Music Visualization**.
 
-> **Heads up:** the "Sensitivity" quick control here is shared across RGB Frequency,
-> Custom, *and* HSV Music mode - dragging it down affects all three at once. If those
-> modes suddenly look dim/black, check this slider before assuming something's wrong;
-> it defaults to 1.0.
+**Quick Controls** are Brightness, Saturation and *Beat clock sensitivity* (every mode)
+plus a few of the selected mode's own settings, which change with the mode:
+
+| Mode | Quick settings |
+|---|---|
+| Beat Sync | Beat detector sensitivity, Sustain brightness, Brightness decay, Hue snap speed |
+| Beat Sync White | Beat detector sensitivity, Sustain brightness, Brightness decay, Temp snap speed |
+| Peak Flash | Peak sensitivity, Flash decay, Whiteness amount, Color richness (hue flow), Baseline brightness min |
+| RGB Frequency / HSV Music / Custom | Level sensitivity (gain), Attack, Release |
+
+Each is the same setting as in the Color Mapping tab - change it in either place and the
+other follows. **More ... settings in Color Mapping** opens that mode's page.
+
+The four sensitivities are different things:
+- **Beat clock sensitivity** - the shared beat clock (Color Mapping -> Rhythm). Beat Sync
+  and Beat Sync White react to it when they follow the shared clock (the default), Chase
+  and Group Switch with speed source *clock*. Greyed out when nothing follows the clock.
+- **Beat detector sensitivity** - Beat Sync's / Beat Sync White's own detector, used only
+  when the mode does *not* follow the shared clock (greyed out otherwise).
+- **Peak sensitivity** - Peak Flash's peak detector; Peak Flash never uses the clock.
+- **Level sensitivity (gain)** - how strongly RGB Frequency, Custom and HSV Music turn
+  the sound level into light; each of the three has its own.
+
+*Attack*/*Release* (the level smoothing) are only used by RGB Frequency, Custom and HSV
+Music, and are one setting shared by the three.
 
 ### Devices & Setup tab
 Add lamps manually (or via **Scan Network** for IP/ID, then fill in the key), test

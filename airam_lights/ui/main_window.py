@@ -47,6 +47,7 @@ class MainWindow(QMainWindow):
         # Queued: the signal usually comes from a button inside one of the
         # very tabs being replaced, which must not be deleted mid-click.
         self.controller.configReplaced.connect(self._rebuild_settings_tabs, Qt.QueuedConnection)
+        self.controller.showModeSettings.connect(self._show_mode_settings)
 
     def _rebuild_settings_tabs(self) -> None:
         """Recreates the settings tabs so every widget shows the current
@@ -61,6 +62,13 @@ class MainWindow(QMainWindow):
             self.tabs.insertTab(index, tab_class(self.controller), title)
             old.deleteLater()
         self.tabs.setCurrentIndex(current)
+
+    def _show_mode_settings(self, mode: str) -> None:
+        """The Quick Controls' "more settings" link: the Color Mapping tab, on that mode's page."""
+        tab = self.tabs.widget(2)  # rebuilt on a preset load, so looked up each time
+        self.tabs.setCurrentWidget(tab)
+        if isinstance(tab, ColorMappingTab):
+            tab.show_mode(mode)
 
     def _on_audio_error(self, message: str) -> None:
         QMessageBox.warning(self, "Audio capture error", message)

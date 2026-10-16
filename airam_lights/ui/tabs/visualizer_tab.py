@@ -1,7 +1,9 @@
 """Main visualizer tab: audio device, level meter, spectrum, mode selection,
-and the most commonly-tweaked controls (sensitivity/brightness/saturation/
-attack/release). Detailed per-mode configuration lives in the Color Mapping
-and Chase & Group Switch tabs."""
+and Quick Controls: brightness, saturation and the beat clock's sensitivity
+(every mode) plus a few of the selected mode's own settings, which change with
+the mode (ui/quick_settings.py).
+Detailed per-mode configuration lives in the Color Mapping and Chase & Group
+Switch tabs."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -12,12 +14,15 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QRadioButton,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
 
 from ...audio.devices import list_loopback_devices, list_microphone_devices
 from ..controller import AppController
+from ..quick_settings import CLOCK_SENSITIVITY, QUICK_SETTINGS, clock_in_use, get_value, link_slider, set_value
+from ..widgets.musical import set_active
 from ..widgets.level_meter import LevelMeter
 from ..widgets.param_slider import FloatSlider
 from ..widgets.spectrum_widget import SpectrumWidget
@@ -118,6 +123,8 @@ class VisualizerTab(QWidget):
         root.addWidget(audio_box)
 
         # -- mode --------------------------------------------------------------------
+        # Filled under Quick Controls; the mode radio below already switches to one.
+        self._mode_settings_pages = {}
         mode_box = QGroupBox("Mode")
         mode_layout = QHBoxLayout(mode_box)
         self.mode_group = QButtonGroup(self)
@@ -136,10 +143,6 @@ class VisualizerTab(QWidget):
         quick_layout = QVBoxLayout(quick_box)
         cm = controller.config.color_mapping
 
-        self.sensitivity_slider = FloatSlider("Sensitivity", 0.1, 4.0, cm.rgb.sensitivity)
-        self.sensitivity_slider.valueChanged.connect(self._on_sensitivity)
-        quick_layout.addWidget(self.sensitivity_slider)
-
         self.brightness_slider = FloatSlider("Brightness", 0.0, 1.0, cm.brightness)
         self.brightness_slider.valueChanged.connect(self._on_brightness)
         quick_layout.addWidget(self.brightness_slider)
@@ -148,13 +151,35 @@ class VisualizerTab(QWidget):
         self.saturation_slider.valueChanged.connect(self._on_saturation)
         quick_layout.addWidget(self.saturation_slider)
 
-        self.attack_slider = FloatSlider("Attack", 1.0, 1000.0, cm.smoothing.attack_ms, decimals=0, suffix=" ms")
-        self.attack_slider.valueChanged.connect(self._on_attack)
-        quick_layout.addWidget(self.attack_slider)
+        self.quick_sliders = {}  # (mode, path) -> FloatSlider; mode None = shown in every mode
+        self.clock_sensitivity_slider = self._quick_slider(None, CLOCK_SENSITIVITY)
+        quick_layout.addWidget(self.clock_sensitivity_slider)
 
-        self.release_slider = FloatSlider("Release", 1.0, 2000.0, cm.smoothing.release_ms, decimals=0, suffix=" ms")
-        self.release_slider.valueChanged.connect(self._on_release)
-        quick_layout.addWidget(self.release_slider)
+        # The selected mode's own settings: one page per mode, switched with it.
+        self.mode_settings_stack = QStackedWidget()
+        for key, label in _MODES:
+            page = QWidget()
+            page_layout = QVBoxLayout(page)
+            page_layout.setContentsMargins(0, 0, 0, 0)
+            for setting in QUICK_SETTINGS[key]:
+                page_layout.addWidget(self._quick_slider(key, setting))
+            more = QPushButton(f"More {label} settings in Color Mapping →")
+            more.setFlat(True)
+            more.setToolTip(f"Opens the {label} page of the Color Mapping tab.")
+            more.clicked.connect(lambda _checked=False, mode=key: controller.showModeSettings.emit(mode))
+            more_row = QHBoxLayout()
+            more_row.addStretch(1)
+            more_row.addWidget(more)
+            page_layout.addLayout(more_row)
+            page_layout.addStretch(1)
+            self.mode_settings_stack.addWidget(page)
+            self._mode_settings_pages[key] = page
+        quick_layout.addWidget(self.mode_settings_stack)
+        # One label width for all of them, so the sliders start in one column
+        # whichever mode's page is showing.
+        for slider in [self.brightness_slider, self.saturation_slider, *self.quick_sliders.values()]:
+            slider._label.setMinimumWidth(190)
+        self._show_mode_settings(cm.mode)
 
         root.addWidget(quick_box)
 
@@ -170,6 +195,7 @@ class VisualizerTab(QWidget):
         controller.levelUpdated.connect(self.level_meter.set_level)
         controller.spectrumUpdated.connect(self.spectrum_widget.set_frame)
         controller.audioError.connect(self._on_audio_error)
+        controller.configReplaced.connect(self._refresh_from_config)
 
     # -- audio device -----------------------------------------------------------------
 
@@ -237,17 +263,69 @@ class VisualizerTab(QWidget):
             if checked:
                 self.controller.config.color_mapping.mode = key
                 self.controller.apply_config_changes()
+                self._show_mode_settings(key)
 
         return handler
 
     # -- quick controls -------------------------------------------------------------------
 
-    def _on_sensitivity(self, value: float) -> None:
-        cm = self.controller.config.color_mapping
-        cm.rgb.sensitivity = value
-        cm.custom.sensitivity = value
-        cm.hsv.sensitivity = value
+    def _quick_slider(self, mode, setting) -> FloatSlider:
+        slider = FloatSlider(
+            setting.label, setting.minimum, setting.maximum, get_value(self.controller.config, setting.path),
+            decimals=setting.decimals, suffix=setting.suffix, tooltip=setting.tooltip,
+        )
+        slider.valueChanged.connect(lambda v, path=setting.path: self._on_quick_setting(path, v))
+        link_slider(self.controller, setting.path, slider)
+        self.quick_sliders[(mode, setting.path)] = slider
+        return slider
+
+    def _show_mode_settings(self, mode: str) -> None:
+        page = self._mode_settings_pages.get(mode)
+        if page is not None:  # (none yet while the mode radio is first set)
+            self.mode_settings_stack.setCurrentWidget(page)
+            self._update_sensitivity_states()
+
+    def _update_sensitivity_states(self) -> None:
+        """Grey out the sensitivity nothing listens to right now: the beat clock's
+        when nothing follows the clock, a beat mode's own detector's when the
+        mode follows the clock. (Those switches are on other tabs, so this runs
+        again whenever this tab is shown.)"""
+        config = self.controller.config
+        set_active(
+            [self.clock_sensitivity_slider], clock_in_use(config),
+            "Nothing follows the shared beat clock right now: Beat Sync and Beat Sync White do when "
+            "'follow the shared clock' is on (Color Mapping -> Rhythm), Chase and Group Switch with "
+            "speed source 'clock'.",
+        )
+        own = [self.quick_sliders[(mode, f"color_mapping.{mode}.sensitivity")] for mode in ("beat_sync", "beat_sync_white")]
+        set_active(
+            own, not config.rhythm.shared_clock,
+            "This mode follows the shared beat clock (Color Mapping -> Rhythm) - Beat clock sensitivity "
+            "above is the one in use.",
+        )
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_sensitivity_states()
+
+    def _on_quick_setting(self, path: str, value: float) -> None:
+        set_value(self.controller.config, path, value)
         self.controller.apply_config_changes()
+
+    def _refresh_from_config(self) -> None:
+        """After a preset load: the mode and every quick slider from the new config."""
+        cm = self.controller.config.color_mapping
+        button = self._mode_buttons.get(cm.mode)
+        if button is not None:
+            button.blockSignals(True)
+            button.setChecked(True)
+            button.blockSignals(False)
+            self._show_mode_settings(cm.mode)
+        self.brightness_slider.set_value(cm.brightness)
+        self.saturation_slider.set_value(cm.saturation)
+        for (_mode, path), slider in self.quick_sliders.items():
+            slider.set_value(get_value(self.controller.config, path))
+        self._update_sensitivity_states()
 
     def _on_brightness(self, value: float) -> None:
         self.controller.config.color_mapping.brightness = value
@@ -255,14 +333,6 @@ class VisualizerTab(QWidget):
 
     def _on_saturation(self, value: float) -> None:
         self.controller.config.color_mapping.saturation = value
-        self.controller.apply_config_changes()
-
-    def _on_attack(self, value: float) -> None:
-        self.controller.config.color_mapping.smoothing.attack_ms = value
-        self.controller.apply_config_changes()
-
-    def _on_release(self, value: float) -> None:
-        self.controller.config.color_mapping.smoothing.release_ms = value
         self.controller.apply_config_changes()
 
     # -- start/stop -----------------------------------------------------------------------

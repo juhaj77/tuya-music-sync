@@ -42,6 +42,10 @@ class AppController(QObject):
     logChanged = Signal()
     audioError = Signal(str)
     configReplaced = Signal()  # many settings changed at once (preset) - rebuild the settings tabs
+    # One setting shown in two places (Quick Controls and its Color Mapping page) was
+    # changed: (path under color_mapping, the slider that changed it) - see ui/quick_settings.py
+    linkedSettingChanged = Signal(str, object)
+    showModeSettings = Signal(str)  # open the Color Mapping page of this mode
 
     def __init__(self):
         super().__init__()
