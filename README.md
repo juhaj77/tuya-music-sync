@@ -681,7 +681,9 @@ drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequen
   `dynamic` every sweep gets a new colour, one of the brightest the bulbs make (red,
   yellow, green, cyan, blue, magenta): one of the two farthest from the colour the lamps
   show at that moment, so it stands out, and never the previous sweep's. The info panel's
-  timeline shows each sweep in its colour.
+  timeline shows each sweep in its colour. A white flash on a lamp the sweep is lighting
+  shows on top of the sweep's colour, which stays at full - the white doesn't cut it. **Test sweep now** plays it 4 times in a row on
+  the selected lamps right away (with the visualizer running), to see how it looks.
 
 The info panel shows where it is: `beat 2/4 · phrase bar 7/8, loudness high`, with a
 live timeline of the pulses under it (see *Info panel* below).
@@ -977,8 +979,10 @@ Along the bottom of the window, under every tab (it never scrolls away):
   something follows the pitch), and the colour mode.
 - **Second row, while the pulse sequencer runs** - a timeline of the last two bars on
   the clock's grid, scrolling left as the music plays (the bright line is now, the beats
-  coming up to its right): **White** flashes (the walk's with their group's number, full
-  height when every lamp flashes, yellow when played as a flash strobe), **Dark** pulses,
+  coming up to its right): **White** flashes drawn as their envelope - up over the
+  attack, flat through the duration, down over the release along its curve, as tall as
+  they are bright (the walk's with their group's number, outlined in gold when every lamp
+  flashes, yellow when played as a flash strobe), **Dark** pulses,
   **Strobe** bursts and color **Sweeps** in their colour; grey lines are bar lines, the
   golden one a phrase start. Under it, the patterns playing now (`auto` resolved by the
   loudness) and the latest pulses in words.

@@ -251,3 +251,54 @@ def test_engine_dynamic_sweep_colour_varies_and_shows_on_the_timeline(monkeypatc
     assert len(hues) >= 3 and all(h in SWEEP_PALETTE for h in hues)
     assert all(a != b for a, b in zip(hues, hues[1:]))  # a new colour every sweep
     assert set(lit_colours) <= set(hues) and lit_colours  # the lamps show the logged colour
+
+
+# -- Test button ---------------------------------------------------------------------------------------
+
+
+def test_test_button_plays_four_sweeps_right_away_even_without_the_sequencer(monkeypatch):
+    engine, clock = _make_sweep_engine(monkeypatch, color_sweep_enabled=False)
+    engine.config.sequencer.enabled = False
+    for _ in range(int(1.0 / TICK)):
+        engine.tick_visual()
+        clock.now += TICK
+    assert engine.trigger_color_sweep_test().startswith("Playing 4 sweeps")
+    ticks = []
+    for _ in range(int(3.0 / TICK)):
+        engine.tick_visual()
+        ticks.append((0.0, {lamp for lamp, c in engine.latest_lamp_colors.items() if c == GREEN}))
+        clock.now += TICK
+    # Back to back, so one run of lit ticks: a, b, c, d four times over.
+    lit = [l for _, l in ticks if l]
+    assert all(len(l) == 1 for l in lit)
+    order = []
+    for l in lit:
+        lamp = next(iter(l))
+        if not order or order[-1] != lamp:
+            order.append(lamp)
+    assert order == ["a", "b", "c", "d"] * 4
+    assert engine._color_sweep is None and not ticks[-1][1]  # over, and the show is back
+
+
+def test_test_button_needs_the_visualizer_running(monkeypatch):
+    engine, clock = _make_sweep_engine(monkeypatch)
+    engine.running = False
+    assert engine.trigger_color_sweep_test().startswith("Not played: start the visualizer")
+
+
+def test_a_white_flash_does_not_cut_the_sweep(monkeypatch):
+    engine, clock = _make_sweep_engine(monkeypatch, color_sweep_beats=2.0, color_sweep_width=2)
+    engine.config.color_mapping.beat_sync.white_pulse_enabled = True
+    engine.config.sequencer.white_pattern = "beats"
+    engine.config.sequencer.min_group_gap_ms = 0.0
+    both = 0
+    for _ in range(int(20.0 / TICK)):
+        engine.tick_visual()
+        sweep = engine._color_sweep
+        if sweep is not None:
+            colour = Color.from_hsv(sweep["hue"], 1.0, 1.0)
+            for lamp, target in engine.latest_lamp_white_targets.items():
+                if target.under == colour:
+                    both += 1  # mid white flash, the sweep's colour at full under it
+        clock.now += TICK
+    assert both > 0

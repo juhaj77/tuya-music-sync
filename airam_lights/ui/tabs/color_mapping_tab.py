@@ -1074,7 +1074,7 @@ class ColorMappingTab(QWidget):
             [self.seq_sweep_color_combo, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider,
              self.seq_sweep_length_combo, self.seq_sweep_rotators_spin, self.seq_sweep_width_spin, self.seq_sweep_direction_combo,
              self.seq_sweep_placement_combo, self.seq_sweep_level_combo, self.seq_sweep_chance_slider,
-             self.seq_sweep_gap_slider],
+             self.seq_sweep_gap_slider, self.seq_sweep_test_button],
             sequencing and sq.color_sweep_enabled,
             seq_off if not sequencing else "Color sweep is off.",
         )
@@ -1858,6 +1858,23 @@ class ColorMappingTab(QWidget):
         for w in (self.seq_sweep_chance_slider, self.seq_sweep_gap_slider):
             w.valueChanged.connect(self._on_sequencer_changed)
             layout.addWidget(w)
+
+        test_row = QHBoxLayout()
+        self.seq_sweep_test_button = QPushButton("Test sweep now")
+        self.seq_sweep_test_button.setToolTip(
+            "Plays the sweep 4 times in a row on the selected lamps right away, with the settings above (a "
+            "new colour each time with 'dynamic') - to see how it looks without waiting for the music to "
+            "call for one. Plays on top of the show, so start the visualizer first."
+        )
+        self.seq_sweep_test_button.clicked.connect(self._on_sweep_test)
+        test_row.addWidget(self.seq_sweep_test_button)
+        self.seq_sweep_test_label = QLabel()
+        self.seq_sweep_test_label.setWordWrap(True)
+        test_row.addWidget(self.seq_sweep_test_label, stretch=1)
+        layout.addLayout(test_row)
+
+    def _on_sweep_test(self) -> None:
+        self.seq_sweep_test_label.setText(self.controller.engine.trigger_color_sweep_test())
 
     def _on_strobe_test(self) -> None:
         self.seq_strobe_test_label.setText(self.controller.engine.trigger_strobe_test())

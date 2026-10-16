@@ -497,10 +497,11 @@ class VisualizationEngine:
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
-        swept = bool(colors) and mode == "beat_sync" and self._apply_color_sweep(colors, selected_ids)
+        # (The sequencer's sweeps only come in Beat Sync; the Test button's play in any colour mode.)
+        swept = self._apply_color_sweep(colors, selected_ids) if colors else set()
 
         if self._beat_sync_white_targets and (self.config.chase.enabled or self.config.group_switch.enabled or swept):
-            self._recolor_under_white(colors)
+            self._recolor_under_white(colors, swept)
         self._restrict_white_targets_to_moving_lamps(selected_ids)
 
         if self._beat_sync_white_targets:
@@ -911,18 +912,24 @@ class VisualizationEngine:
             self._under_white_fraction[device_id] = fraction
         return Color(color.r * keep, color.g * keep, color.b * keep)
 
-    def _recolor_under_white(self, colors: Dict[str, Color]) -> None:
+    def _recolor_under_white(self, colors: Dict[str, Color], swept: Set[str] = frozenset()) -> None:
         """The colour under each white flash, taken from the lamp's FINAL
         colour. The flashes are set up before the Chase / Group Switch
         overlays run, from the colour the mode itself computed - so a lamp an
         overlay had recoloured (say, to the opposite hue) showed its
         un-overlaid colour for as long as a white flash lasted, and jumped
         back when it ended: a hue flicker on every flash, most visible in the
-        long, dim tail of a phrase-start flash."""
+        long, dim tail of a phrase-start flash.
+
+        `swept`: the lamps the color sweep lights this tick - its colour stays
+        at full under the white instead of crossfading, so the sweep and a
+        white flash show at once (the white doesn't cut the sweep)."""
         for device_id, target in list(self._beat_sync_white_targets.items()):
             fraction = self._under_white_fraction.get(device_id)
             if target.under is None or fraction is None or device_id not in colors:
                 continue
+            if device_id in swept:
+                fraction = 0.0
             self._beat_sync_white_targets[device_id] = WhiteTarget(
                 target.brightness, target.temp, self._under_white(colors[device_id], fraction)
             )
@@ -959,12 +966,7 @@ class VisualizationEngine:
         if event.kind == "sweep":
             if self._strobe_running():
                 return  # (the clock re-estimated the bar start mid-strobe) - the strobe has the stage
-            sq = self.config.sequencer
-            if sq.color_sweep_color == "dynamic":
-                hue = dynamic_sweep_hue(self._beat_target_hue, self._last_sweep_hue, random)
-            else:
-                hue = sq.color_sweep_hue_deg
-            self._last_sweep_hue = hue
+            hue = self._next_sweep_hue()
             self._color_sweep = {"start": event.step / STEPS_PER_BEAT, "beats": event.length, "last": -1, "hue": hue}
             self._color_sweep["log"] = self._log_seq_event(event, length=event.length, hue=hue)
             return
@@ -1011,8 +1013,12 @@ class VisualizationEngine:
                     self._seq_white_started[lamp] = wall_now
                 lamps = [lamp for lamp in lamps if lamp not in own]
         if lamps or flash_strobe:
-            beats = length / self._beat_clock.period_s if self._beat_clock.period_s else 0.25
-            self._log_seq_event(event, length=beats, flash_strobe=flash_strobe)
+            period = self._beat_clock.period_s or 0.5
+            # The flash's envelope in beats, for the info panel's timeline.
+            self._log_seq_event(
+                event, length=length / period, flash_strobe=flash_strobe,
+                attack=attack / period, hold=hold / period, release=release / period, curve=curve,
+            )
         for lamp in lamps:
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
@@ -1154,7 +1160,7 @@ class VisualizationEngine:
             )
         return message
 
-    def _apply_color_sweep(self, colors: Dict[str, Color], selected_ids) -> bool:
+    def _apply_color_sweep(self, colors: Dict[str, Color], selected_ids) -> Set[str]:
         """Paints the sequencer's color sweep (PulseSequencerConfig.
         color_sweep_enabled) over `colors`, in place: the sweep's colour
         runs once round the Chase order positions over its length on the
@@ -1165,21 +1171,33 @@ class VisualizationEngine:
         out at the end of its stretch, so every position stays lit for the
         same share of the sweep. A position whose share fell between two ticks still gets this one, so
         none is skipped at fast tempos. Ends early when the clock loses lock
-        or the strobe takes over, or the grid jumps back. True when it lit something this tick."""
+        or the strobe takes over, or the grid jumps back. Returns the lamps it lit this tick."""
         sweep = self._color_sweep
         if sweep is None:
-            return False
-        position = self._seq_position
-        if not self._sequencing or position is None or self._strobe_running():
-            self._end_color_sweep(position)
-            return False
-        progress = (position - sweep["start"]) / max(1e-6, sweep["beats"])
+            return set()
+        if "t0" in sweep:  # the Test button's: on its own timer, not the clock
+            if self._strobe_running():
+                self._color_sweep = None
+                return set()
+            progress = (self._perf_now - sweep["t0"]) / sweep["duration"]
+            if progress >= 1.0 and sweep["repeats"] > 1:
+                sweep.update(
+                    t0=sweep["t0"] + sweep["duration"], repeats=sweep["repeats"] - 1, last=-1,
+                    hue=self._next_sweep_hue(),
+                )
+                progress = (self._perf_now - sweep["t0"]) / sweep["duration"]
+        else:
+            position = self._seq_position
+            if not self._sequencing or position is None or self._strobe_running():
+                self._end_color_sweep(position)
+                return set()
+            progress = (position - sweep["start"]) / max(1e-6, sweep["beats"])
         positions = get_chase_groups(self.config.per_lamp_effects, selected_ids)
         if progress >= 1.0 or not positions:
             self._color_sweep = None
-            return False
+            return set()
         if progress < 0.0:
-            return False
+            return set()
         sq = self.config.sequencer
         n = len(positions)
         count = max(1, min(int(sq.color_sweep_rotators), n))
@@ -1189,7 +1207,7 @@ class VisualizationEngine:
         index = min(travel - 1, int(progress * travel))
         if index < sweep["last"]:
             self._end_color_sweep(None)  # the grid jumped back (bar start re-estimated): don't replay it
-            return False
+            return set()
         first = sweep["last"] + 1 if sweep["last"] < index else index
         sweep["last"] = index
         lit: Set[str] = set()
@@ -1197,12 +1215,50 @@ class VisualizationEngine:
             k = (-i) % n if sq.color_sweep_direction == "backward" else i
             lit.update(spread_positions(positions, k, count))
         color = Color.from_hsv(sweep["hue"], sq.color_sweep_saturation, sq.color_sweep_brightness)
-        swept = False
-        for device_id in lit:
-            if device_id in colors:
-                colors[device_id] = color
-                swept = True
+        swept = {device_id for device_id in lit if device_id in colors}
+        for device_id in swept:
+            colors[device_id] = color
         return swept
+
+    def _next_sweep_hue(self) -> float:
+        """The next color sweep's hue: its own, or with color_sweep_color
+        "dynamic" one picked to stand out from the show (dynamic_sweep_hue)."""
+        sq = self.config.sequencer
+        if sq.color_sweep_color == "dynamic":
+            hue = dynamic_sweep_hue(self._beat_target_hue, self._last_sweep_hue, random)
+        else:
+            hue = sq.color_sweep_hue_deg
+        self._last_sweep_hue = hue
+        return hue
+
+    def trigger_color_sweep_test(self, repeats: int = 4) -> str:
+        """Plays the color sweep `repeats` times in a row on the selected
+        lamps right away (the Test button next to the sweep settings), with
+        the sweep's own settings, at the clock's tempo - or as if at 120 BPM
+        while it has none. On top of the running show, so the visualizer must
+        be on. Returns a line saying what happened."""
+        if not self.running:
+            return "Not played: start the visualizer first - the sweep plays on top of the show."
+        if self.config.color_mapping.mode == "beat_sync_white":
+            return "Not played: Beat Sync White drives the white LEDs only - the sweep needs an RGB mode."
+        selected_ids = self.lamp_manager.selected_device_ids()
+        positions = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        if not positions:
+            return "Not played: no selected lamp has a Chase order (Devices & Setup tab)."
+        sq = self.config.sequencer
+        period = self._beat_clock.period_s if self.clock_active and self._beat_clock.locked else None
+        note = "" if period else " (no tempo yet, so as if at 120 BPM)"
+        period = period or 0.5
+        steps_per_bar = max(1, int(self.config.rhythm.beats_per_bar)) * STEPS_PER_BEAT
+        beats = max(1, min(steps_per_bar, int(round(sq.color_sweep_beats * STEPS_PER_BEAT)))) / STEPS_PER_BEAT
+        self._color_sweep = {
+            "t0": time.perf_counter() + 0.1, "duration": beats * period, "repeats": max(1, int(repeats)),
+            "last": -1, "hue": self._next_sweep_hue(),
+        }
+        return (
+            f"Playing {repeats} sweeps of {beats:g} beats round {len(positions)} Chase positions, "
+            f"{beats * period:.2f} s each{note}."
+        )
 
     def _end_color_sweep(self, position: Optional[float]) -> None:
         """Stops the color sweep early - and shortens it on the info panel's

@@ -20,9 +20,11 @@ import math
 import time
 from typing import Optional
 
-from PySide6.QtCore import QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+
+from ...effects.pulse_sequencer import release_level
 
 _MODE_NAMES = {
     "beat_sync": "Beat Sync",
@@ -161,19 +163,7 @@ class SequencerTimeline(QWidget):
             x = x_of(pos)
             w = max(3.0, length * scale)
             if e["kind"] == "white":
-                if e.get("flash_strobe"):
-                    color = QColor(_FLASH_STROBE)
-                else:
-                    color = QColor(_WHITE)
-                    color.setAlphaF(0.35 + 0.65 * max(0.0, min(1.0, e["brightness"])))
-                if e["group"] is not None and e["reason"] != "phrase":
-                    # A walk flash: a shorter block, its group's number beside it.
-                    h_short = h * 0.62
-                    painter.fillRect(QRectF(x, top + h - h_short, w, h_short), color)
-                    painter.setPen(_TEXT)
-                    painter.drawText(QRectF(x + 2, top - 3, 24, h * 0.5), Qt.AlignLeft, str(e["group"] + 1))
-                else:
-                    painter.fillRect(QRectF(x, top, w, h), color)  # every lamp at once
+                self._draw_white(painter, e, x, top, h, scale)
             elif e["kind"] == "dark":
                 painter.fillRect(QRectF(x, top, w, h), _DARK)
             elif e["kind"] == "strobe":
@@ -196,6 +186,35 @@ class SequencerTimeline(QWidget):
         painter.drawLine(int(nx), 1, int(nx), rect.height() - 2)
         painter.setClipping(False)
         self._border(painter, rect)
+
+    @staticmethod
+    def _draw_white(painter: QPainter, e: dict, x: float, top: float, h: float, scale: float) -> None:
+        """A white flash as its envelope: up over the attack, flat through
+        the hold (its duration), down over the release along its release
+        curve - as tall as it is bright. The walk's flashes carry their
+        group's number; a flash on every lamp (the phrase start) is outlined
+        in gold; a flash strobe is yellow."""
+        attack, hold, release = (max(0.0, e.get(k, 0.0)) * scale for k in ("attack", "hold", "release"))
+        if attack + hold + release < 3.0:
+            hold = 3.0  # too short to see its shape: at least a sliver
+        bottom = top + h
+        peak = bottom - h * max(0.25, min(1.0, e["brightness"]))
+        points = [QPointF(x, bottom), QPointF(x + attack, peak), QPointF(x + attack + hold, peak)]
+        curve = e.get("curve", "linear")
+        for k in range(1, 9):
+            t = k / 8.0
+            points.append(QPointF(x + attack + hold + release * t, bottom - (bottom - peak) * release_level(t, curve)))
+        points.append(QPointF(x + attack + hold + release, bottom))
+        everywhere = e["group"] is None or e["reason"] == "phrase"
+        fill = QColor(_FLASH_STROBE) if e.get("flash_strobe") else QColor(_WHITE)
+        fill.setAlphaF(0.75 if e.get("flash_strobe") else 0.55)
+        painter.setBrush(fill)
+        painter.setPen(QPen(_PHRASE if everywhere else fill.lighter(), 1.0))
+        painter.drawPolygon(QPolygonF(points))
+        painter.setBrush(Qt.NoBrush)
+        if not everywhere:
+            painter.setPen(_TEXT)
+            painter.drawText(QRectF(x + 2, top - 3, 24, h * 0.5), Qt.AlignLeft, str(e["group"] + 1))
 
     @staticmethod
     def _border(painter: QPainter, rect) -> None:
@@ -228,9 +247,10 @@ class InfoPanel(QFrame):
         self.timeline = SequencerTimeline(controller.engine)
         self.timeline.setToolTip(
             "The pulse sequencer, the last two bars on the beat clock's grid (now = the bright line, the "
-            "beats coming up to its right). White: the white flashes - the walk's with their group's "
-            "number, full height when every lamp flashes (the phrase start), yellow when it played as a "
-            "flash strobe. Dark: the dark pulses. Strobe: the bursts. Sweep: the color sweeps, in their "
+            "beats coming up to its right). White: the white flashes as their envelope - up over the "
+            "attack, flat through the duration, down over the release along its curve, as tall as they "
+            "are bright; the walk's with their group's number, outlined in gold when every lamp flashes "
+            "(the phrase start), yellow when played as a flash strobe. Dark: the dark pulses. Strobe: the bursts. Sweep: the color sweeps, in their "
             "colour. Grey lines are bar lines, the golden one a phrase start."
         )
         seq_layout.addWidget(self.timeline)
