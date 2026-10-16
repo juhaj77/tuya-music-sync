@@ -1,97 +1,119 @@
 # Airam Music Lights
 ![Airam Music Lights Demo](airam_demo.gif)
 
-**Contents**
+A real-time music light show for **Airam SmartHome Smart PAR16 RGB GU10** Wi-Fi spotlights:
+every lamp at once and in sync, controlled over your **local network** - no cloud at
+runtime, no phone app. Windows (ready-made build) and Linux (from source).
 
-- 🇫🇮 [**Suomeksi** - lyhyt kuvaus suomeksi](#suomeksi)
-- [Demo videos](#demo-videos)
-- [1. How this works (architecture)](#1-how-this-works-architecture)
-- [2. Local control of the Airam bulbs - what's confirmed vs. assumed](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
-- [3. Installation](#3-installation) (prebuilt Windows exe, or from source on Windows or Linux)
-- [4. Phase 1: prove local control works on ONE bulb](#4-phase-1-prove-local-control-works-on-one-bulb-do-this-first)
-- [5. Running the full application](#5-running-the-full-application)
-- [6. Manual (no-music) control app](#6-manual-no-music-control-app)
-- [7. Why it feels smooth instead of "crude" like the Airam app](#7-why-it-feels-smooth-instead-of-crude-like-the-airam-app)
-- [8. Update rates - independently configurable](#8-update-rates---independently-configurable)
-- [9. Running the tests](#9-running-the-tests)
-- [10. Development phases (status)](#10-development-phases-status)
-- [11. Known limitations / honest caveats](#11-known-limitations--honest-caveats)
+**[Download for Windows](https://github.com/juhaj77/tuya-music-sync/releases/latest)** ·
+[Quick start](#quick-start) · [Suomeksi](#suomeksi) · [Demo videos](#demo-videos) ·
+[Troubleshooting](#troubleshooting)
+
+## Contents
+
+- **[Quick start](#quick-start)** - from download to a running show in six steps
+- [What it does](#what-it-does) · [Suomeksi](#suomeksi) · [Demo videos](#demo-videos)
+- **Getting started**
+  - [Installation](#installation) - Windows build, or from source on Windows / Linux
+  - [Getting the lamps' local keys](#getting-the-lamps-local-keys)
+  - [Testing one lamp](#testing-one-lamp)
+- **User manual**
+  - [The window](#the-window) - tabs, collapsible sections, greyed-out settings
+  - [Visualizer tab](#visualizer-tab) - audio, mode, Quick Controls
+  - [Devices & Setup tab](#devices--setup-tab) - lamps and their place in the effects
+  - [Color Mapping tab](#color-mapping-tab)
+    - [Rhythm - the shared beat clock](#rhythm---the-shared-beat-clock)
+    - [Beat Sync](#beat-sync) - beat detection, colour, between beats, dark and white pulses
+    - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep)
+    - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [RGB Frequency, Custom and HSV Music](#rgb-frequency-custom-and-hsv-music)
+    - [Global settings](#global-settings) - lamp transitions, command rate
+    - [Presets and built-in looks](#presets-and-built-in-looks)
+  - [Chase & Group Switch tab](#chase--group-switch-tab) - [Chase](#chase) · [Group Switch](#group-switch)
+  - [Info panel](#info-panel) · [Diagnostics tab](#diagnostics-tab)
+  - [Manual control app](#manual-control-app) - colours, white, chase and ambient scenes without music
+  - [Settings and log files](#settings-and-log-files)
+- **[Troubleshooting](#troubleshooting)** - lamps without a place, a lamp that won't respond or
+  ignores the show, late flashes, crashes
+- [Technical reference](#technical-reference) - architecture, what's confirmed about the bulbs, update rates, tests
 - [License](#license) (MIT)
-    
-A desktop application - for Windows, and run from source also on Linux - that turns **Airam SmartHome Smart PAR16 RGB GU10**
-Wi-Fi spotlights into a real-time, fully configurable music visualizer - controlled
-entirely over your **local network**, with no cloud dependency at runtime and no
-Android phone required. Works with any number of lamps, from one to as many as your
-Wi-Fi network and Tuya account can handle - the author's own setup runs 8, but nothing
-in the app assumes that specific number anywhere. Audio normally comes from loopback
-capture of whatever the PC is playing (WASAPI loopback on Windows, the output's monitor
-source on PulseAudio / PipeWire on Linux - no microphone needed), but a real microphone
-can be selected instead if you want to test how the lights react to actual room/ambient
-sound.
 
-It replaces the Airam SmartHome app's built-in "Music Sync" (which is limited to one
-bulb at a time and changes colors abruptly) with your own local FFT-based analysis,
-smooth attack/release color interpolation, and simultaneous, synchronized control of
-every lamp you own.
+---
 
-**Compatibility:** developed and tested with **Airam SmartHome Smart PAR16 RGB GU10**
-spots. The app talks to the bulbs through tinytuya's generic Tuya bulb interface and
-nothing in it is specific to that model, so other Tuya-based RGB bulbs (e.g. **Airam
-SmartHome E27 RGB bulbs**, or other **Smart Life / Tuya-compatible** RGB bulbs) *should*
-work too - but they haven't been tested yet. If you try one, please open an issue and
-report whether it worked!
+## Quick start
 
-**Download:** a ready-to-run Windows build (no Python needed) is available on the
-[Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest) - see
-[Installation](#3-installation).
+1. **Install.** Download `AiramMusicLights-*-windows-x64.zip` from the
+   [Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest) and unzip it
+   anywhere ([other options](#installation)).
+2. **Get the lamps' local keys** - a one-time step through a free Tuya developer account:
+   pair the lamps in the **Smart Life** app (not Airam SmartHome), then run
+   `AiramSetupWizard.exe`. It writes the lamps into the app's settings.
+   [Step by step](#getting-the-lamps-local-keys).
+3. **Check the lamps.** Start `AiramMusicLights.exe` and open **Devices & Setup**: every lamp
+   should show *Online*. **Test Selected** cycles them red, green, blue and white.
+4. **Give each lamp its place** in the lamp list - a *Chase order* (0, 1, 2, ... round the
+   room) and an *Effect group* ([details](#devices--setup-tab)). The default show is tuned
+   for several lamps: Chase walks the Chase order, Group Switch and the white flashes walk
+   the Effect groups.
+   > **Small setup** (one lamp, or all lamps in one spot)? Switch **Group Switch** off,
+   > give the lamps at least a Chase order or switch **Chase** off too (Chase & Group
+   > Switch tab), and set the pulse sequencer's *Walk through* to `chase_order` - without
+   > an order every white flash lands on every lamp at once.
+5. **Play.** On the **Visualizer** tab keep the source on *Loopback*, play some music,
+   check the level meter moves, and press **Start Music Visualization**.
+6. **Tune.** The **Quick Controls** on the Visualizer tab hold the most useful settings of the
+   selected mode. Everything else is on the Color Mapping and Chase & Group Switch tabs,
+   in sections that start closed - open only the feature you want to change.
+   **Presets -> Built-in look** offers ready-made looks.
 
-**Linux:** supported too, run from source - the music is captured from PulseAudio /
-PipeWire (the output's monitor, no extra setup), everything else is the same code as on
-Windows. See [Option C: run from source (Linux)](#option-c-run-from-source-linux). This
-part is new and hasn't been run on a real Linux desktop yet, so reports are very welcome.
+**What a fresh install plays:** *Beat Sync* on the shared beat clock, the colour stepping
+by the notes' pitch; the pulse sequencer walking true-white flashes from lamp group to
+lamp group, with occasional strobe rolls, flash strobes and colour sweeps; Chase and
+Group Switch turning each lamp's hue with the music; lamps updated 50 times a second.
 
-> **Beat Sync is the most interesting mode - and the default.** Of all the
-> color-mapping modes, it's the one that consistently feels the most visually alive in
-> practice - a percussive flash-and-decay on every beat, optionally with **dark pulses**
-> (a rhythm-synced pause before the flash, off by default) and **white pulses** (a
-> hi-hat/cymbal-style accent, **on by default** with tuned timing - a real flash to the
-> **RGBCCT** bulb's dedicated white LEDs via its physical WHITE work_mode at the pulse's
-> peak, not just an RGB approximation, with warm and cool white flashes mixed in an
-> adjustable ratio rather than one fixed color temperature every time),
-> instead of the continuous, sometimes-muted blending the other modes do. A fresh
-> install starts with a tuned show built on it: Beat Sync on the **shared beat clock**
-> with the colour stepping by the notes' pitch, the **pulse sequencer** walking
-> true-white flashes from lamp group to lamp group (with strobe rolls, flash strobes and
-> colour sweeps), the **Chase** and **Group Switch** overlays turning each lamp's own hue
-> with the music, and a *Lamp command rate* of 50/s so the glides stay smooth. Every
-> settings section starts closed - open only the feature you want to tune. See
-> [section 5](#5-running-the-full-application) for the full writeup, or jump straight to
-> [Beat Sync mode](#beat-sync-mode) or the [Chase overlay](#chase--rotating-light-overlay).
-> The Chase highlight's **width** should scale with how many lamps are in the chase - see
-> that section for a starting formula.
+> **Photosensitivity warning:** the strobe and flash strobe flash at rates that can
+> trigger seizures in people with photosensitive epilepsy.
 
-> **Set up your lamps' order first - the default show is tuned for several lamps.**
-> **Chase** and **Group Switch** (Chase & Group Switch tab) need several lamps and each
-> lamp's place set on the **Devices & Setup** tab: a *Chase order* (0, 1, 2, ... round
-> the room) for Chase, an *Effect group* for Group Switch. The **white pulses** need an
-> order too - the pulse sequencer walks them through the Effect groups (or the Chase
-> order, its *Walk through* setting); without one, every white flash lands on every lamp
-> at once. With a **small or limited setup** (one lamp, or lamps all in one spot):
-> - switch **Group Switch off**,
-> - give the lamps at least a *Chase order* and check the Chase settings (its section on
->   the Chase & Group Switch tab) - or switch **Chase off** too,
-> - for the white pulses, set the sequencer's *Walk through* to `chase_order`, or give the
->   lamps Effect groups.
+## What it does
 
-> **Read `DEVICE_NOTES.md` first.** It separates *confirmed facts*, *assumptions*, and
-> *things you still need to test* about your specific bulbs. This README assumes you
-> will run Phase 1 (below) against your real hardware before relying on anything else.
+- **Every lamp in sync, locally** - loopback audio from the PC (or a microphone) and the
+  Tuya LAN protocol; no cloud round-trip, no phone app once set up. Any number of lamps.
+- **Six colour modes** - **Beat Sync** (the main mode: a flash on every beat, with the
+  shared beat clock, the pulse sequencer, dark and true-white pulses), Beat Sync White,
+  Peak Flash, RGB Frequency, HSV Music and Custom.
+- **Real white flashes** - the bulbs' own white LEDs, warm, cool or gliding between.
+- **Chase and Group Switch overlays** - a highlight travelling round the room, or lamp
+  groups taking turns, on top of any colour mode.
+- **Info panel** - tempo, beat, phrase, loudness, note and key, and a live timeline of
+  the sequencer's pulses.
+- **Manual control app** - colours, white balance, chase and synchronized ambient scenes
+  without music.
+- **Never loses your settings** - autosaved every 20 s; keeps the PC from idle-sleeping
+  while open.
+
+**Compatibility:** developed and tested with Airam SmartHome Smart PAR16 RGB GU10 spots.
+Nothing in the app is specific to that model, so other Tuya-based RGB bulbs (e.g. Airam
+SmartHome E27 RGB bulbs, other Smart Life / Tuya bulbs) *should* work - untested so far;
+please open an issue and tell whether yours did.
+
+## Suomeksi
+
+**Airam Music Lights** on Windows-sovellus (toimii lähdekoodista ajettuna myös Linuxilla),
+joka synkronoi **Airam SmartHome -älylamput** (Smart PAR16 RGB GU10 -kohdevalot)
+musiikkiin reaaliajassa: valot vaihtavat väriä ja välähtävät musiikin tahdissa. Sovellus
+ohjaa lamppuja suoraan kotiverkon kautta ilman pilvipalvelua, ja kaikkia lamppuja yhtä
+aikaa ja synkronoidusti - toisin kuin Airam SmartHome -sovelluksen oma musiikkitila, joka
+toimii vain yhdellä lampulla kerrallaan. Mukana on myös erillinen sovellus valojen
+käsiohjaukseen (värit, valkoinen valo, kiertävä valo, tunnelmavalaistus) ilman musiikkia.
+Muiden Tuya-pohjaisten RGB-lamppujen (esim. Airamin E27-älylamput) pitäisi toimia myös,
+mutta niitä ei ole vielä testattu. Valmis Windows-versio löytyy
+[Releases-sivulta](https://github.com/juhaj77/tuya-music-sync/releases/latest), ja
+[Quick start](#quick-start) kertoo käyttöönoton vaiheet.
 
 ## Demo videos
 
-Recorded on real hardware: **8 Airam spots**, 4 in the ceiling and 4 along the walls, all
-in **Beat Sync** mode with the **strobe** on, filmed on a **Xiaomi 14T in Pro mode** so the
-camera isn't fighting the lights by auto-adjusting exposure and white balance.
+Recorded on real hardware: **8 Airam spots**, 4 in the ceiling and 4 along the walls, all in
+**Beat Sync** mode with the **strobe** on, filmed on a **Xiaomi 14T in Pro mode** (so the
+camera doesn't fight the lights with auto exposure and white balance).
 
 | Video | Length | Ver | FPS | Base hue | Chase overlay | Group Switch | White pulse |
 |:--|:-:|:-:|:-:|:--|:--|:--|:--|
@@ -101,170 +123,45 @@ camera isn't fighting the lights by auto-adjusting exposure and white balance.
 | [**Chase**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.14/chase_GitHub.mp4) | 30 s | 1.14 | 60 | step<br>fixed | forward | off | rotation<br>backward |
 | [**Mix - hue from pitch**](https://github.com/juhaj77/tuya-music-sync/releases/download/v1.16/Mix_hue_from_pitch.mp4) | 33 s | 1.16 | 60 | step<br>from **pitch** | on, short switch fade<br>relative, fixed step | complementary<br>active group only | rotation |
 
-- **Deep Purple** - a change from the more mainstream electronic music of the other clips
-  (Amon Tobin), and the lights go along with the style surprisingly well. The louder and
-  brighter the sound, the further Chase turns the highlighted lamps away from the room's
-  base color (34-151 degrees). **Fade across groups** is on only in this video, so the
-  group color spreads over all the groups in steps instead of showing on the active group only.
-- **Mix - hue relative** - with Chase in `hue_shift_relative` mode each lamp's own hue is
-  only nudged, so Group Switch's groups hold together much better than with the other
-  chase color modes. The phone camera separates the colors rather poorly, but the row of
-  lamps on the back wall shows the hue variation moving from left to right.
+- **Deep Purple** - Amon Tobin, a change from the electronic music of the other clips, and
+  the lights go along with it surprisingly well. The louder and brighter the sound, the
+  further Chase turns the highlighted lamps away from the room's base colour (34-151
+  degrees). Only this video has **Fade across groups** on.
+- **Mix - hue relative** - with Chase in `hue_shift_relative` each lamp's own hue is only
+  nudged, so Group Switch's groups hold together much better than with the other Chase
+  colour modes. The back wall's row of lamps shows the hue variation moving left to right.
 - **Mix - hue from pitch** - each beat the base hue moves on by a step set by the note that
-  stands out: a small step when it sits close to the song's key note, a big jump on a note
-  with more tension. In 33 seconds the room goes around the whole color circle.
+  stands out: small near the song's key note, a big jump on a note with more tension. In
+  33 seconds the room goes round the whole colour circle.
 
-(The videos are hosted as GitHub Release assets - GitHub's in-repo file viewer refuses
-to preview video files past a few MB, so they aren't committed directly into the repo.)
-
-**At a glance:**
-
-- **100% local control** - WASAPI loopback audio (or a real microphone, if you want
-  to test with room sound) + local Tuya LAN protocol, no cloud round-trip and no
-  companion app needed once set up.
-- **Six color-mapping modes**: **Beat Sync** - the main mode, with the shared beat clock,
-  the pulse sequencer, optional **dark pulses** and **white pulses** - then Beat Sync
-  White, Peak Flash, RGB Frequency and HSV Music, plus a Custom mode for arbitrary
-  frequency ranges.
-- **Every lamp's place in the effects**, right in the lamp list: its Chase order, Chase
-  dwell, Effect group and true-white brightness.
-- **Info panel** along the bottom of the window: tempo, beat, phrase, loudness, note and
-  key - and, while the pulse sequencer runs, a live timeline of its pulses.
-- **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
-  width/speed/falloff curve, optionally beat- or peak-synced) layered on top of any
-  mode - on in a fresh install; needs each lamp's Chase order (see above).
-- **Group Switch overlay** - a discrete alternative to Chase: lamps are grouped
-  (independently of Chase's own grouping) and exactly one group is fully "active" at a
-  time with a hard, instant switch instead of a gradient - useful when you want a clean
-  on/off alternation between lamp groups rather than a traveling highlight. Can run at
-  the same time as Chase.
-- **Ambient Scenes** - synchronized, PC-driven looping animations (color cycle,
-  breathing, color-temperature breathing) that solve multi-lamp sync properly instead
-  of power-cycling smart plugs.
-- **Standalone manual control app** (`manual_control.py`) for audio-free color/white/
-  chase/ambient control, sharing one config file with the music visualizer.
-- **Works with any number of lamps** - nothing in the app hardcodes a specific count.
-- **Crash-resilient persistence** - autosaves every 20s, restores your exact last state
-  (including the manual app's last-picked color) on restart.
-- **Keeps the PC awake** while either app is open, without blocking manual sleep.
-
-Both apps (`main.py` and `manual_control.py`) prevent the PC from **automatically**
-going to sleep while they're open (`airam_lights/keep_awake.py`: Windows'
-`SetThreadExecutionState` API, or on Linux a `systemd-inhibit` sleep lock) - a full system sleep pauses every process at the
-hardware level (CPU, network, everything), so there is no way to "keep working through"
-one; the only real fix is asking Windows not to idle-sleep in the first place. The
-display can still turn off / the session can still lock (that doesn't stop the app),
-and this only blocks *automatic, idle-timeout* sleep - manually choosing Sleep from the
-Start menu, or a laptop's own lid-close power-plan action, still works as normal. If a
-laptop's Wi-Fi adapter still seems to drop out from under an otherwise-awake PC, check
-Device Manager -> your Wi-Fi adapter -> Power Management -> "Allow the computer to turn
-off this device to save power" (uncheck it) - that's a separate, adapter-level setting
-this API does not control.
-
-## Suomeksi
-
-**Airam Music Lights** on Windows-sovellus (toimii lähdekoodista ajettuna myös
-Linuxilla), joka synkronoi **Airam SmartHome
--älylamput** (Smart PAR16 RGB GU10 -kohdevalot) musiikkiin reaaliajassa: valot
-vaihtavat väriä ja välähtävät musiikin tahdissa. Sovellus ohjaa lamppuja suoraan
-kotiverkon kautta ilman pilvipalvelua, ja se ohjaa kaikkia lamppuja yhtä aikaa ja
-synkronoidusti, toisin kuin Airam SmartHome -sovelluksen oma musiikkitila, joka toimii
-vain yhdellä lampulla kerrallaan. Mukana on myös erillinen sovellus valojen käsiohjaukseen
-(värit, valkoinen valo, kiertävä valo, tunnelmavalaistus) ilman musiikkia. Muiden
-Tuya-pohjaisten RGB-lamppujen (esim. Airamin E27-älylamput) pitäisi toimia myös, mutta
-niitä ei ole vielä testattu. Valmis Windows-versio löytyy
-[Releases-sivulta](https://github.com/juhaj77/tuya-music-sync/releases/latest).
+(The videos are Release assets: GitHub's file viewer won't preview videos over a few MB.)
 
 ---
 
-## 1. How this works (architecture)
+# Getting started
 
-```
- WASAPI loopback -> FFT / DSP -> Color Mapping -> Overlays / Sequencer -> Lamp Manager -> N Airam bulbs (LAN)
-   (audio/)         (dsp/)        (color/)          (engine/)          (lamps/)
-```
+## Installation
 
-- **audio/** - WASAPI loopback capture ("what you hear"), decoupled ring buffer.
-- **dsp/** - windowed FFT, configurable frequency-band energy extraction, spectral
-  centroid/contrast, attack/release smoothing. Pure numpy, no UI/network dependency.
-- **color/** - RGB / HSV / Beat Sync / Peak Flash color mapping. Pure functions on floats, no
-  dependency on audio or Tuya code, so it can be (and is) unit-tested in isolation.
-- **lamps/** - local Tuya (tinytuya) device control, LAN discovery, one worker thread
-  per lamp with independent rate limiting and change-thresholding.
-- **engine/** - ties the above together via two independently-configurable update
-  loops (audio analysis rate vs. visual/smoothing rate); lamp command rate is enforced
-  separately again, inside the lamp manager.
-- **effects/** - the Chase/rotating-light overlay (`chase.py`), shared between the music
-  visualizer and the standalone manual control app (see below) so it only exists once.
-- **config/** - JSON configuration (devices, groups, presets, DSP/color settings).
-- **diagnostics/** - logging + runtime rate/latency metrics, shown in the Diagnostics tab.
-- **ui/** - PySide6 desktop UI (5 tabs: Visualizer, Devices & Setup, Color Mapping,
-  Chase & Group Switch, Diagnostics - and the info panel under them).
-
-The DSP/color engine has **zero import dependency** on the lamp/Tuya layer, and vice
-versa - you can develop/test the visualization math with `pytest` alone, no bulbs
-required (see `tests/`).
-
----
-
-## 2. Local control of the Airam bulbs - what's confirmed vs. assumed
-
-See `DEVICE_NOTES.md` for the full breakdown, including the exact confirmed datapoint
-(DP) table. Short version:
-
-- **Confirmed end-to-end against real hardware**: local LAN control (no cloud
-  round-trip) works, including full RGB color/brightness/power control, verified via
-  `tools/phase1_test.py`'s red/green/blue/white cycle on a physical bulb.
-- Airam SmartHome bulbs are Wi-Fi-only, no hub - this matches the product page.
-- They are built on the **Tuya IoT platform** (product ID `cawpuqfm0ed5ykfj`), using DP
-  layout "Type B" (`switch_led`=20, `work_mode`=21, `bright_value_v2`=22,
-  `temp_value_v2`=23, `colour_data_v2`=24) - confirmed directly from the bulbs' own
-  local `status()` response, not assumed.
-- Tuya devices of this class expose a **local LAN protocol** (TCP port 6668,
-  encrypted with a per-device `local_key`). This app uses
-  [`tinytuya`](https://github.com/jasonacox/tinytuya), a mature open-source
-  implementation of that protocol, instead of inventing anything.
-- **No datapoint IDs are hardcoded anywhere in this codebase.** Color/brightness/power
-  control goes through `tinytuya.BulbDevice`, which reads each bulb's own `status()`
-  response and adapts to whatever layout it actually reports. The diagnostics tooling
-  (Phase 1 script and the app's Diagnostics tab) always shows you the *real* raw
-  datapoints your bulbs return.
-- The Tuya cloud API is used for **exactly one thing, once, offline from the
-  visualizer**: extracting each bulb's `local_key` during setup, because Tuya does not
-  broadcast that key on the LAN for security reasons. All runtime traffic (audio
-  analysis -> color -> lamp commands) is 100% local LAN, no cloud round-trip.
-- **Still not independently verified against real hardware**: the WHITE work_mode
-  control path used by Beat Sync White, White Balance, and White Chase
-  (`LampDevice.set_white()`). The DP layout it uses is the same confirmed table above,
-  but the specific `tinytuya` calls have not yet been run against a physical bulb - test
-  this yourself via the manual app's White Balance tab before relying on it. RGB color
-  control is fully confirmed and is what every other mode uses.
-
----
-
-## 3. Installation
-
-### Option A: prebuilt Windows build (no Python needed)
+### Windows: ready-made build (no Python needed)
 
 Download the latest `AiramMusicLights-*-windows-x64.zip` from the
-[Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest), unzip
-it anywhere, and run the exes inside the folder:
+[Releases page](https://github.com/juhaj77/tuya-music-sync/releases/latest), unzip it
+anywhere and run the exes inside the folder - keep them together, they share the
+libraries next to them:
 
-- `AiramMusicLights.exe` - the music visualizer (same as `python main.py`)
-- `AiramManualControl.exe` - the manual control app (same as `python manual_control.py`)
-- `AiramSetupWizard.exe` - the one-time local_key setup (same as
-  `python tools\setup_wizard.py`, see [4.2](#42-obtain-each-bulbs-local_key-one-time-via-the-tuya-cloud))
+| Exe | What it is | From source |
+|---|---|---|
+| `AiramMusicLights.exe` | the music app | `python main.py` |
+| `AiramManualControl.exe` | the [manual control app](#manual-control-app) | `python manual_control.py` |
+| `AiramSetupWizard.exe` | the one-time [local key setup](#getting-the-lamps-local-keys) | `python tools\setup_wizard.py` |
 
-Keep the exes in the unzipped folder - they share the libraries next to them. Windows
-SmartScreen may warn about an unrecognized app since the build isn't code-signed;
-choose **More info -> Run anyway**. The wizard writes tinytuya's `devices.json` (which
-contains your local keys) into the folder you run it from - delete it afterwards if you
-don't want the keys lying around.
+The build isn't code-signed, so SmartScreen may warn about an unrecognized app: **More
+info -> Run anyway**. Updating: unzip the new version over the old one or next to it - your
+settings live elsewhere ([Settings and log files](#settings-and-log-files)) and are kept.
 
-### Option B: run from source (Windows)
+### Windows: from source
 
-Requires **Python 3.10+** on Windows (tested with recent CPython 3.x; PySide6 and
-PyAudioWPatch both ship Windows wheels).
+Requires **Python 3.10+**.
 
 ```powershell
 git clone https://github.com/juhaj77/tuya-music-sync.git
@@ -272,26 +169,16 @@ cd tuya-music-sync
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+python main.py
 ```
 
-For running the automated tests too:
+To build the exes yourself (output in `dist\AiramMusicLights\`):
+`pip install pyinstaller`, then `pyinstaller airam_lights.spec`.
 
-```powershell
-pip install -r requirements-dev.txt
-```
+### Linux: from source
 
-To build the Option A exes yourself (output goes to `dist\AiramMusicLights\`):
-
-```powershell
-pip install pyinstaller
-pyinstaller airam_lights.spec
-```
-
-### Option C: run from source (Linux)
-
-Requires **Python 3.10+** and a desktop with **PulseAudio**, or **PipeWire** with its
-PulseAudio server (`pipewire-pulse`) - which is what current Ubuntu, Fedora, Debian and
-similar distributions run out of the box. There is no prebuilt Linux build.
+Requires **Python 3.10+** and **PulseAudio**, or **PipeWire** with `pipewire-pulse` (what
+current Ubuntu, Fedora and Debian run out of the box). There is no ready-made Linux build.
 
 ```bash
 git clone https://github.com/juhaj77/tuya-music-sync.git
@@ -302,132 +189,96 @@ pip install -r requirements.txt
 python main.py
 ```
 
-The same `requirements.txt` works on both systems: pip installs the audio library that
-fits the operating system (PyAudioWPatch on Windows, `soundcard` on Linux), and the app
-picks the matching one at runtime (`airam_lights/audio/devices.py`, `audio_backend()`).
-Everything else - lamp control, the effects, the UI - is the same code on both.
+The same `requirements.txt` serves both systems (pip picks PyAudioWPatch on Windows,
+`soundcard` on Linux). What differs on Linux:
 
-What differs on Linux:
+- **Audio:** *Loopback* lists each output's **monitor** source ("Monitor of ..."), by default
+  the one of your default output; *Microphone* lists the recording devices.
+- **Settings and logs** are in `~/.config/AiramMusicLights/` (or under `$XDG_CONFIG_HOME`)
+  wherever this README says `%APPDATA%\AiramMusicLights\`.
+- **Commands** here are written for PowerShell: use `python3` and forward slashes.
+- **Keep-awake** uses a `systemd-inhibit` lock; without systemd-logind the PC may still
+  auto-suspend.
 
-- **Audio source.** *Loopback* lists each output's **monitor** source ("Monitor of
-  ..."), the default being the monitor of your default output - the Linux counterpart
-  of WASAPI loopback. *Microphone* lists the real recording devices.
-- **Settings and logs** live in `~/.config/AiramMusicLights/` (or under
-  `$XDG_CONFIG_HOME`) instead of `%APPDATA%\AiramMusicLights\` - wherever this README
-  mentions the `%APPDATA%` path.
-- **Commands** in this README are written for PowerShell; on Linux use `python3` and
-  forward slashes (`python3 tools/setup_wizard.py`).
-- **Keep-awake** uses a `systemd-inhibit` sleep lock; without systemd-logind the app
-  still runs, it just can't stop the PC from auto-suspending.
+Linux support is newer: audio capture is verified against a PulseAudio server, but not yet
+on PipeWire or real sound hardware, and keep-awake is untested on a real desktop. Please
+report what you find.
 
-Linux support is newer and less proven than the Windows side: audio capture has been
-verified against a PulseAudio server (monitor capture, device selection, latency around
-10-20 ms), but not yet on PipeWire or with real sound hardware, and the keep-awake lock
-is untested on a real desktop. If something doesn't work, please open an issue.
+## Getting the lamps' local keys
 
----
+The lamps only accept local commands encrypted with their own `local_key`, which Tuya
+never sends over the LAN. It's fetched once from the Tuya cloud; after that everything is
+local.
 
-## 4. Phase 1: prove local control works on ONE bulb (do this first)
+> **Pair the lamps with the Smart Life app** (Tuya's own), not Airam SmartHome - an Airam
+> SmartHome account can't be linked to the Tuya developer platform. Remove the lamps from
+> the Airam app first if they're paired there.
 
-Don't skip this - it's the whole point of "don't invent undocumented datapoints."
+1. Create an account at <https://iot.tuya.com> and a **Cloud Development** project (a
+   region near you, e.g. Central Europe).
+2. In the project, subscribe to the **IoT Core** and **Authorization** APIs (Service API -
+   both free).
+3. **Cloud -> \[your project\] -> Devices -> Link Tuya App Account**: scan the QR code with
+   the **Smart Life** app (scan icon on the Me / Home tab) using the account the lamps are
+   paired to. The lamps should now be listed in the project.
+4. Run `AiramSetupWizard.exe` (or `python tools\setup_wizard.py`). It asks for the
+   **Access ID** and **Access Secret** (the project's Overview page), the **data center
+   region** and your account UID (next to the linked app account).
+5. The wizard downloads every lamp's key and imports the lamps into the app's settings
+   (`%APPDATA%\AiramMusicLights\config.json`) without printing the keys. It also leaves
+   tinytuya's `devices.json` (with the keys) in the folder you ran it from - delete it if
+   you don't want it lying around; keep `tinytuya.json`, which lets the app
+   [fetch a changed key by itself](#a-lamp-wont-respond).
 
-### 4.1 Find your bulb's IP / device ID on the LAN
+Already have the keys from other tools (e.g. Home Assistant's Tuya Local)? Add the lamps
+by hand: Devices & Setup -> **Add Device Manually** (device ID, IP, local key, version).
+**Scan Network** there, or `python tools\scan_devices.py`, finds the lamps' IPs and IDs.
+Snags met during development (the "use the correct app" QR block, "data center is
+suspended") and their workarounds are in `DEVICE_NOTES.md`.
 
-```powershell
-python tools\scan_devices.py
-```
+## Testing one lamp
 
-This broadcasts a UDP discovery packet and lists every Tuya device that answers, with
-IP, device ID, and protocol version. It does **not** give you the `local_key` - Tuya
-never broadcasts that on the LAN.
-
-### 4.2 Obtain each bulb's `local_key` (one-time, via the Tuya cloud)
-
-```powershell
-python tools\setup_wizard.py
-```
-
-This launches `tinytuya`'s interactive setup wizard, which needs a **free** Tuya IoT
-Platform developer account linked to a **Smart Life** app account:
-
-> **Important:** the bulbs must be paired with the **Smart Life** app (Tuya's own
-> app), not the Airam SmartHome app. Linking the Airam SmartHome app account to the
-> Tuya IoT Platform does not work, so the bulbs can't be added to the Cloud
-> Development project that way. Install Smart Life, create an account, and pair the
-> bulbs there (remove them from the Airam SmartHome app first if they are already
-> paired to it).
-
-1. Create an account at <https://iot.tuya.com> and create a **Cloud Development**
-   project (any region close to Finland, e.g. Western Europe / Central Europe).
-2. In that project, subscribe to the **IoT Core** and **Authorization** APIs (under
-   "Service API" - both are free-tier).
-3. Go to **Cloud -> \[your project\] -> Devices -> Link Tuya App Account**, and scan
-   the QR code shown there **using the Smart Life app** (the scan icon in the top
-   corner of the Me / Home tab) with the account the bulbs are paired to. Scanning
-   with the Airam SmartHome app does not work. Your bulbs should now be listed as
-   linked devices in the Tuya IoT Platform.
-4. Run the wizard above; it asks for your **Access ID**, **Access Secret** (both shown
-   on your Cloud project's Overview page), the **data center region**, and your
-   account UID (shown next to the linked app account). It then downloads a
-   `devices.json` with every device's `local_key` and writes it locally.
-5. `tools\setup_wizard.py` automatically imports that into the app's own config file
-   (`%APPDATA%\AiramMusicLights\config.json`) and never prints the keys to the
-   console.
-
-If this linking step doesn't work for your Airam account for any reason, you can also
-obtain a bulb's `local_key` through other local-Tuya tooling you may already have used
-(e.g. Home Assistant's Tuya Local integration config flow) and enter it manually in the
-app's **Devices** tab instead - the app never requires the wizard specifically, only a
-valid `(device_id, ip, local_key, version)` tuple per bulb.
-
-### 4.3 Test ONE bulb manually
+Optional, from source: proves local control works before anything else.
 
 ```powershell
 python tools\phase1_test.py --device "Lamp 1"
-```
-
-or, without touching the config file at all:
-
-```powershell
+# or without the config file:
 python tools\phase1_test.py --ip 192.168.1.50 --id eb3f... --key 0123456789abcdef
 ```
 
-This prints:
-
-- online/offline
-- the **raw datapoints** your bulb actually returned (not an assumption)
-- detected bulb type (A/B/C - see `DEVICE_NOTES.md`)
-- measured command latency
-- then cycles the bulb red -> green -> blue -> white so you can visually confirm local
-  RGB control genuinely works.
-
-Once this passes, update the confirmation table in `DEVICE_NOTES.md` and move on.
+It prints whether the lamp is online, the **raw datapoints** it actually returned, the
+detected bulb type (see `DEVICE_NOTES.md`) and the command latency, then cycles the lamp
+red -> green -> blue -> white.
 
 ---
 
-## 5. Running the full application
+# User manual
 
-```powershell
-python main.py
-```
+## The window
 
-The window is dark throughout: settings sit in cards, and the features are **collapsible
-sections** - a header row with the feature's name and, for anything that can be switched
-on or off, its switch; click the name (or the chevron) to open that feature's settings,
-and only that one. Which sections you left open is remembered between runs
-(`ui.ini` next to `config.json`). A section whose feature can't run right now says why in
-its header, in orange, even when closed.
+Five tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Chase & Group
+Switch**, **Diagnostics** - and the [info panel](#info-panel) under them, which stays put on
+every tab.
 
-### Visualizer tab
-Pick your audio **Source**: loopback (default - your current default playback
-device, no microphone involved; WASAPI loopback on Windows, the output's monitor on
-Linux) or **Microphone** (a real recording device, for testing
-how the lights react to actual room/ambient sound - has its own sensitivity/gain
-control, since mics are usually much quieter than a loopback tap). Watch the level
-meter and spectrum to confirm audio capture works, choose a mode, tweak the
-**Quick Controls**, and press **Start Music Visualization**.
+- **Sections.** Features are collapsible sections: a header with the feature's name and,
+  if it can be switched on or off, its switch. Click the name (or the chevron) to open it.
+  Every section starts closed; which ones you leave open is remembered.
+- **Why is this setting greyed out?** A setting that does nothing in the current
+  combination is greyed out, with the reason at the start of its tooltip - e.g. Beat
+  Sync's own beat detection while it follows the shared clock. A section whose feature
+  can't run right now says why in its header, in orange, even when closed.
+- **Tooltips everywhere** - hover any setting for what it does.
 
-**Quick Controls** are Brightness, Saturation and *Beat clock sensitivity* (every mode)
+## Visualizer tab
+
+1. **Source** - *Loopback* (what the PC plays, the default) or *Microphone* (room sound;
+   it has its own gain slider, since microphones are much quieter).
+2. **Level** and **Spectrum** show the sound coming in.
+3. **Mode** - the colour mode ([Color Mapping tab](#color-mapping-tab) describes each).
+4. **Quick Controls** - the settings worth reaching for first.
+5. **Start Music Visualization**.
+
+**Quick Controls** are *Brightness*, *Saturation* and *Beat clock sensitivity* (every mode),
 plus a few of the selected mode's own settings, which change with the mode:
 
 | Mode | Quick settings |
@@ -438,121 +289,523 @@ plus a few of the selected mode's own settings, which change with the mode:
 | RGB Frequency / HSV Music / Custom | Level sensitivity (gain), Attack, Release |
 
 Each is the same setting as in the Color Mapping tab - change it in either place and the
-other follows. **More ... settings in Color Mapping** opens that mode's page.
+other follows. **More ... settings in Color Mapping** opens the mode's page there.
 
-The four sensitivities are different things:
-- **Beat clock sensitivity** - the shared beat clock (Color Mapping -> Rhythm). Beat Sync
-  and Beat Sync White react to it when they follow the shared clock (the default), Chase
-  and Group Switch with speed source *clock*. Greyed out when nothing follows the clock.
-- **Beat detector sensitivity** - Beat Sync's / Beat Sync White's own detector, used only
-  when the mode does *not* follow the shared clock (greyed out otherwise).
-- **Peak sensitivity** - Peak Flash's peak detector; Peak Flash never uses the clock.
-- **Level sensitivity (gain)** - how strongly RGB Frequency, Custom and HSV Music turn
-  the sound level into light; each of the three has its own.
+**Four sensitivities** - they are different things:
 
-*Attack*/*Release* (the level smoothing) are only used by RGB Frequency, Custom and HSV
-Music, and are one setting shared by the three.
+| Setting | What it sets | Used when |
+|---|---|---|
+| **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Color Mapping -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
+| **Beat detector sensitivity** | Beat Sync's / Beat Sync White's own beat detector | only when that mode does *not* follow the clock (greyed out otherwise) |
+| **Peak sensitivity** | Peak Flash's peak detector | Peak Flash (it never uses the clock) |
+| **Level sensitivity (gain)** | how strongly the sound level turns into light | RGB Frequency, Custom, HSV Music - each its own |
 
-### Devices & Setup tab
-Add lamps manually (or via **Scan Network** for IP/ID, then fill in the key), test
-connection/RGB/power per device, rename them, select exactly which ones participate
-in visualization, and save/apply named groups (e.g. "All Lamps", "Ceiling", "Left side").
-The lamp list and chase rotators scale to however many devices you've added - there is
-no fixed lamp count anywhere in the app.
+For all of them: **higher = fewer, clearer hits**, except the gain, where higher = brighter.
 
-Each row also sets the lamp's **place in the effects** (hover a column title for the
-details):
+## Devices & Setup tab
 
-- **Chase order** - its position in the Chase overlay's rotation (and the sequencer's
-  color sweep and Chase-order white walk), 0-based; lamps with the same number act as one
-  position. Off = not in the chase.
-- **Chase dwell x** - how long the Chase highlight lingers at this position (1.0 =
-  default; lower it for a position with several lamps).
-- **Effect group** - its group for Group Switch and the sequencer's white walk. Off = in
-  no group.
-- **True white x** - multiplies the true-white flash brightness for this lamp (white
-  pulses, sequencer flashes and strobes): 0.5 = half.
+![Devices & Setup tab: eight lamps with their Chase order, Chase dwell, Effect group and True white multiplier](devices_setup.png)
 
-The **Now** swatch shows the colour each lamp was last actually sent, updated many times
-a second - what the lamp shows, not just what the engine wanted (the lamp command rate
-thins that out). True white shows as a pale tint over the colour.
+**The lamp list** - one row per lamp (hover a column title for its details):
 
-**When one lamp won't respond** (but still works in the phone app - which goes through
-the Tuya cloud, not your LAN): the app first rebuilds the connection itself; if that
-doesn't help, it leaves the lamp out of the show, logs the actual reason once, and
-checks it again every 15 s - the rest of the lamps keep playing, and the lamp rejoins
-automatically as soon as it answers. While checking, it also fixes the two causes that
-don't go away on their own:
+| Column | What it is |
+|---|---|
+| ☑ | the lamp takes part in the show (**Select All** / **Clear** below the list) |
+| dot, **Status**, **Latency** | online (green) or not answering (red), and how long its last answer took |
+| **Lamp**, **IP** | name and address (**Edit Selected** to change them) |
+| **Now** | the colour the lamp was last actually sent, updated many times a second - true white shows as a pale tint |
+| **Chase order** | its position in the [Chase](#chase) rotation, 0-based. Lamps with the same number act as one position; *Off* = not in the chase. The sequencer's [color sweep](#color-sweep) and its `chase_order` white walk use the same order. |
+| **Chase dwell x** | how long the Chase highlight lingers at this position (1.0 = even). Lower it for a position with several lamps, which otherwise seems to hold the highlight longer. |
+| **Effect group** | its group for [Group Switch](#group-switch) and the sequencer's white walk - independent of the Chase order. *Off* = in no group. |
+| **True white x** | multiplies this lamp's true-white brightness (white pulses, sequencer flashes, strobes): 0.5 = half. Give a whole group the same value to balance it against the others. |
 
-- **New IP address** (DHCP): it looks for the lamp on the network and updates the IP.
-- **New local key** (the lamp was reset and re-paired in the phone app): it fetches the
-  current key from the Tuya cloud, using the credentials the setup wizard saved in
-  `tinytuya.json`. **Refresh keys from Tuya cloud** in this tab does the same for every
-  lamp on demand.
+In the picture: eight lamps round the room in Chase order 0-7, in three Effect groups; the
+lamps of group 0 have a longer Chase dwell, and some lamps' true white is turned down.
 
-If the error is `Err 914` and the key in the cloud hasn't changed, the lamp's own local
-connection is stuck - switch it off and on at the wall switch; the app picks it up again
-within ~15 s without a restart.
+**Buttons:**
 
-**Lamp transitions: instant vs. faded changes.** The bulbs have two ways to take a color.
-The persistent colour datapoint (DP 24), which earlier builds used, makes the bulb fade
-every change itself over roughly **0.7 s** - measured on video with an Airam PAR16 - so
-at a typical dance tempo (a beat every ~0.4 s) the light never actually arrives before
-the next beat, flashes blur, and white flashes need 4-5 commands (switch work_mode to
-white, brightness, temperature, and back). The real-time control datapoint (DP 28,
-`control_data`) takes a change instantly (within one 30 fps video frame) and lights the
-white LEDs directly with a single command, without switching work_mode. **Lamp
-transitions** (Color Mapping tab, Global box) picks the way:
+- **Add Device Manually**, **Scan Network** (finds IPs and IDs - the key you add yourself),
+  **Edit Selected**, **Remove Selected**.
+- **Test Selected** cycles the selected lamps red -> green -> blue -> white; **Refresh
+  Status** asks every lamp's state again now.
+- **Refresh keys from Tuya cloud** - re-fetches every lamp's local key (after a lamp was
+  reset and re-paired).
+- **Lamp groups** - save the current selection under a name (**Save Current Selection
+  As...**, e.g. "Ceiling") and select it again with **Apply Group**.
 
-- `direct` (default) - DP 28 without fade: crisp flashes, beats and white pulses.
-- `smooth` (experimental) - DP 28, chosen per command: a big change (a beat's flash, a
-  white flash lighting up, the strobe) lands instantly like `direct`, while the small
-  steps of a brightness fade, a hue snap or a hue glide are sent with the bulb's own
-  short fade - so the bulb glides from one step to the next instead of showing every
-  command as a tiny jump. Fades look smoother and a little slower.
-- `gradient` - DP 28 with the bulb's own short fade (~0.25 s) on every change.
-- `legacy` - DP 24 and work_mode switching, as before (~0.7 s fades).
+A lamp that stops answering is handled automatically - see
+[A lamp won't respond](#a-lamp-wont-respond).
 
-With `direct` every command shows as a step, so smooth fades and hue glides
-want a higher **Lamp command rate** (up to 60/s; the color engine computes at least that
-often) - or `smooth`, which lets the bulb fill in between the steps. Colours go out at
-the datapoint's own resolution (hue in degrees, saturation and brightness in 0.1 %
-steps), not rounded through 8-bit RGB. A white flash's brightness really follows *White pulse attack* /
-*release* (it swells in and fades out) instead of the bulb's own fade. The bulbs can
-show colour and white at the same time on DP 28, so a flash is a **crossfade**: the
-colour dims as the white swells and comes back as it fades - the lamp never drops to
-dark around a flash.
+## Color Mapping tab
 
-Only bulbs with the v2 datapoint layout (like the Airam ones) use DP 28; others always
-use `legacy`. If your bulbs stop changing color with `direct`/`gradient`, choose `legacy`.
-Worth knowing: a warm white takes longer to build up than a cool one (~0.5 s), so very
-short warm flashes come out dimmer than cool ones.
+From top to bottom: the **Rhythm** section (the shared beat clock), a page per colour mode,
+the **Global** section and **Presets**.
 
-**When a lamp looks online but ignores the show.** Some bulbs occasionally get into a
-state where they still answer status queries - so they look perfectly online - but
-silently ignore every control command. Colour commands are sent without waiting for an
-acknowledgement (waiting would slow every command down), so nothing fails on the app's
-side either: no error, nothing in the log. The phone app keeps working (through the
-cloud), and only switching the lamp off and on at the wall brings it back. This looks
-like a known weakness of the bulbs' local network handling under a long, dense stream
-of commands; how much the show's command rate contributes isn't settled yet - it has
-happened with and without *Glide hue*.
+### Rhythm - the shared beat clock
 
-The app now watches for it: every status refresh (~4 s) compares what the lamp *reports*
-it's showing with what it was sent. (The bulb never reports colors sent through DP 28,
-so with `direct`/`gradient` transitions the current color is also written to DP 24 once
-every 5 s, and the check compares against those writes.) A lamp that keeps reporting the exact same color
-while the show sends it plenty of different ones is flagged as **not following
-commands**:
+One beat detector that every layer can follow, so the flash, the colour changes, Chase
+and Group Switch move on the same beats instead of each reacting to different hits
+(`dsp/beat_clock.py`).
 
-1. The app logs a warning and rebuilds the connection once.
-2. If that doesn't help, the lamp is left out of the show and shown as offline in the
-   Devices tab with the reason ("...switch the lamp off and on at the wall switch"). It's
-   re-checked every 15 s by sending it a test color and reading back what it shows - once
-   it obeys again (e.g. after the power-cycle), it rejoins the show by itself.
+- **Beat Sync (and Beat Sync White) follow the shared clock** - on in a fresh install. Their
+  own beat detection settings are then unused (greyed out), and their pulses can be
+  triggered on accents or bar starts.
+- **Beat detection band** - keep it on the kick drum (40-150 Hz): the cleanest beat.
+- **Beat clock sensitivity** - how far above the recent average a kick must rise to count.
+  Around 1.08-1.15 suits most music; once the tempo is locked, missed kicks are filled in
+  anyway. *Min interval* and *Min energy floor* fine-tune it.
+- **Lock to tempo** - once a steady tempo is found, only kicks near the expected beat count
+  (off-beat hi-hats, snares and vocals are ignored) and a too-quiet kick is filled in.
+- **Lead time** - once locked, each beat is sent this much early to cancel the Wi-Fi and
+  bulb delay (~100-150 ms). Raise it if flashes look late, lower it if early.
+- **Beats per bar** (4; 3 for waltz time) - the bar start lands on the beat that usually hits
+  hardest. **Accent share** - what share of beats count as accents (0.25 = the hardest
+  quarter).
+- **Keep going (bars)** - when the beat gets lost while the music plays on (a breakdown),
+  the lights keep moving on the last tempo for up to this many bars.
+- **No beat? Follow the notes** - for music without a steady kick (classical, acoustic,
+  ambient): the clock follows the tempo of the notes, or failing that a free pace that
+  speeds up as the music swells. A clear beat takes over again by itself.
 
-Each time, the log (`%APPDATA%\AiramMusicLights\logs\app.log`; search for `not following`
-or `stuck-lamp report`) records what that lamp had been put through, for example:
+Rhythm choices elsewhere (*every 2 beats*, *every bar*, phrases of 1/2/4/8/16 bars) only
+offer values that line up with the bar, so nothing drifts against the music.
+
+### Beat Sync
+
+The main mode: on every beat the lamps jump to a fresh, fully saturated colour at full
+brightness, then fade toward a dim *Sustain brightness* until the next beat - a
+percussive flash-and-decay that makes the rhythm obvious. Its page has these sections:
+
+**Beat detection** - Beat Sync's own detector (band, *Beat detector sensitivity*, *Min
+interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shared clock.
+
+**Colour on the beat** - how each beat's new colour is picked (*Hue mode*):
+
+- `random` - a new hue every beat, at least *Min hue jump* away from the last one.
+- `step` - moves on by a fixed angle (*Hue step*; 137.5° is the golden angle: well-spread
+  colours that don't repeat for a long time). With **Hue step from** anything but `fixed`,
+  the music sets each step between *Step min* and *Step max*:
+  - `intensity` - small steps in quiet parts, big contrasting jumps in a chorus;
+  - `brightness` - bass-heavy vs bright sound;
+  - `intensity_brightness` - both;
+  - `pitch` - the tension of the note that stands out in the song's key; it glides over
+    to `intensity_brightness` when no note stands out.
+- `spectrum` - the music picks the colour, spread over HSV Music's hue range. *Spectrum
+  from* `pitch` (default) follows the standing-out note on the circle of fifths, so related
+  notes and chords get neighbouring colours; during drums, noise or a droning note it
+  glides over to `intensity_brightness`. Every source is measured against the song's own
+  recent range, so all music uses the whole hue range. The line under *Hue mode* shows the
+  note, the key and how much of the colour comes from the pitch.
+
+**Change hue** (every beat, every 2 beats, every bar...) keeps a colour for several beats -
+every beat still flashes. Then the flash itself: *Saturation*, *Flash brightness*,
+*Sustain brightness* (the level between beats), *Hue snap speed* (how fast the colour
+changes to the new hue - low = a snap, high = a fade), *Brightness attack* and *Brightness
+decay* (how slowly the flash fades back to Sustain brightness).
+
+**Between beats** - what moves after each flash, either, both or neither:
+
+- **Fade brightness** (on) - the flash fades toward *Sustain brightness* over *Brightness
+  decay* (both in the section above). Off: the brightness stays at *Flash brightness* (on RGB+CCT bulbs the coloured
+  LEDs are much dimmer than the white ones, so this keeps the colour at full strength).
+- **Glide hue** - after each beat the colour travels *Glide distance* degrees toward the
+  next colour, and the next beat lands on it. *Glide timing* `beat` moves evenly through
+  the beat (the colour wheel turns with the tempo); `decay` follows the brightness decay -
+  a quick sweep right after the hit. A distance about the Hue step arrives exactly at the
+  next colour; 360 is a full rainbow every beat. Gliding sends commands continuously,
+  capped by *Lamp command rate*.
+
+**Dark pulses** (on) - now and then a beat first dips toward black (*depth*, *duration*,
+*attack*, *release*) before its flash: a rhythm-synced breath. The app can't see a beat
+coming, so the dip starts on the beat and the flash comes after it. *Probability* is the
+chance per beat; **Dark pulse on** `random` (any beat), `accent` (the hardest hits) or
+`downbeat` (bar starts) - the latter two need the shared clock.
+
+**White pulses** (on) - a beat's flash also gets a short **true-white** flash: the bulb's
+own white LEDs, never mixed from RGB. With [Lamp transitions](#global-settings) `direct` or
+`smooth` the colour and white **crossfade** (the colour dims as the white swells and comes
+back as it fades), and the white's brightness really follows *attack*, *duration* and
+*release* along the *White release curve*. Settings:
+
+- *White pulse probability*, **White pulse on** - as for dark pulses (with the
+  [pulse sequencer](#pulse-sequencer) on, the sequencer places the flashes instead and
+  these two are unused).
+- *White pulse brightness*, and per lamp the *True white x* column.
+- **Warm/cool** - how each flash's colour temperature is picked: `random` (by *White pulse
+  cool ratio*, the chance of cool), `alternate` (cool, warm, cool...), `bar` (the downbeat
+  coolest, flashes between beats warmest), `loudness` (warm when quiet, cool when loud) or
+  `phrase` (cooling toward the phrase's end). `bar` and `phrase` need the shared clock.
+- **Hybrid warm/cool** - the chance a flash glides its temperature from one end to the
+  other instead (cool to warm when Warm/cool picked cool, warm to cool when warm). The
+  glide follows the flash's **light**, not the clock: halfway through its light, halfway
+  through the change - so the change happens while the flash is bright. (Light = the area
+  under the brightness curve: attack/2 + duration + release x 1/2 for linear and
+  ease_in_out, 2/3 for ease_in, 1/3 for ease_out.) A flash strobe keeps one temperature.
+- **True white lamps** - which lamps flash: `all`, the lamps under the `chase` highlight,
+  the active Group Switch `group`, or `rotate` - its own walk one lamp on per flash through
+  the Chase order. **Rotating** sets how many lamps flash at once (1, 2 opposite, 3/4 evenly
+  spaced), for the sequencer's walk too.
+
+A safety ceiling guarantees the lamps a colour window at least every 1.5 s of continuous
+white, so a lamp can never look stuck in white. Warm white builds up slower than cool
+(~0.5 s), so very short warm flashes come out dimmer.
+
+### Pulse sequencer
+
+On in a fresh install; needs the shared beat clock. Instead of a probability roll on every
+beat, it places the white and dark pulses the way a lighting operator or a drummer would,
+on a 16th-note grid (`effects/pulse_sequencer.py`). Until the clock has locked, Beat Sync's
+per-beat pulse settings apply.
+
+- **White pattern** - which 16ths flash: downbeats, every beat, off-beats, a 3-3-2
+  syncopation, a gallop, straight 16ths - or `auto`, sparse when quiet and busier as it gets
+  louder. *White density* is the chance each step flashes.
+- **Group walk** - each flash goes to the next lamp group, so the white travels round the
+  room: `forward`, `backward` (e.g. against the Group Switch colours), `pingpong`, `random`
+  or `all`. **Walk through** - the Effect groups (`groups`) or the Chase order lamp by lamp
+  (`chase_order`). *Double chance* sometimes repeats a flash in the same group an 8th later.
+- **Thinning** - calming the flashes the way a drummer would:
+  - *Accent focus* drops the light positions first (16ths, then the "ands", then beats 2
+    and 4, then 3 - the downbeat stays);
+  - *Phrase build* starts each phrase sparse and fills it in toward its end;
+  - *Repeat the groove* decides once per phrase which steps flash and repeats it in every
+    bar, so the eye can follow it (off: every step rolled anew).
+- **Dark pattern** - a breath before the downbeat (`before_downbeat`), only before a new
+  phrase, before the backbeats too, or dark 16ths in fills (`stutter`), with its own
+  density and length.
+- **Phrases** (8 bars by default) - *Fills* (denser flashes at a phrase's end), *Phrase
+  accents* (a dark breath, then every lamp flashes on the new phrase) and *Follow drops* (a
+  quiet-to-loud jump starts a new phrase right there).
+- **Pulse dynamics** - the white pulse settings are the baseline and each flash is shaped
+  by where it falls: the downbeat long and bright, 16ths short and crisp, fills snappier
+  toward the phrase start, quiet parts softer. *Dynamics amount* 0 = all identical.
+- **White release curve** (White pulses section) - the fade-out's shape: `linear`,
+  `ease_in` (lingers, then drops), `ease_out` (drops fast, long soft tail), `ease_in_out`
+  (S-curve), or `dynamic` - picked per flash like an instrument decays (`ease_in` on heavy
+  beats, `ease_out` on light ones and fills, `ease_in_out` at the phrase start and in quiet
+  parts).
+
+The *downbeat* is placed on the beat of the bar that usually hits hardest, so after a few
+bars it lines up with the real bar start. The sequencer has three optional extras:
+
+#### Strobe
+
+Now and then a short burst of fast cool-white flashes on every lamp at once - a roll into
+the next phrase or bar, on top of the show (the colours and other pulses keep running
+underneath). It fills the end of a bar and stops at the bar line, so the downbeat lands
+clean. Needs *Lamp transitions* `direct` or `smooth`.
+
+- **Strobe placement** (rarest first) - `phrase` (only into a new phrase), `half_phrase`
+  (also into the phrase's second half), `bars` (any bar), `half_bars` (also mid-bar).
+- **Strobe from loudness** - only when the music is at least this loud (`calm` = always,
+  `groove`, `high`, `peak`); **Strobe chance** and **Strobe min gap** (bars) keep it occasional.
+- **Strobe length** - half a beat to 4 beats.
+- **Strobe max rate** - the rate follows the tempo: the fastest subdivision of the beat
+  under this ceiling (e.g. 8.5/s at 128 BPM). A flash takes two commands, so the *Lamp
+  command rate* limits it too (20/s allows 10 flashes/s).
+- **Strobe on-time** (share of each flash the white is on), **Strobe brightness**, and
+  **Strobe brightness wave** - `off` (all equal), `linear` or `bezier` (the burst swells from
+  dark to full in the middle and back).
+- **Test strobe now** plays one burst on the selected lamps right away.
+
+> Flashing light at these rates can trigger seizures in people with photosensitive
+> epilepsy - the usual recommendation for venues is at most 4 flashes per second.
+
+#### Flash strobe
+
+Now and then one of the walk's white flashes is played as a short **strobe on just that
+group** - a glitch along the way as the white travels round the room (with several
+rotators, only the walk's own group strobes). Placement `bar_end` (the bar's last beat, a
+roll into the next bar) or `beats` (any beat but the downbeat); loudness, chance and a
+minimum gap keep it occasional.
+
+It lasts as long as the white flash it replaces (attack + duration + release, never past
+the bar line), and its flashes **follow that white flash's brightness curve** - times
+*Flash strobe brightness* - so it blends in with the white pulses. The rate and on-time
+are the strobe's; a flash too short for two strobe flashes stays plain. The all-lamps
+strobe always wins: none starts once it's announced, and one running is cut short when it
+begins. Needs *Lamp transitions* `direct` or `smooth`.
+
+#### Color sweep
+
+Now and then a **colour of its own** runs once round the lamps in **Chase order**, fast, on
+top of the show. It uses only its own settings - the Chase overlay can be off - and works
+with any lamp transitions.
+
+- **Sweep colour** - `custom` (your hue) or `dynamic`: each sweep one of the brightest
+  colours the bulbs make (red, yellow, green, cyan, blue, magenta), far from what the lamps
+  show at that moment and never the previous sweep's. Then saturation and brightness.
+- **Sweep length** - half a beat to 4 beats for the whole round.
+- **Rotators** - how many run at once, evenly spaced (every lamp is still lit once per
+  sweep). **Width** - how many neighbouring positions are lit at once; a band of 2-3 reads
+  more clearly than one spot. **Sweep direction** forward or backward.
+- **Sweep placement** - `phrase` (ends on the bar line into a new phrase), `bars` (any bar line)
+  or `beats` (starts on any beat, over by the bar line). Loudness, chance and minimum gap
+  keep it occasional. It never runs during the strobe.
+- A white flash on a lamp being swept shows on top of the sweep colour, which stays full.
+- **Test sweep now** plays it 4 times in a row on the selected lamps, with the settings
+  above (the visualizer must be running).
+
+### Beat Sync White
+
+Beat Sync's flash-and-decay (including dark pulses), but on the bulb's **white** LEDs:
+brightness and colour temperature instead of colour - the lamps stay white and move
+warm <-> cool on the beat. *Temperature mode* `random` picks a new temperature every beat (at least
+*Min temp jump* away); `alternate` ping-pongs between *Temp range min (warm)* and *max
+(cool)*. Chase and Group Switch don't run in this mode (a hue overlay has nothing to work
+on in white). The white control path is the least verified part against real hardware -
+see [what's confirmed](#local-control-whats-confirmed).
+
+### Peak Flash
+
+A softer, continuous cousin of Beat Sync:
+
+- Reacts to peaks across the **whole spectrum** (kicks, snares, vocal hits), with *Peak
+  sensitivity*.
+- Blends toward **white** with the treble (cymbals, hi-hats, sibilance; *Whiteness amount*,
+  *White attack/release*), back to full colour when it drops.
+- Brightness **tracks the overall loudness** between *Baseline brightness min/max*, with a
+  *Flash brightness* boost on each peak that decays (*Flash attack*, *Flash decay*).
+- The hue never snaps: it **flows** - a slow rotation (`drift`, *Drift speed*) or following
+  the spectral centroid (`centroid`). **Color richness (hue flow)** (up to ~15 s) sets how
+  slowly: high values unfold a slow, rich colour story over a song section.
+
+### RGB Frequency, Custom and HSV Music
+
+The continuous modes - the light follows the sound level rather than beats:
+
+- **RGB Frequency** - bass drives red, mids green, treble blue. Each channel has its
+  frequency range, *Gain*, *Min/Max level* and *Gamma*.
+- **Custom** - the same mechanism with your own frequency ranges.
+- **HSV Music** - hue from the spectral centroid (*Hue @ low freq* .. *Hue @ high freq*),
+  brightness from the overall energy (*Brightness min/max*), saturation from spectral
+  contrast.
+
+Each has its own *Level sensitivity (gain)*. **Attack** / **Release** - the level
+smoothing,
+one setting shared by the three modes: how fast the light follows rising / falling sound.
+The Global *Response curve* applies to these modes only.
+
+### Global settings
+
+- **Lamp transitions** - how the bulbs take a change:
+  - `direct` (default) - the real-time control datapoint (DP 28), no fade: crisp flashes,
+    beats and white pulses; colour and white can show at once.
+  - `smooth` (experimental) - DP 28, chosen per command: big changes (a beat's flash, a white
+    flash, the strobe) land instantly, small fade and glide steps use the bulb's own short
+    fade - smoother, a little slower.
+  - `gradient` - DP 28 with the bulb's short fade (~0.25 s) on every change.
+  - `legacy` - the persistent colour datapoint (DP 24): the bulb fades every change over
+    ~0.7 s, so at dance tempo the light never arrives before the next beat. Only for bulbs
+    that don't change colour with the others; bulbs without the v2 datapoint layout always
+    use it.
+- **Lamp command rate** - commands per second per lamp (up to 60; 50 in a fresh install).
+  With `direct` every command shows as a step, so smooth fades and glides want a high rate.
+- **Min change threshold** - skips sends that would barely change the colour.
+- **Response curve** (`linear` / `log` / `exp2`) - reshapes the level before it becomes light,
+  in RGB Frequency, Custom and HSV Music only: `log` brings out quiet detail, `exp2` the
+  opposite.
+- **Invert brightness** - quiet parts bright, loud parts dark, in every mode.
+
+Colours go out at the datapoint's own resolution (hue in degrees, saturation and
+brightness in 0.1 % steps), not rounded through 8-bit RGB.
+
+### Presets and built-in looks
+
+- **Built-in look** + **Apply** - sets the shared clock, Beat Sync, the pulse sequencer, Chase and Group
+  Switch together: *Groove - one color per bar*, *Calm - slow color flow*, *Club - punchy*,
+  *Dance - white across groups*, *Chase focus*, *Group focus*. Your lamp setup, Chase width
+  and intensity, Group Switch intensity, beat detection band and sensitivity, lead time and
+  true-white brightness and cool ratio are left as they are.
+- **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
+  Group Switch and the lamps' Chase order. Loading one updates every setting at once.
+
+## Chase & Group Switch tab
+
+Two overlays on top of whichever colour mode runs (not Beat Sync White), each a section
+with its on/off switch. Both are on in a fresh install, and both need the lamps' place set
+on the [Devices & Setup tab](#devices--setup-tab). They can run together: Chase applies
+first, then Group Switch.
+
+### Chase
+
+A highlight travelling round the lamps in **Chase order**. Lamps sharing a number move
+together as one position - e.g. give the two lamps on each of four walls the same number
+(0, 0, 1, 1, 2, 2, 3, 3) and the chase steps wall by wall round the room.
+
+- **Speed source** - `off`: a constant number of full rotations per second (0.5 = one lap
+  every 2 s, however many lamps); `beat` / `intensity_peak`: still until a beat (its own
+  bass detector) or a loudness peak, then steps on *beat multiplier* positions; `clock`:
+  steps every N beats of the shared clock (the fresh-install choice).
+- **Number of rotators** - highlights travelling at once, evenly spaced (2 = opposite
+  sides). **Reverse direction** flips the way round.
+- **Highlight width** - how many positions the glow spans: low = a crisp travelling spot.
+  Scale it with the lamp count: about a third of the lamps in the chase is a good start.
+- **Falloff curve** - `linear`, or `bezier`, which lingers near the peak colour (try it if
+  the colour feels too brief).
+- **Intensity** - a brightness **boost multiplier** on the lamp's own brightness, never a
+  fixed brightness: a lamp the mode has dimmed to black (a dark pulse) stays black.
+- **Soft steps** + **Switch fade** - with only a few lamps the highlight can't really glide;
+  this fades every lamp to its new colour over the Switch fade time instead of jumping
+  (on in a fresh install, 100 ms).
+- **Color**:
+  - `complementary` - the opposite (+180°) of the lamp's own colour;
+  - `hue_shift` - each position a progressively different fixed hue (a rainbow trail, from
+    *custom hue* by *Hue shift step*);
+  - `hue_shift_relative` (fresh install) - turns the lamp's own hue by the *Hue shift step*,
+    keeping its saturation - a nudge that follows the Beat Sync colours;
+  - `custom` - one fixed hue; for the clearest effect pick one far from your usual palette.
+- **Hue shift step from** (both hue_shift modes) - `fixed`, or the music sets the step
+  between *Step min* and *Step max*: `intensity` (loudness), `brightness` (bass-heavy vs
+  bright), `intensity_brightness`, or `pitch` (the standing-out note's tension in the key;
+  drums are filtered out first). The line under the sliders shows the current step.
+- **Chase dwell x** - per lamp, in the Devices & Setup list.
+
+### Group Switch
+
+Lamps take turns by **Effect group**: one group is fully "active" at a time with a hard,
+instant switch - a clean alternation instead of Chase's travelling gradient. Same speed
+sources as Chase (`off`, `beat`, `intensity_peak`, `clock` - every N beats) and the same
+colour modes, without width or falloff. Needs at least two groups - with one lamp or one
+group, switch it off.
+
+- **Active groups at once** - that many groups active together, evenly spaced (four groups,
+  2 active: groups 1+3, then 2+4). White pulses that follow the group land on all of them.
+- **Fade across groups** (off) - spreads the group colour over *all* groups in equal hue
+  steps back to the lamps' own colour (with `complementary` and three groups: own colour ->
+  halfway -> opposite), the ramp moving with the active group. Needs at least three groups
+  per active group.
+- **Switch fade** (0 = the hard step) - every group's colour glides to its new place over
+  about that long.
+- **hue_shift_relative** - the active group turns its lamps' hue by the step, the groups
+  behind it part of the way. The shifts never build up: with both overlays relative, a lamp
+  is at most Chase's step plus Group Switch's step from the base colour.
+
+## Info panel
+
+Along the bottom of the window, on every tab:
+
+- **First row** - the beats of the bar as dots (the downbeat bigger and golden), the tempo
+  and whether the clock is locked, the phrase bar and loudness (while the sequencer runs),
+  the drums share, the note and key (while something follows the pitch) and the mode.
+- **Second row, while the pulse sequencer runs** - a timeline of the last two bars,
+  scrolling left (the bright line is now):
+  - **White** - each flash drawn as its envelope (up over the attack, flat through the
+    duration, down over the release, as tall as it's bright), in its **warm (amber)** or
+    **cool (blue-white)** white, a hybrid as a gradient; the walk's flashes carry their
+    group number, gold outline = every lamp, yellow = played as a flash strobe;
+  - **Dark** pulses;
+  - **Strobe** - bursts in cyan, flash strobes in yellow (each flash as tall as the white
+    curve at that moment; a strobe drawn over one is the one that took over);
+  - **Sweep** - colour sweeps in their colour.
+
+  Grey lines are bar lines, the golden one a phrase start. Below: the patterns playing now
+  and the latest pulses in words.
+
+## Diagnostics tab
+
+Audio callback, analysis and visual update rates; per lamp the online state, bulb type,
+latency and command counts (sent, failed, skipped as unchanged); and a live log viewer.
+
+## Manual control app
+
+`AiramManualControl.exe` (`python manual_control.py`) - control the lamps without music.
+It shares the settings file with the music app: the same lamps, keys, Chase order and
+Chase settings.
+
+- **Devices & Setup** - the same tab as in the music app.
+- **Manual Color** - pick a colour and **Apply to Selected**; Turn On / Off.
+- **White Balance** - brightness + colour temperature (0 = warmest .. 1 = coolest) on the
+  white LEDs, plus **White Chase**: a warm or cool region (`target_temp`) travelling round
+  the Chase order.
+- **Color + White** - white and colour on the same lamps at once, e.g. blue under cool white
+  (reads colder) or red under warm white (warmer). Pick a lamp group or the selection, set
+  both, apply - then the next group. Remembered per lamp. Needs *Lamp transitions* other
+  than `legacy`.
+- **Chase / Rotating Light** - the [Chase](#chase) overlay on its own ~30 Hz timer (no beat
+  sync without audio).
+- **Ambient Scenes** - synchronized looping animations: `color_cycle` (every lamp round the
+  hue wheel together), `breathing` (brightness pulsing at one hue) and `temp_breathing`
+  (warm-cool pulsing on white). *Speed* = cycles per second; the per-lamp *Phase offset
+  (ms)* can stagger the lamps for a travelling wave.
+
+Only one animation drives the lamps at a time - whichever you used last. The last applied
+colour or white balance comes back on restart (turning lamps off doesn't change it).
+
+**Why ambient scenes instead of the bulbs' own scenes?** Each bulb's built-in scene runs on
+its own clock from whenever it was started, and nothing can start them in sync -
+power-cycling them together with smart plugs doesn't work reliably either. Ambient Scenes
+are computed once per tick from one clock on the PC and sent to every lamp together, so
+they're synchronized by construction.
+
+## Settings and log files
+
+All in `%APPDATA%\AiramMusicLights\` (Linux: `~/.config/AiramMusicLights/`):
+
+| File | What |
+|---|---|
+| `config.json` | lamps, keys, groups, presets and every setting - readable JSON, shared by both apps. Saved on exit **and every 20 s**, so a crash or power cut loses nothing. |
+| `ui.ini` | which sections are open |
+| `logs\app.log` | the log (rotating, 2 MB x 4) |
+| `logs\crash.log` | the stack of every thread if the app ever crashes natively |
+
+While either app is open the PC doesn't **idle**-sleep (Windows
+`SetThreadExecutionState`, Linux `systemd-inhibit`); the display may still turn off, and
+choosing Sleep yourself still works.
+
+---
+
+# Troubleshooting
+
+## Chase, Group Switch or the white walk does nothing, or every lamp flashes at once
+
+The lamps have no place yet: set *Chase order* and *Effect group* on the
+[Devices & Setup tab](#devices--setup-tab). Group Switch needs two or more groups. With a
+small setup see the box in [Quick start](#quick-start).
+
+## A setting seems to do nothing
+
+Hover it: a greyed-out setting says in its tooltip why it's unused (e.g. Beat Sync's own
+detection while it follows the shared clock). For the sensitivities, see
+[Four sensitivities](#visualizer-tab). Some settings only show in certain modes: the
+continuous modes' Attack/Release, for instance, don't affect Beat Sync at all.
+
+## Flashes look late or early
+
+Adjust **Lead time** in the [Rhythm section](#rhythm---the-shared-beat-clock) (needs *Lock
+to tempo*): raise it if late, lower it if early.
+
+## A lamp won't respond
+
+(But works in the phone app, which goes through the cloud.) The app rebuilds the
+connection itself; if that doesn't help, it leaves the lamp out of the show, logs the
+reason once and checks it every 15 s - the other lamps keep playing, and the lamp rejoins
+by itself. While checking it also fixes:
+
+- **a new IP address** (DHCP) - it finds the lamp on the network and updates the IP;
+- **a new local key** (the lamp was reset and re-paired) - it fetches the key from the
+  Tuya cloud with the credentials in `tinytuya.json`. **Refresh keys from Tuya cloud**
+  does it for every lamp.
+
+`Err 914` with an unchanged key means the lamp's local connection is stuck: switch it off
+and on at the wall; the app picks it up within ~15 s.
+
+## A lamp looks online but ignores the show
+
+Some bulbs occasionally keep answering status queries but silently ignore every control
+command - only switching them off and on at the wall helps. Colour commands aren't
+acknowledged (waiting would slow everything down), so nothing fails on the app's side.
+The app watches for it: every ~4 s it compares what the lamp *reports* with what it was
+sent (with DP 28 transitions the colour is also written to DP 24 every 5 s for this). A
+lamp that keeps reporting one colour while being sent many is flagged:
+
+1. a warning in the log and one connection rebuild;
+2. if that doesn't help, the lamp is left out and shown offline with the reason; it's
+   re-checked every 15 s with a test colour and rejoins once it obeys (e.g. after the
+   power-cycle).
+
+Each time the log (search `not following` or `stuck-lamp report`) records what the lamp
+had been put through:
 
 ```
 'OV' (192.168.1.241) is not following commands - ... Rebuilding its connection.
@@ -561,735 +814,136 @@ connected for 41.3 min; show: mode=beat_sync, fade=on, glide_hue=beat, white_pul
 sequencer=on, chase=clock, group_switch=clock, lamp_command_rate=20/s, min_change=0.015]
 ```
 
-After a few of these it's possible to see what stuck lamps have in common - whether it's
-always the same lamp, the command rate, the number of white switches, glide on or off, or
-simply time. If stuck lamps turn out to follow the load, lowering **Lamp command rate**
-(e.g. to 10/s) or raising **Min change threshold** (Color Mapping tab, Global box)
-reduces it.
+If it turns out to follow the load, a lower **Lamp command rate** (e.g. 10/s) or a higher
+**Min change threshold** (Global section) reduces it.
 
-### Color Mapping tab
-Full detail for **RGB Frequency** and **Custom** modes (per-channel frequency range,
-gain, min/max level, gamma - both modes are literally the same mechanism, Custom just
-unlocks arbitrary ranges instead of the bass/mid/treble defaults), **HSV Music**
-mode (hue from spectral centroid, brightness from overall energy, saturation from
-spectral contrast), and **Beat Sync** mode (see below). Also: response curve
-(linear/log/exp2), the network's min-change threshold, mapping presets, and
-**Invert brightness** - a single checkbox in the Global section that flips the
-brightness response for every mode at once (0 becomes bright, 1 becomes black), for
-when you want quiet passages to light up and loud/energetic moments to go dark instead
-of the usual way around.
+## The lamps don't change colour with `direct` / `gradient`
 
-#### Rhythm: the shared beat clock
-Beat Sync, Chase and Group Switch can each run their own beat detector - but then the
-same drum hit may advance one layer and not another, or advance them on different
-frames, and the combined show reads as three unrelated rhythms (i.e. random). The
-**Rhythm** box at the top of the tab adds one shared detector that every layer can
-follow instead (`airam_lights/dsp/beat_clock.py`):
+Your bulbs may not support the real-time datapoint: choose **Lamp transitions** `legacy`.
 
-- **Tempo lock** - estimates the tempo from the last few seconds of the kick-drum band,
-  then only accepts hits near the expected beat (off-beat hi-hats, snares and vocals are
-  ignored) and fills in a beat when a kick is too quiet to detect, so the rhythm stays
-  regular.
-- **Lead time** - once locked, each beat is sent this many milliseconds early, cancelling
-  out the Wi-Fi + bulb reaction delay (~100-150 ms) so flashes land *on* the beat instead
-  of just after it. Raise it if flashes look late, lower it if they look early.
-- **Bars and accents** - beats are counted in bars (`Beats per bar`, 4 by default), with
-  the bar start placed on the position that usually hits hardest. The hardest hits are
-  flagged as accents.
+## Warm white flashes are dimmer than cool ones
 
-What follows the clock:
+Warm white takes longer to build up in the bulb (~0.5 s), so very short warm flashes come
+out dimmer. Lengthen the white pulse, or favour cool (*White pulse cool ratio*).
 
-- **Beat Sync** (checkbox *Beat Sync follows the shared clock*) - flashes on the clock's
-  beats. **Change hue every N beats** keeps a color for several beats (4 = one color per
-  bar) instead of a new color on every hit. Dark and white pulses get a trigger:
-  `random` (every beat rolls the probability, as before), `accent` (only the hardest
-  hits) or `downbeat` (only bar starts).
-- **Chase / Group Switch** - Speed source `clock`, moving every N beats counted from the
-  bar start (e.g. Chase every beat, Group Switch once per bar).
+## The Wi-Fi drops out on a laptop
 
-The **info panel** along the bottom of the window shows the detected tempo, whether it's
-locked, and the current beat in the bar (see *Info panel* below).
+The app keeps the PC awake, but not the Wi-Fi adapter's own power saving: Device Manager ->
+your Wi-Fi adapter -> Power Management -> uncheck "Allow the computer to turn off this
+device to save power".
 
-Settings that don't do anything in the current combination are **greyed out**, with the
-reason in their tooltip and a short note next to them - e.g. Beat Sync's own detection
-band while it follows the shared clock, a Chase's beat detector while its Speed source
-is `clock`, or *Sustain brightness* while *Fade brightness* is off. Rhythm divisions are chosen from
-values that line up with the bar - *every beat*, *every 2 beats*, *every bar*, *every 2
-bars*... following *Beats per bar* - and phrases from 1/2/4/8/16 bars, so a setting can't
-drift against the music (e.g. "every 3 beats" in 4/4 would land on a different beat of
-each bar).
+## The app crashed
 
-#### Between beats: fade brightness and/or glide hue
-Beat Sync's **Between beats** row picks what moves after each flash - either, both or
-neither:
+Look at `logs\crash.log` ([Settings and log files](#settings-and-log-files)) and attach it
+and `app.log` to an issue.
 
-- **Fade brightness** (on by default) - the classic flash that fades toward *Sustain
-  brightness*. Off: brightness stays at *Flash brightness* the whole time (dark pulses
-  still dip it). On RGB+CCT bulbs the colored LEDs are much dimmer than the white ones, so
-  this keeps the colored light - and what reflects off the walls - at full strength.
-- **Glide hue** - after each beat the color travels *Glide distance* degrees toward the
-  next color, and the next beat lands on that color. With *Glide timing* `beat` it moves
-  evenly through the whole beat (following the tempo), so the color wheel keeps turning
-  in time with the music; `decay` follows the brightness attack/decay instead - a quick
-  sweep right after the hit. A distance of about the Hue step arrives exactly at the next
-  color; 360 is a full rainbow every beat.
+## Setup wizard / cloud linking problems
 
-A gliding color changes on every frame, so lamps receive commands continuously - still
-capped per lamp by *Lamp command rate* (50/s in a fresh install).
-
-#### Pulse sequencer: white and dark pulses on musical positions
-In the Beat Sync tab, the **Pulse sequencer** takes over the white and dark pulses from
-the per-beat probability rolls and places them the way a lighting operator (or a
-drummer) would, on a 16th-note grid from the shared clock (`effects/pulse_sequencer.py`):
-
-- **Patterns** - which 16ths of the bar flash white: downbeats, every beat, off-beats
-  (the "and"), a 3-3-2 syncopation, a gallop, straight 16ths - or `auto`, which follows
-  the loudness: sparse when the song is quiet, busier as it gets louder.
-- **Group walk** - each white flash goes to the next lamp group (the Group Switch
-  groups), so the white travels around the room - `backward` sends it the other way
-  round, e.g. against the Group Switch colors; *Double chance* sometimes repeats a
-  flash in the same group an 8th later.
-- **Thinning** - three ways to calm the white flashes down, the way a drummer would
-  rather than by random gaps:
-  - *Accent focus* drops the light positions first: the 16ths between beats, then the
-    "ands", then beats 2 and 4, then beat 3 - the downbeat stays. Busy patterns
-    (sixteenths, gallop) calm down without losing the pulse.
-  - *Phrase build* starts each phrase sparse and fills it in bar by bar toward the end,
-    so the tension builds up to the fill and the phrase-start flash.
-  - *Repeat the groove* decides which steps flash (and which double) once per phrase and
-    repeats it in every bar, so the eye can follow it; a new variation comes with the
-    next phrase. Off, every step is rolled anew and the gaps jump around from bar to bar.
-- **Dark pulses** - a breath on the last 16th before the downbeat (and before the
-  backbeats, and fast stutters in fills when it's loud), with their own density and
-  length.
-- **Phrases** - bars are counted in phrases (8 by default - most pop/dance music changes
-  something every 8 bars). The end of each phrase gets a fill (denser flashes), a dark
-  breath, and every lamp flashes on the new phrase's first beat. A sudden quiet-to-loud
-  jump (a drop) starts a new phrase right there.
-
-- **Pulse dynamics** - the white pulse settings (brightness, attack, duration, release)
-  are the baseline, and each flash is shaped by where it falls in the music: the downbeat
-  long and bright, flashes between beats short and crisp, fills snappier and brighter
-  toward the phrase start, the phrase start held longest with a slow fade, quiet parts
-  dimmer and softer, loud parts full and sharp. *Dynamics amount* sets how strongly
-  (0 = every flash identical).
-- **White release curve** (white pulse settings) - the shape of each flash's fade-out,
-  best seen with a longer *White pulse release* (a few hundred ms): `linear` (a straight
-  fade, as before), `ease_in` (lingers near full, then drops away), `ease_out` (drops
-  fast, then a long soft tail, like a struck drum or cymbal), `ease_in_out` (an S-curve).
-  `dynamic` lets the sequencer pick per flash, the way an instrument decays:
-  `ease_in_out` for the phrase-start flash and in quiet parts, `ease_in` on the heavy
-  beats (the light hangs on like a held bass note, then clears for the next beat),
-  `ease_out` on the lighter beats, the fills and the doubles (percussive). It shapes the
-  sequencer's flashes; the per-beat flashes without the sequencer fade out exponentially,
-  and with `legacy` transitions the bulb fades on its own.
-- **Flash strobe** (optional, off by default) - now and then one of the group walk's
-  white flashes is played as a short **strobe on just that group** instead, so as the
-  white travels round the room a strobe shows up along the way - a stylish glitch, not
-  a room-filling effect: with several *White rotators* only the walk's own group
-  strobes, the others keep their plain white flash. It starts on the flash's
-  beat - with *placement* `bar_end` only the bar's last beat, a roll into the next bar;
-  with `beats` any beat but the downbeat - and **lasts as long as the white flash it
-  replaces** (attack + duration + release), never past the bar line, so the downbeat
-  lands clean. Its flashes **follow that white flash's brightness curve**: they rise
-  over the attack, stay full through the duration and fade over the release along its
-  release curve - with the attack, duration, release and peak the pulse dynamics picked
-  for that very flash, and the per-lamp multiplier - times *Flash strobe brightness*, so
-  it blends in with the white pulses instead of jumping out. A white flash too short for
-  two strobe flashes stays a plain flash. Loudness, chance and a minimum gap in bars keep
-  it occasional; the rate and on-time are the strobe's. The all-lamps strobe always
-  wins: none starts once it's announced, and one still running is cut short when it
-  begins. Like the strobe, it needs *Lamp transitions* `direct` or `smooth` - otherwise
-  the flash stays a plain white flash. On the info panel's timeline it shows twice: as a
-  yellow white flash on the White lane, and on the Strobe lane in yellow (the strobe is
-  cyan), each flash as tall as the white flash's curve at that moment - a strobe drawn
-  over it is the one that took over.
-- **Color sweep** (optional, off by default) - now and then a **colour of its own**
-  (*Sweep colour* `custom` - your own hue - or `dynamic`, then saturation and brightness)
-  runs once round the lamps in **Chase
-  order**, fast - over *Sweep length* (half a beat to 4 beats), each position lit in turn
-  for its share of it, on top of the show. It sits on the grid like the strobe: with
-  *placement* `phrase` it ends on the bar line into a new phrase (a run into the
-  phrase-start flash), with `bars` on any bar line, with `beats` it starts on any beat
-  and is over by the bar line - the downbeat always lands clean. *Rotators* sets how many
-  run at once, evenly spaced round the loop; each covers its own stretch, so every lamp
-  is still lit once per sweep. *Width* lights that many neighbouring positions at once -
-  a band of 2 or 3 spots moving round reads more clearly than a single one. Loudness, chance and a minimum gap in bars keep it
-  occasional; it never runs during the strobe (a strobe takes over from one still
-  running). It uses only its own settings - none of the Chase overlay's, which can stay
-  off - and works with any *Lamp transitions*, since it's on the RGB colour. With
-  `dynamic` every sweep gets a new colour, one of the brightest the bulbs make (red,
-  yellow, green, cyan, blue, magenta): one of the two farthest from the colour the lamps
-  show at that moment, so it stands out, and never the previous sweep's. The info panel's
-  timeline shows each sweep in its colour. A white flash on a lamp the sweep is lighting
-  shows on top of the sweep's colour, which stays at full - the white doesn't cut it. **Test sweep now** plays it 4 times in a row on
-  the selected lamps right away (with the visualizer running), to see how it looks.
-
-The info panel shows where it is: `beat 2/4 · phrase bar 7/8, loudness high`, with a
-live timeline of the pulses under it (see *Info panel* below).
-The *downbeat* (beat 1) is placed on whichever beat of the bar usually hits hardest -
-in most dance music that's where the kick is strongest, so it lines up with the real
-bar start after a few bars of listening.
-
-#### Built-in looks
-**Presets -> Built-in look** sets the shared clock, Beat Sync, the pulse sequencer, Chase
-and Group Switch together: *Groove - one color per bar*, *Calm - slow color flow*,
-*Club - punchy*, *Dance - white across groups*, *Chase focus* and *Group focus*. They only change rhythm and color behavior - your lamp
-groups, Chase width/intensity, Group Switch intensity, beat detection band/sensitivity,
-lead time and true-white depth/brightness/cool ratio are left as you set them. Saved
-presets (*Save As...*) now also include the Rhythm and Group Switch settings, and loading
-any preset updates the sliders right away.
-
-#### Beat Sync mode
-The other modes blend colors continuously, which can end up looking muted/washed
-toward white if the source material doesn't have big swings between bands. Beat Sync
-takes the opposite approach: a simple energy-based beat detector
-(`dsp/beat_detector.py`, unit-tested with synthetic pulse trains in
-`tests/test_beat_detector.py`) watches one frequency band (kick-drum range, 40-200 Hz,
-by default) and on every detected hit jumps the lamps to a **fresh, fully-saturated hue
-at full brightness**, then lets brightness decay toward a dim baseline until the next
-hit - a percussive flash-and-decay envelope that makes the rhythm obvious instead of a
-faint brightness ripple. Three ways to pick the new hue each beat:
-
-- **random** (default): a new hue every hit, forced to differ from the last one by at
-  least `min_hue_jump_deg` so you never get two similar colors back to back.
-- **step**: advances by a fixed angle each hit (default 137.5°, the "golden angle" -
-  cycles through well-spread colors without ever repeating for a long time). With
-  **Hue step from** set to anything but **fixed**, the music sets each step between
-  **Step min** and **Step max**, using the same sources as Chase's hue step:
-  - **intensity**: small steps to neighbouring colors in a quiet part, big jumps to
-    contrasting colors in a chorus.
-  - **brightness**: bass-heavy vs bright sound.
-  - **intensity_brightness**: both of the above.
-  - **pitch**: the note's tension in the key. It glides over to intensity_brightness
-    when no note stands out or the notes don't move.
-
-  The color always moves on, so it never gets stuck on one color.
-- **spectrum**: the music picks each hit's color, spread over HSV Music's Hue min..max.
-  **Spectrum from** sets what it follows. **pitch** (the default) follows the note that
-  stands out, by its place in the key on the circle of fifths. The key's seven notes are
-  spread over the whole range, so related notes and chords get neighbouring colors.
-  Pitch is used while a note stands out clearly and the notes actually move. During
-  drums, noise, atonal passages or one note droning on, it glides over to
-  **intensity_brightness** (loudness plus bass-heavy vs bright sound) and back, without
-  switching abruptly. **brightness** and **intensity** follow just one of the two. Every
-  source is measured against the song's own recent range, so all music uses the whole
-  hue range. (Earlier versions used an absolute 20 Hz-16 kHz scale, which put
-  most music in the same turquoise slice.) With **Glide hue**, the color glides toward
-  **Glide distance** the way the music's color last moved, turning round at the ends of
-  the hue range. The line under the
-  hue mode shows the note, the key and how much of the color comes from the pitch.
-
-`sensitivity` / `min_interval_ms` / `min_energy` tune how trigger-happy the detector
-is; `hue snap speed` / `brightness attack` / `brightness decay` tune how sharp vs.
-smooth the flash feels.
-
-**Dark pulses**: toggled via `dark_pulse_enabled` (on by default), `dark_pulse_probability`
-(0..1) is the chance that a given beat first dips toward black for `dark_pulse_duration_ms`
-(how dark, via `dark_pulse_depth`) *before* flashing to its new color, instead of flashing
-immediately - a rhythm-synced pause/strobe accent layered on top of the hue and brightness
-behavior above, with its own `dark_pulse_attack_ms`/`release_ms` controlling how sharply it
-cuts into the pause and eases back out of it (independent of the general `brightness_attack_ms`/
-`release_ms` used for the normal flash/decay). Since this is a real-time reactive system, it
-can only react to a beat as it happens (it can't anticipate a future one), so the pause always
-starts right on the trigger and the actual color flash is simply delayed until the pause ends
-- not a pause *before* the hit, but a hesitation *right on* the hit before committing to the
-flash.
-
-**White pulses**: independent of dark pulses, `white_pulse_probability` (0..1, **on by
-default** - toggle `white_pulse_enabled`) is the chance a given beat's flash *also* gets a
-brief white accent, for `white_pulse_duration_ms`, with its own `white_pulse_attack_ms`/
-`release_ms` controlling how sharply it snaps in and eases back out. The shipped defaults
-(probability 0.26, duration 45ms, attack 17ms, release 49ms, brightness 0.3, temp 0.5) were
-tuned live against real hardware until the combination read as musically "in harmony"
-rather than a jarring or washed-out accent - a reasonable starting point to tweak from
-rather than a neutral/untuned one. Dark and white pulses each roll their own probability
-independently on every beat - both, either, or neither can happen on any given hit, so with
-both enabled at non-trivial probabilities you'll occasionally see them coincide; that's
-expected rather than a bug.
-
-This is always a **"true white" flash**: the lamp switches its physical **WHITE
-work_mode** on - the real white diode(s) - at `white_pulse_white_brightness` (default
-0.3). White is never mixed from the RGB LEDs: on RGB+CCT bulbs those are much weaker than
-the white ones, so all their output stays reserved for color (earlier builds had an
-RGB-desaturation variant and an "invert" option; they're gone, and their saved settings
-are ignored).
-Each flash also independently rolls **warm vs. cool** white: `white_pulse_cool_ratio`
-(default 0.5) is the chance a given flash lands on cool white instead of warm (0.0 =
-always warm, 1.0 = always cool, 0.5 = a roughly even, unpredictable mix) - the roll happens
-once per new flash, tied to the same beat trigger as everything else in Beat Sync mode, and
-holds for that flash's whole duration rather than flickering mid-flight, so consecutive
-white accents read as varied instead of visually identical every time. **Warm/cool** chooses how that
-temperature is picked (anywhere between warm and cool, not just the two ends): `random`
-(the cool-ratio roll above), `bar` (by the weight of the beat - the downbeat coolest, the
-bar's middle beat half-cool, the other beats warmer, flashes between beats warmest, so the
-heavy beats stand out), `alternate` (cool, warm, cool...), `loudness` (warm in the quiet
-parts of a song, cool in the loud ones) or `phrase` (cooling down over each phrase toward
-its end; the new phrase's first flash is cool, then back to warm). `bar` and `phrase` need
-the shared beat clock to know where the bar is. **Hybrid warm/cool** (0 = off) is the chance
-that a flash is a hybrid instead: its colour temperature glides from one end to the other,
-cool to warm when Warm/cool picked cool for it, warm to cool when it picked warm (a flash
-strobe keeps one temperature). The glide follows the flash's **light**, not the clock: when
-half the light under its brightness curve is out, the temperature is halfway - so the change
-happens while the flash is bright, and the dim tail barely moves. (The light is the area
-under the curve, exact: attack/2 + duration + release x 1/2 for linear and ease_in_out, 2/3
-for ease_in, 1/3 for ease_out.) The info panel's timeline shows each white flash in its warm (amber) or cool
-(blue-white) white, and a hybrid as a gradient. It then switches
-back to RGB colour mode once the pulse ends and resumes
-wherever the normal Beat Sync hue/brightness envelope has evolved to in the meantime - the
-show continues exactly where it left off, it's just been briefly interrupted by a real
-white flash. On a dense/fast track, several short flashes can chain closely enough that
-the lamps would otherwise stay in WHITE work_mode almost continuously for a stretch - a
-hard safety ceiling forces a real, guaranteed-length RGB-only window at least every 1.5s
-of continuous white time, so a lamp can never end up looking stuck in white regardless of
-how the beats line up. By default every selected lamp flashes white together;
-`white_pulse_target` (**True white lamps** in the UI) can instead limit the flash to just
-the lamps the **Chase** highlight is currently on (`chase`) or to Group Switch's currently
-active group(s) (`group`) - the lamps are picked when the flash starts and held for its
-duration, and it falls back to all lamps if that effect isn't enabled. Following the Chase
-highlight skips lamps whenever Chase moves more than one lamp between two flashes; `rotate`
-avoids that by giving the white its **own rotation** through the Chase order: every flash
-moves exactly one lamp on (in the same direction as Chase), however fast Chase itself
-moves. **Rotating** next to it sets how many lamps flash at once - 1, 2 on opposite sides,
-or 3/4 evenly spaced - and applies to the pulse sequencer's walk too, which can step
-through either the Group Switch groups or the Chase order (*Walk through*). The per-lamp
-**True white x** column (`white_pulse_brightness_mult`) scales an individual lamp's
-true-white brightness relative to the global setting (0.5 = half) - give every lamp in a
-group the same value to balance, say, wall spots next to plants against the ceiling group;
-the ratio holds when you change the global brightness. The white flash uses the bulb's
-WHITE work_mode DP, same as Beat Sync White mode - see [section 2](#2-local-control-of-the-airam-bulbs---whats-confirmed-vs-assumed)
-for what's confirmed vs. still-unverified about that path on real hardware.
-
-#### Peak Flash mode
-A softer, more continuous cousin of Beat Sync. Instead of a fixed bass-only trigger and
-a hue that only changes on a beat, Peak Flash:
-
-- Detects peaks across the **whole spectrum** by default (not just bass), so it reacts
-  to any sudden loud moment - kicks, snares, vocal hits, sung notes, anything.
-- Blends the color toward **pure white** in proportion to treble/cymbal/sibilance
-  energy (`treble_low_hz`-`treble_high_hz`, default 5-16 kHz) - hit a crash cymbal or a
-  bright hi-hat and the lamps flash white; when the treble drops back down they return
-  to full color. This is a smooth blend (`white attack`/`white release`), not a hard
-  switch.
-- Keeps brightness **continuously tracking overall loudness** (`baseline brightness
-  min/max`) between peaks, with a sharp `flash brightness` boost exactly on each
-  detected peak that decays back down (`flash attack`/`flash decay`) - so the lights
-  breathe with the music's overall intensity, not just jump on/off.
-- Never snaps hue discretely - it **flows continuously**, either as a slow autonomous
-  rotation (`hue_source: drift`, speed via `drift speed`) or by continuously following
-  the spectral centroid (`hue_source: centroid`). The key control here is **"Color
-  richness (hue flow)"**: a smoothing time constant (hundreds of ms up to ~15s) that is
-  the actual math behind the "smooth blend" / storytelling feel you get by turning it
-  up - higher values make the color arc unfold slowly and richly over an entire song
-  section; lower values make it dance more quickly.
-
-Net effect: vivid, maximally saturated color most of the time, punctuated by white
-flashes on cymbals/treble peaks and brightness swells tracking the music's energy,
-while the underlying hue keeps telling a slow, continuous color "story" instead of
-jumping around.
-
-#### Beat Sync White mode
-The same rhythm-reactive envelope as Beat Sync (including dark pulses), but drives the
-bulb's **WHITE work_mode** (brightness + color temperature) instead of RGB - the lamps
-stay genuinely white, animating warm<->cool on the beat rather than jumping between
-colors. `temp_mode: random` picks a new temperature every hit (forced to differ from
-the last one by `min_temp_jump`); `alternate` ping-pongs cleanly between the warm and
-cool ends of your configured `temp_min`/`temp_max` range. Everything else (sensitivity,
-min interval, flash/sustain brightness, dark pulses) works exactly like Beat Sync.
-
-> This is the newest lamp-control call in the app (`LampDevice.set_white()`) and,
-> unlike RGB, has **not yet been independently verified against the physical bulbs** -
-> see `DEVICE_NOTES.md`. Test it via the manual app's White Balance tab first.
-
-### Chase & Group Switch tab
-Two collapsible sections, one per overlay - **Chase** and **Group Switch** - each with its
-on/off switch in the header. Which lamps take part, and where, is set per lamp on the
-Devices & Setup tab (*Chase order*, *Chase dwell x*, *Effect group*).
-
-#### Chase / Rotating Light overlay
-An overlay effect layered on top of **whichever color mode is active** (RGB, HSV,
-Beat Sync, Peak Flash, Custom - every RGB mode), **enabled by default**: give a
-lamp a **chase order** (0, 1, 2, ...) in the Devices & Setup lamp list to include it in the
-rotation, then a moving highlight travels through them in that order, creating a
-spinning/chasing light effect on top of whatever colors the active mode is already
-producing. The one exception is **Beat Sync White**: it drives the lamps' white mode
-(brightness + color temperature), which a hue overlay has nothing to work on, so Chase and
-Group Switch don't run there - their settings are greyed out with a note while it's the
-active mode.
-
-- **Speed source**: `off` for a constant number of **full rotations per second** (e.g.
-  0.5 = one complete lap around all the chase-ordered lamps every 2 seconds, regardless
-  of how many lamps are in the chase); `beat` or `intensity_peak` to instead sit still
-  and only advance `beat_multiplier` lamp-steps the instant a beat (bass-band, via the
-  chase's own independent detector) or a broadband loudness peak is detected - genuinely
-  event-driven, not a tempo estimate, so it never drifts on its own between hits.
-- **Highlight width**: how many lamp-positions the glow spans (soft falloff). Lower
-  (e.g. 0.5-0.8) gives a crisp "single dot traveling" look; higher blurs it across more
-  lamps at once. **Scale this with your lamp count**: as a starting point, roughly a
-  third of the number of lamps in the chase tends to look smooth without lighting every
-  lamp at once (the shipped default, 1.5, assumes a modest handful of lamps - a chase of
-  12+ lamps likely wants a noticeably wider highlight, a chase of 2-3 wants it narrower).
-- **Intensity**: a brightness *boost multiplier* applied on top of whatever brightness
-  the active mode already computed for that lamp - it is never an independent/fixed
-  brightness. This matters: a lamp the active mode has deliberately dimmed to black
-  (e.g. a Beat Sync dark pulse) stays black no matter how high the intensity or how wide
-  the highlight is, since boosting zero brightness is still zero. If the chase feels too
-  subtle, raise this (default 3x) rather than expecting it to override a dark moment.
-- **Color**: **complementary** (the default, paired with Beat Sync) makes the chase
-  highlight's hue the opposite (+180°) of whatever hue that lamp is already showing from
-  the active mode - stays visually varied no matter what colors the base mode is
-  currently producing. **hue_shift** instead gives each chase position a progressively
-  different, fixed hue (a rainbow trail effect, stepped by `hue_shift_step_deg` from
-  `custom_hue_deg`). **hue_shift_relative** turns the hue the lamp is already showing by
-  `hue_shift_step_deg` (e.g. 15° = a small, even nudge that follows the Beat Sync
-  colors), keeping its saturation; with Group Switch on top in `complementary` mode the
-  active group shows the opposite of that already turned hue. **custom** uses one fixed hue/saturation for the whole highlight -
-  for the clearest, most obviously visible effect, pick a hue very different from your
-  usual palette (e.g. if your mode tends toward blues/greens, try an orange/red hue
-  around 20-40°) combined with a narrow width.
-- **Hue shift step from** (both hue_shift modes): **fixed** uses `hue_shift_step_deg`;
-  the other sources let the music set the step between **Step min** and **Step max**
-  every moment. **intensity** follows how loud the music is, **brightness** whether
-  the sound is bass-heavy or bright, and **intensity_brightness** averages the two. All
-  three are measured against the song's own recent range. **pitch** follows the note
-  that stands out by how much tension it has in the song's key: the key note itself
-  gives Step min, notes foreign to the key give Step max. Drums are filtered out first
-  (harmonic/percussive separation), and when no note stands out clearly enough (drums,
-  noise, atonal passages), the step glides over to intensity_brightness and back. The
-  line under the sliders shows the current step, note, key and the pitch's share.
-  Music app only: the manual app has no audio, so it always uses the fixed step.
-- **Chase dwell x** (a column of the Devices & Setup lamp list): how long the
-  highlight lingers at *this lamp's* chase position relative to the others - 1.0 is
-  the default/uniform speed. Lower it for a position that has several physical lamps
-  sharing one chase order (e.g. a multi-spot ceiling fixture) if the highlight feels
-  like it dwells there noticeably longer than at single-lamp positions - which is a
-  real perceptual effect (more lamps lit at once reads as "lingering" even though the
-  underlying timing is uniform without this), not just something to live with.
-
-#### Group Switch overlay
-A **discrete alternative** to the Chase overlay above, in its own sub-tab: instead of a
-highlight that gradually blends across neighboring lamps, lamps are grouped by
-**effect group** (0, 1, 2, ... - set in the Devices & Setup lamp list, a separate grouping
-from Chase's own **chase order**, so a lamp can be in either, both, or neither), and
-**one group is fully active at a time** (or several, see *Active groups at once*
-below) with a hard, instant switch - no
-gradient, no partial blend on neighboring groups. Same speed-source model as Chase
-(`off` / `beat` / `intensity_peak`, its own independent detector) and the same
-custom/complementary/hue_shift/hue_shift_relative color options, but deliberately without a width or
-falloff-curve concept, since there's nothing to blend. Can run at the same time as
-Chase - Chase applies first, then Group Switch's discrete switch applies on top of
-whatever color Chase already produced for that lamp.
-
-Group Switch is **on in a fresh install**. It needs each lamp's *Effect group* (Devices &
-Setup tab); if all your lamps are in one group - or you have only a lamp or two - switch
-it off: with a single group there is nothing to switch between.
-
-**Active groups at once** (1 by default) makes that many groups active together, evenly
-spaced through the group order - the same spacing as Chase's *Number of rotators*. With
-four groups of two lamps and 2 active, every other group switches: groups 1+3, then 2+4,
-and back. White pulses that follow the group (*True white lamps: group*) land on all the
-active groups.
-
-**Fade across groups** (on in a fresh install) spreads the group color over *all* the groups
-instead of showing it on the active one only: the active group still gets the full
-group color, the group before it one step less, and so on back to the lamps' own color
-- in equal steps around the hue circle, so the in-between groups stay vivid. With three
-groups and `complementary` that is own color -> halfway -> the opposite color; with
-more groups the steps get smaller (five groups: 0, 45, 90, 135, 180 degrees). The
-brightness boost fades the same way, and the whole ramp moves along as the active group
-advances - the switch itself is still a hard step. It needs at least three groups (with
-two there is nothing in between). With several active groups, each one gets its own
-ramp over the groups behind it, back to the previous active group - so it needs at
-least three groups per active group. White pulses that follow the group
-(*True white lamps: group*) still land on the active groups only.
-
-**Switch fade** (0 = off, the hard step) softens the switch itself: when the active
-group moves on, every group's color glides to its new place over about that long
-instead of jumping - a time constant like Beat Sync's *Hue snap speed*, so the same
-value gives the same feel. It works with and without *Fade across groups*, and in
-`hue_shift` mode the hue glides along too.
-
-**hue_shift_relative** works like Chase's: the active group turns the hue its lamps
-already show (the active mode's color, with Chase's on top if it runs) by the *Hue shift
-step*, keeping their saturation - with *Fade across groups* the groups behind it turn
-part of the way. **Hue shift step from** is the same as Chase's too (`fixed`,
-`intensity`, `brightness`, `intensity_brightness`, `pitch`, with Group Switch's own
-*Step min* / *Step max* and status line), for both `hue_shift` modes. The step is worked
-out afresh every tick and only ever turns that tick's own colors, so the shifts never
-build up: with both overlays in `hue_shift_relative`, a lamp is at most Chase's step plus
-Group Switch's step away from the base color, however long the show runs.
-
-### Info panel
-Along the bottom of the window, under every tab (it never scrolls away):
-
-- **First row** - the beats of the bar as dots (the current one lit, the downbeat
-  bigger and golden), the tempo and whether the clock is locked, the phrase bar and
-  loudness (while the sequencer runs), the drums share, the note and key (while
-  something follows the pitch), and the colour mode.
-- **Second row, while the pulse sequencer runs** - a timeline of the last two bars on
-  the clock's grid, scrolling left as the music plays (the bright line is now, the beats
-  coming up to its right): **White** flashes drawn as their envelope - up over the
-  attack, flat through the duration, down over the release along its curve, as tall as
-  they are bright (the walk's with their group's number, outlined in gold when every lamp
-  flashes, yellow when played as a flash strobe), **Dark** pulses,
-  **Strobe** bursts and color **Sweeps** in their colour; grey lines are bar lines, the
-  golden one a phrase start. Under it, the patterns playing now (`auto` resolved by the
-  loudness) and the latest pulses in words.
-
-### Diagnostics tab
-Audio callback rate, FFT/analysis rate, visual update rate, per-lamp online state /
-bulb type / latency / command counts (sent, failed, skipped-as-unchanged), current
-mode, and a live log viewer.
-
-Configuration (devices, groups, presets, DSP/color settings - including local keys) is
-saved automatically on a clean exit to `%APPDATA%\AiramMusicLights\config.json`, in
-human-readable JSON, **and** every 20 seconds while the app is running - so nothing
-from a session is lost even if the app is killed abruptly (crash, Task Manager, power
-loss) instead of closed normally. Both apps (`main.py` and `manual_control.py`) read
-and write this exact same file, so anything tuned in one is already there the next time
-you open either. This is verified by `tests/test_config_persistence.py` (every field of
-every settings dataclass survives a save/reload round-trip, including old config files
-saved before newer features existed) and was additionally exercised end-to-end through
-the real UI in both apps (set values via the actual widgets, close, reopen a fresh
-window, confirm every value - and the widgets displaying them - match).
-
-This includes the manual app's **actual picked static color/white-balance**
-(`ManualStateConfig`) - not just the Chase/Ambient/etc. *settings*, but the literal
-color you last applied via "Apply to Selected", restored and re-sent to the lamps the
-moment the app starts, regardless of what Chase or Ambient happen to be configured to
-(see `tests/test_manual_engine.py`). Turning a selection off does not overwrite this -
-it's treated as a power state, not a change in your preferred color.
+See the snags and workarounds in `DEVICE_NOTES.md`; or add the lamps by hand with keys
+from other tools ([Getting the lamps' local keys](#getting-the-lamps-local-keys)).
 
 ---
 
-## 6. Manual (no-music) control app
+# Technical reference
 
-```powershell
-python manual_control.py
+## Architecture
+
+```
+ audio capture -> FFT / DSP -> colour mapping -> overlays / sequencer -> lamp manager -> N bulbs (LAN)
+   (audio/)        (dsp/)       (color/)            (engine/, effects/)     (lamps/)
 ```
 
-A separate, standalone app for controlling the lamps' colors directly, with no audio
-capture and no music analysis at all - for when you just want to set a color or run a
-lighting effect without playing anything. It shares the **same config file** as
-`main.py` (same devices, local keys, per-lamp chase positions, and Chase settings), so
-anything you tune in one shows up in the other.
+- **audio/** - WASAPI loopback (Windows) / PulseAudio monitor (Linux) capture, ring buffer.
+- **dsp/** - windowed FFT, band energies, spectral features, beat detection, the beat clock,
+  pitch, attack/release smoothing. Pure numpy.
+- **color/** - colour mapping as pure functions on floats.
+- **effects/** - Chase and Group Switch (shared with the manual app), the pulse sequencer,
+  ambient scenes.
+- **engine/** - ties it together on independent update loops.
+- **lamps/** - local Tuya control (tinytuya), discovery, one worker thread per lamp with its
+  own rate limit, change threshold and recovery.
+- **config/** - the JSON settings; **diagnostics/** - logging and metrics; **ui/** - PySide6.
 
-- **Devices & Setup tab** - identical to the music app's (same code, reused as-is):
-  add/scan/test lamps, name them, select which participate.
-- **Manual Color tab** - pick a color from a color dialog and apply it to whichever
-  lamps are currently selected; also Turn On/Off buttons for the selection.
-- **White Balance tab** - drives the bulb's WHITE work_mode instead of RGB: set a
-  static brightness + color temperature (0=warmest..1=coolest) for the selection, plus
-  a **White Chase** effect - a warm-or-cool region (`target_temp`) rotates through the
-  chase-ordered lamps instead of an RGB highlight, using the same rotators/width/speed/
-  intensity controls and the same position-grouping as the RGB Chase.
-- **Color + White tab** - lights the white LEDs and the RGB LEDs of the same lamps at
-  once, e.g. **blue under cool white** to make it read colder and **red under warm
-  white** to make it read warmer. Pick a saved lamp group (Devices & Setup -> Lamp
-  groups) or the current selection, set the white's temperature and brightness and the
-  color and its strength, and apply - then pick the next group and set it differently.
-  Each lamp's setting is remembered and comes back on restart. Both go out as one
-  command on the real-time control datapoint (DP 28), the only way the bulb shows them
-  together - so it needs *Lamp transitions* other than `legacy` (the default `direct`
-  is fine); with `legacy` the lamps show only the white. White Chase keeps the color
-  under the white while it runs.
-- **Chase / Rotating Light tab** - the RGB Chase overlay described below, run on its
-  own ~30 Hz timer instead of driven by audio. "Sync to beat" isn't offered here since
-  there's no audio to sync to (picking a beat-synced preset in the music app and then
-  opening this app just falls back to the constant speed instead of crashing).
-- **Ambient Scenes tab** - self-looping animations (see below) that replace the bulb's
-  own onboard "scene" animations specifically to solve **synchronization** across
-  multiple lamps.
+The DSP and colour code has no dependency on the lamp layer and vice versa, so the
+visualization math is tested with `pytest` alone, no bulbs needed.
 
-Only one PC-driven animation actually drives the lamps at a time (whichever you
-used/enabled most recently - applying a static color or enabling RGB Chase switches to
-RGB, applying White Balance or enabling White Chase switches to White, enabling an
-Ambient Scene takes over from either), since a bulb can only be in one work_mode at
-once and this app only ever runs one animation loop.
+## Local control: what's confirmed
 
-#### Ambient Scenes: solving lamp synchronization properly
-If you've been setting the bulbs' own built-in animated "scene" in the Airam app on
-each lamp individually, then trying to power-cycle a smart plug and a light switch at
-the same instant to line them up - stop doing that. It's fighting a fundamental
-limitation: each bulb's onboard scene animation runs on its **own internal clock**,
-starting whenever it was individually triggered, and there is no command to say "start
-now, in sync with these other lamps." Smart plugs' own switch-on latency makes the
-power-cycle trick unreliable on top of that.
+Full breakdown with the datapoint table in `DEVICE_NOTES.md`.
 
-Ambient Scenes are computed **once per tick, from one shared clock, on the PC**, and
-pushed to every selected lamp together on the same network round - so they are
-synchronized by construction, with zero timing trickery required:
+- **Confirmed on real hardware:** local LAN control (no cloud) of colour, brightness and
+  power, and the real-time control datapoint (DP 28) with colour and white together. Airam
+  SmartHome bulbs are Wi-Fi only, no hub.
+- They're on the **Tuya IoT platform** (product ID `cawpuqfm0ed5ykfj`), DP layout "Type B":
+  `switch_led`=20, `work_mode`=21, `bright_value_v2`=22, `temp_value_v2`=23,
+  `colour_data_v2`=24 - read from the bulbs' own `status()`, not assumed.
+- The protocol is Tuya's local LAN protocol (TCP 6668, encrypted per device), via
+  [`tinytuya`](https://github.com/jasonacox/tinytuya). No datapoint IDs are hardcoded:
+  `tinytuya.BulbDevice` adapts to the layout each bulb reports.
+- The Tuya cloud is used for one thing only: fetching the `local_key`s (at setup, and when
+  a lamp's key changes). All show traffic is local.
+- **Least verified:** the WHITE work_mode path (`LampDevice.set_white()`) used by Beat Sync
+  White, White Balance and White Chase - test it with the manual app's White Balance tab
+  before relying on it.
+- The bulbs' own scene datapoint (DP 25) is deliberately not used - its encoding was never
+  confirmed, and it wouldn't solve syncing anyway.
 
-- **color_cycle** - every lamp sweeps through the full hue wheel together (a
-  synchronized rainbow).
-- **breathing** - brightness pulses smoothly between a min and max at a fixed hue (RGB).
-- **temp_breathing** - the same smooth pulse, but on color temperature instead
-  (WHITE work_mode - warm to cool and back).
+## Why it's smooth
 
-`Speed` sets how many full cycles happen per second (e.g. 0.1 = one cycle every 10s).
-Every lamp defaults to phase offset 0 = perfectly synchronized; the optional per-lamp
-"Phase offset (ms)" table lets you deliberately stagger lamps instead, for a traveling
-wave look, if you ever want that - but synchronized is the default and the point.
+Levels pass through **attack/release exponential smoothing** (`dsp/smoothing.py`: a rising
+signal follows the attack time constant, a falling one the release), and every
+intermediate value is sent - bass going from 30 % to 80 % becomes
+`30 -> 35 -> 42 -> 51 -> 63 -> 74 -> 80`, not one jump. Beat Sync's flash and decay,
+the white pulses and the overlays' switch fades are envelopes of their own. The lamp layer
+rate-limits each lamp and skips sends that are effectively unchanged (`lamps/manager.py`).
 
-This intentionally does **not** touch the bulb's own scene datapoint (DP 25) - its
-on-wire encoding was never independently confirmed for these bulbs (unlike DP 24's
-colour format, which was), and using it wouldn't solve the sync problem anyway even if
-decoded. See `DEVICE_NOTES.md` for the full reasoning.
+## Update rates
 
-The Chase overlay's underlying math (`airam_lights/effects/chase.py`) is shared code
-between this app and `main.py`'s music visualizer - a fix or feature there (like the
-lamp-position grouping described below) applies to both automatically, they can never
-drift apart into two different implementations.
-
-### Chase / Rotating Light overlay (shared by both apps)
-
-Give a lamp a **chase position** (0, 1, 2, ...) - in the manual app's Chase tab, or in
-the Devices & Setup lamp list (both apps) - to include it in the
-rotation, in that order. **Lamps that share the same position number animate
-together, as one group** - this matters because your physical lamp layout is usually
-not a single ring; e.g. give the two lamps on each of four walls the same position
-number (0, 0, 1, 1, 2, 2, 3, 3) and the chase treats each wall as one step, moving
-around the room instead of assuming an actual circle of individually-addressable
-positions.
-
-- **Number of rotators**: how many highlights travel the loop at once, evenly spaced
-  and always moving together - 2 puts them on opposite sides, 3 a third apart, etc.
-- **Speed**: full rotations per second (e.g. 0.5 = one lap every 2 seconds), or, in the
-  music app only, synced to the detected beat.
-- **Reverse direction**: flips which way the highlight travels around the chase order.
-  Available on RGB Chase, White Chase, and Ambient Scenes' `color_cycle` (it has no
-  visible effect on `breathing`/`temp_breathing`, whose pulse is symmetric in time).
-- **Highlight width**: how many chase positions the glow spans (soft falloff) - lower
-  is a crisper "single spot" look.
-- **Intensity**: a brightness *boost multiplier* on top of each lamp's own current
-  brightness - never an independent/fixed value, so a lamp that's off/black stays that
-  way no matter the intensity or width (this was a real bug, now fixed and covered by a
-  regression test in `tests/test_chase.py`).
-- **Falloff curve**: `linear` (constant-rate falloff from the peak - the peak color is a
-  single fleeting instant, which can feel like it "flies by" too quickly) or `bezier`
-  (an eased S-curve/smoothstep that dwells near the peak color - and near the
-  background - for longer, transitioning fastest in the middle). Try `bezier` if a
-  chase color feels too brief.
-- **Soft steps** + **Switch fade** (off by default): with only a handful of lamps the
-  highlight can't really glide - whatever the width and falloff curve, each lamp's color
-  changes in visible jumps as the highlight moves on, and jumps outright when it steps
-  on a beat. With Soft steps on, every lamp's color fades to its new value over the
-  Switch fade time instead (a time constant, like Group Switch's *Switch fade* and Beat
-  Sync's *Hue snap speed*). Longer = softer, with a longer trail.
-- **Color**: `custom` (a fixed hue/saturation you set), `complementary` (the opposite
-  hue of whatever that lamp's own color currently is), or `hue_shift` (each position
-  shows a progressively different hue - a rainbow trail as the light travels around), or
-  `hue_shift_relative` (each lamp's own hue turned by the hue shift step).
-- **Dwell x** (per-lamp, in the same position table): how long the highlight lingers
-  at that lamp's own position relative to the rest of the loop - 1.0 is uniform/
-  default. Lower it for a position where several lamps share one chase order (e.g. a
-  multi-spot ceiling fixture) if that position feels like it holds the highlight
-  noticeably longer than single-lamp positions do; raise it to deliberately make the
-  highlight pause somewhere. Applies to both RGB Chase and White Chase, since they
-  share the same chase positions.
-
-Presets (Color Mapping tab, music app) capture the full setup, Chase overlay and
-per-lamp chase positions included - not just the color mapping mode's own settings.
-
----
-
-## 7. Why it feels smooth instead of "crude" like the Airam app
-
-Every level (band energy, spectral centroid, brightness, per-lamp output) passes
-through **attack/release exponential smoothing**
-(`value += (target - value) * alpha`, with `alpha` derived independently from the
-attack and release time constants depending on whether the signal is rising or
-falling - see `dsp/smoothing.py`). A bass hit can snap up quickly (short attack) while
-decaying gently (long release), and every intermediate value is sent, not just the
-start/end - e.g. bass going from 30% to 80% actually produces a sequence like
-`30 -> 35 -> 42 -> 51 -> 63 -> 74 -> 80`, never a single jump.
-
-On top of that, the network layer independently **rate-limits** each lamp
-(`lamp_command_rate_hz`) and **skips sends that are effectively unchanged**
-(`min_change_threshold`), so smoothing doesn't turn into needless network spam - see
-`lamps/manager.py`.
-
----
-
-## 8. Update rates - independently configurable
-
-| Stage | Config field | Default |
+| Stage | Config field | Default (fresh install) |
 |---|---|---|
 | Audio analysis (FFT) | `audio.analysis_update_hz` | 60 Hz |
-| Visual/color/smoothing | `network.visual_update_hz` | 30 Hz |
-| Per-lamp network commands | `network.lamp_command_rate_hz` (Color Mapping -> Global: *Lamp command rate*) | 20 Hz (auto backs off on failures) |
+| Colour engine | `network.visual_update_hz` | 30 Hz, but at least the lamp command rate |
+| Per-lamp commands | `network.lamp_command_rate_hz` (*Lamp command rate*) | 50/s |
 
-These are deliberately separate: the FFT can run faster than the color engine needs,
-and the color engine can run faster than any real Wi-Fi bulb can reliably accept
-commands. If a lamp starts failing/timing out, its worker thread automatically backs
-off (exponentially, capped at 16x its configured interval) without affecting any other
-lamp or the UI - each lamp has its own independent worker thread, so this holds
-regardless of how many lamps you have.
+Separate on purpose: the FFT can run faster than the colour engine needs, and the engine
+faster than a Wi-Fi bulb accepts commands. A failing lamp's worker backs off on its own
+(exponentially, up to 16x its interval) without affecting the other lamps or the UI.
 
----
-
-## 9. Running the tests
+## Running the tests
 
 ```powershell
 pip install -r requirements-dev.txt
-pytest tests/ -v
+pytest tests/
 ```
 
-These test the DSP and color-mapping modules in isolation (synthetic sine waves, no
-audio hardware; pure float math, no bulbs) - exactly the independence the spec asked
-for between the music-analysis engine and the lamp-control layer.
+Several hundred tests: DSP, beat clock, colour mapping, the pulse sequencer, Chase / Group
+Switch / ambient overlays, lamp workers and recovery, config round-trips (every setting
+survives a save and reload, old config files included), and offscreen Qt tests that build
+the real windows. No audio hardware or bulbs needed.
+
+## Known limitations
+
+- The WHITE work_mode path is the least verified on real hardware (see above).
+- `tinytuya`'s scan and wizard APIs have shifted between versions; `lamps/discovery.py` and
+  `tools/setup_wizard.py` try several call signatures, and the Devices tab lets you enter
+  everything by hand regardless.
+- The Tuya cloud linking (one-time) can be finicky depending on the account - see
+  `DEVICE_NOTES.md`.
+- Linux support is newer and less proven than Windows (see [Linux](#linux-from-source)).
+
+## Development history
+
+Phase 1 proved local control on one bulb (`tools/phase1_test.py`, `scan_devices.py`,
+`setup_wizard.py`); then came the multi-lamp device list, loopback audio, the RGB/HSV
+modes, per-lamp worker threads with backoff, Beat Sync / Peak Flash / Beat Sync White, the
+Chase overlay and the manual app, crash-proof persistence and keep-awake. Later releases
+added the shared beat clock, the pulse sequencer, Group Switch, music-driven colour (pitch,
+key), lamp recovery, the dark theme with the info panel, and the mode-dependent Quick
+Controls. (An early 8-band spectrum mode and per-lamp colour modifiers were later
+removed.) Release notes: [Releases](https://github.com/juhaj77/tuya-music-sync/releases).
 
 ---
 
-## 10. Development phases (status)
-
-- [x] **Phase 1** - local protocol investigation + single-bulb diagnostic script
-      (`tools/phase1_test.py`, `tools/scan_devices.py`, `tools/setup_wizard.py`).
-- [x] **Phase 2** - multi-lamp device list, selection, naming, groups, manual RGB/power
-      test (Devices & Setup tab).
-- [x] **Phase 3** - WASAPI loopback audio capture, level meter, spectrum display
-      (Visualizer tab, no lamp control involved).
-- [x] **Phase 4** - RGB Frequency visualization with attack/release smoothing.
-- [x] **Phase 5** - 8-band spectrum mode, HSV mode, configurable frequency ranges,
-      per-lamp modifiers, presets.
-- [x] **Phase 6** - performance/reliability: per-lamp worker threads, automatic
-      backoff, min-change thresholding, diagnostics tab.
-- [x] **Phase 7** - Beat Sync / Peak Flash / Beat Sync White color-mapping modes, the
-      Chase/Rotating Light overlay (shared between both apps, with reverse direction
-      and a linear/bezier falloff curve), Ambient Scenes, and the standalone
-      `manual_control.py` app for audio-free lamp control - all confirmed against real
-      hardware (see `DEVICE_NOTES.md`), except WHITE work_mode (see section 2).
-- [x] **Phase 8** - robustness/polish: config persistence that survives crashes
-      (20s autosave) and restores the manual app's exact last-picked color/white
-      balance on restart, a Windows keep-awake hook so long sessions survive automatic
-      idle sleep, and a full audit removing every hardcoded lamp-count assumption so the
-      app works the same with 1 lamp or 20.
-
-## 11. Known limitations / honest caveats
-
-- **RGB color control is confirmed against physical Airam bulbs** end-to-end (local
-  LAN, no cloud round-trip) - see `DEVICE_NOTES.md` for the full trace. **WHITE
-  work_mode control (Beat Sync White / White Balance / White Chase) is not yet
-  independently verified** against real hardware; test it yourself via the manual
-  app's White Balance tab before relying on it for anything important.
-- `tinytuya`'s LAN scan/wizard APIs have shifted slightly across versions;
-  `lamps/discovery.py` and `tools/setup_wizard.py` are written defensively (try
-  multiple call signatures / key names) but if your installed `tinytuya` version
-  differs meaningfully, check its own `python -m tinytuya scan` / `wizard` output
-  directly as a fallback - the app's Devices tab lets you enter everything manually
-  regardless.
-- Every non-UI module (`audio`, `dsp`, `color`, `lamps`, `config`, `engine`, `effects`)
-  is covered by an automated test suite (`pytest tests/`, currently 82 tests: DSP,
-  smoothing, color mapping, beat detection, Chase/Group Switch/Ambient overlays
-  including reverse direction, and full config-persistence round-trips) plus offscreen
-  Qt smoke tests that construct the real UI windows end-to-end.
-- The Tuya cloud account-linking step (one-time, during setup) can be finicky
-  depending on how your Airam SmartHome account is set up - `DEVICE_NOTES.md` documents
-  the exact snags hit during development (the "use the correct app" QR block, the
-  "data center is suspended" cloud console error) and working fallbacks for both.
-
----
-
-## License
+# License
 
 [MIT](LICENSE) - free to use, modify and share.
