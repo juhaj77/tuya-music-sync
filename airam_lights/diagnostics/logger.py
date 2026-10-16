@@ -12,6 +12,8 @@ Every place in this codebase that logs a device only logs its name/ip/id.
 from __future__ import annotations
 
 import collections
+import datetime
+import faulthandler
 import logging
 import logging.handlers
 from pathlib import Path
@@ -41,6 +43,7 @@ class LogBuffer(logging.Handler):
 
 
 _log_buffer: "LogBuffer | None" = None
+_crash_file = None  # kept open for faulthandler, which writes to it when the process crashes
 
 
 def get_log_buffer() -> LogBuffer:
@@ -74,5 +77,22 @@ def setup_logging(log_dir: "Path | None" = None, level: int = logging.INFO) -> L
     buffer = get_log_buffer()
     root.addHandler(buffer)
 
+    _enable_crash_log(log_dir / "crash.log")
     root.info("Logging initialized, writing to %s", log_dir / "app.log")
     return buffer
+
+
+def _enable_crash_log(path: Path) -> None:
+    """A native crash (an access violation in Qt, a C extension or Python
+    itself) ends the process without a Python traceback or a log line. With
+    faulthandler on, the stack of every thread is written to crash.log at
+    that moment instead, with a timestamp line before each run's output."""
+    global _crash_file
+    try:
+        if _crash_file is None:
+            _crash_file = open(path, "a", encoding="utf-8")
+        _crash_file.write(f"--- run started {datetime.datetime.now():%Y-%m-%d %H:%M:%S} ---\n")
+        _crash_file.flush()
+        faulthandler.enable(file=_crash_file, all_threads=True)
+    except OSError:
+        pass  # no crash log then - never stop the app over it
