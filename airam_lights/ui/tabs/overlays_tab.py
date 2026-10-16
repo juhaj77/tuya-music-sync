@@ -10,12 +10,10 @@ from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QScrollArea,
     QSpinBox,
-    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +23,7 @@ from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import beat_divisions, choice_combo, inactive_note, set_active, show_note
 from ..widgets.param_slider import FloatSlider
+from ..widgets.section import CollapsibleSection
 
 def _scroll_page() -> "tuple[QWidget, QVBoxLayout]":
     """A tab page that's just a QScrollArea wrapping a QVBoxLayout - the
@@ -48,20 +47,19 @@ class OverlaysTab(QWidget):
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
-        sub_tabs = QTabWidget()
-        outer.addWidget(sub_tabs)
-
-        chase_page, chase_root = _scroll_page()
-        sub_tabs.addTab(chase_page, "Chase Overlay")
-
-        group_switch_page, group_switch_root = _scroll_page()
-        sub_tabs.addTab(group_switch_page, "Group Switch")
+        page, root = _scroll_page()
+        outer.addWidget(page)
+        chase_root = group_switch_root = root
 
         # -- chase / rotating light overlay ----------------------------------------------
-        self.chase_white_note = inactive_note()
-        chase_root.addWidget(self.chase_white_note)
-        self.chase_box = chase_box = QGroupBox("Chase / Rotating Light overlay (works on top of every RGB mode)")
-        chase_outer_layout = QVBoxLayout(chase_box)
+        self.chase_box = chase_box = CollapsibleSection(
+            "Chase · rotating light", key="overlays/chase", checkable=True,
+            checked=controller.config.chase.enabled,
+            tooltip="A moving highlight travels through the lamps in their Chase order, on top of whatever "
+            "colour mode is active. Off: the mode shows with no traveling highlight layered on top.",
+        )
+        self.chase_white_note = chase_box.note
+        chase_outer_layout = chase_box.content_layout()
         chase_intro_label = QLabel(
             "Set 'Chase order' (0, 1, 2, ...) on the lamps on the Devices & Setup tab to include "
             "them in the rotation, in that order - a moving highlight travels through them, "
@@ -88,15 +86,9 @@ class OverlaysTab(QWidget):
         columns_row.addWidget(appearance_widget, 1)
         ch = controller.config.chase
 
-        # -- left column: enable/speed/sync -----------------------------------------
-        self.chase_enabled_checkbox = QCheckBox("Enabled")
-        self.chase_enabled_checkbox.setChecked(ch.enabled)
-        self.chase_enabled_checkbox.setToolTip(
-            "Turns the whole Chase overlay on or off - when off, whichever color mode is active "
-            "(RGB, HSV, Beat Sync, etc.) shows with no traveling highlight layered on top."
-        )
+        # -- left column: speed/sync --------------------------------------------------
+        self.chase_enabled_checkbox = chase_box.toggle
         self.chase_enabled_checkbox.toggled.connect(self._on_chase_changed)
-        speed_col.addWidget(self.chase_enabled_checkbox)
 
         rotators_row = QHBoxLayout()
         rotators_row.addWidget(QLabel("Number of rotators:"))
@@ -382,10 +374,15 @@ class OverlaysTab(QWidget):
         chase_root.addWidget(chase_box)
 
         # -- group switch: discrete alternative to the chase overlay above --------------------
-        self.gs_white_note = inactive_note()
-        group_switch_root.addWidget(self.gs_white_note)
-        self.gs_box = gs_box = QGroupBox("Group Switch (discrete alternative to Chase - one active group at a time)")
-        gs_outer_layout = QVBoxLayout(gs_box)
+        self.gs_box = gs_box = CollapsibleSection(
+            "Group Switch · one group at a time", key="overlays/group_switch", checkable=True,
+            checked=controller.config.group_switch.enabled,
+            tooltip="A discrete alternative to Chase: the lamps are grouped by their Effect group, and one "
+            "group at a time is active with a hard, instant switch. Off: no group is forced active and "
+            "Chase (if on) is the only overlay running.",
+        )
+        self.gs_white_note = gs_box.note
+        gs_outer_layout = gs_box.content_layout()
         gs_intro_label = QLabel(
             "Set 'Effect group' (0, 1, 2, ...) on the lamps on the Devices & Setup tab to include "
             "them here, in that order - a SEPARATE grouping from Chase's 'Chase order' above, so a "
@@ -410,15 +407,9 @@ class OverlaysTab(QWidget):
         gs_columns_row.addWidget(gs_appearance_widget, 1)
         gs = controller.config.group_switch
 
-        # -- left column: enable/speed/sync ------------------------------------------
-        self.gs_enabled_checkbox = QCheckBox("Enabled")
-        self.gs_enabled_checkbox.setChecked(gs.enabled)
-        self.gs_enabled_checkbox.setToolTip(
-            "Turns Group Switch on or off - when off, no group is forced 'active' and Chase (if also "
-            "enabled) is the only overlay running."
-        )
+        # -- left column: speed/sync ----------------------------------------------------
+        self.gs_enabled_checkbox = gs_box.toggle
         self.gs_enabled_checkbox.toggled.connect(self._on_group_switch_changed)
-        gs_speed_col.addWidget(self.gs_enabled_checkbox)
 
         self.gs_speed_slider = FloatSlider(
             "Speed (constant)", 0.02, 5.0, gs.speed_rotations_per_s, decimals=3, suffix=" switches/s",
@@ -677,6 +668,7 @@ class OverlaysTab(QWidget):
         self.gs_peak_high_spin.valueChanged.connect(self._on_group_switch_changed)
 
         group_switch_root.addWidget(gs_box)
+        root.addStretch(1)
 
         self._update_overlay_states()
 

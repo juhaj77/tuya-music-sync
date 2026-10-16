@@ -10,8 +10,12 @@ excludes = ["tkinter", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", 
             "PySide6.QtQuick", "PySide6.QtQml", "PySide6.QtPdf", "PySide6.QtMultimedia", "pytest"]
 
 
+# The theme's icon files (airam_lights/ui/assets), looked up next to ui/theme.py.
+datas = [("airam_lights/ui/assets", "airam_lights/ui/assets")]
+
+
 def analysis(script):
-    return Analysis([script], pathex=["."], excludes=excludes, noarchive=False)
+    return Analysis([script], pathex=["."], excludes=excludes, datas=datas, noarchive=False)
 
 
 def exe(a, name, console):

@@ -10,6 +10,8 @@ from typing import Optional
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QFrame, QHBoxLayout, QLabel, QSpinBox, QWidget
 
+from .. import theme
+
 # (header text, width, tooltip) per column, in order.
 _COLUMNS = [
     ("", 22, "Selected: the lamps the show plays on."),
@@ -70,7 +72,7 @@ class LampListHeader(QWidget):
         layout.setContentsMargins(7, 0, 7, 0)
         for column, (text, _, _) in enumerate(_COLUMNS):
             label = QLabel(text)
-            label.setStyleSheet("color: #999;")
+            label.setStyleSheet(f"color: {theme.MUTED};")
             layout.addWidget(_fix(label, column))
         layout.addStretch(1)
 
@@ -92,14 +94,14 @@ class LampTile(QFrame):
         layout.addWidget(_fix(self.checkbox, 0))
 
         self.status_dot = QLabel("●")  # ●
-        self.status_dot.setStyleSheet("color: #888; font-size: 14px;")
+        self.status_dot.setStyleSheet(f"color: {theme.DIM}; font-size: 14px;")
         layout.addWidget(_fix(self.status_dot, 1))
 
         self.name_label = QLabel(name)
         layout.addWidget(_fix(self.name_label, 2))
 
         self.ip_label = QLabel("")
-        self.ip_label.setStyleSheet("color: #999;")
+        self.ip_label.setStyleSheet(f"color: {theme.MUTED};")
         layout.addWidget(_fix(self.ip_label, 3))
 
         self.swatch = QFrame()
@@ -170,11 +172,11 @@ class LampTile(QFrame):
 
     def set_online(self, online: bool, error: str = "") -> None:
         if online:
-            self.status_dot.setStyleSheet("color: #3ecf5e; font-size: 14px;")
+            self.status_dot.setStyleSheet(f"color: {theme.OK}; font-size: 14px;")
             self.status_label.setText("Online")
             self.status_label.setToolTip("")
         else:
-            self.status_dot.setStyleSheet("color: #d6493e; font-size: 14px;")
+            self.status_dot.setStyleSheet(f"color: {theme.ERR}; font-size: 14px;")
             self.status_label.setText("Offline")
             self.status_label.setToolTip(error or "No response")
 

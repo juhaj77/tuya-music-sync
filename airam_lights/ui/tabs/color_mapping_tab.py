@@ -8,7 +8,6 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QComboBox,
-    QGroupBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -59,6 +58,7 @@ from ..widgets.musical import (
     show_note,
 )
 from ..widgets.param_slider import FloatSlider
+from ..widgets.section import CollapsibleSection
 
 
 class RGBModeEditor(QWidget):
@@ -153,9 +153,21 @@ class ColorMappingTab(QWidget):
 
         # -- Beat Sync mode -----------------------------------------------------------
         beat_widget = QWidget()
-        beat_layout = QVBoxLayout(beat_widget)
+        beat_page = QVBoxLayout(beat_widget)
         bs = cm.beat_sync
 
+        def beat_section(title: str, key: str, **kw) -> CollapsibleSection:
+            section = CollapsibleSection(title, key=f"beat/{key}", **kw)
+            beat_page.addWidget(section)
+            return section
+
+        # Each part of Beat Sync is a collapsible section; `beat_layout` is
+        # the one being filled.
+        beat_layout = beat_section(
+            "Beat detection", "detect",
+            tooltip="Beat Sync's own beat detector - used only while it doesn't follow the shared beat "
+            "clock (the Rhythm section at the top).",
+        ).content_layout()
         detect_row = QHBoxLayout()
         detect_row.addWidget(QLabel("Beat detection band:"))
         self.beat_low_spin = QSpinBox()
@@ -211,6 +223,10 @@ class ColorMappingTab(QWidget):
         beat_sensitivity_note.setWordWrap(True)
         beat_layout.addWidget(beat_sensitivity_note)
 
+        beat_layout = beat_section(
+            "Colour on the beat", "color",
+            tooltip="Which colour each beat jumps to, how bright the flash is and how it decays.",
+        ).content_layout()
         hue_row = QHBoxLayout()
         hue_row.addWidget(QLabel("Hue mode:"))
         self.beat_hue_mode_combo = QComboBox()
@@ -354,6 +370,11 @@ class ColorMappingTab(QWidget):
                 w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
+        beat_layout = beat_section(
+            "Between beats", "between",
+            tooltip="What happens between two beats: the brightness fades, the colour glides on toward "
+            "the next one, or both.",
+        ).content_layout()
         between_row = QHBoxLayout()
         between_row.addWidget(QLabel("Between beats:"))
         self.beat_fade_checkbox = QCheckBox("Fade brightness")
@@ -397,24 +418,17 @@ class ColorMappingTab(QWidget):
         self.beat_hue_glide_slider.valueChanged.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_hue_glide_slider)
 
-        beat_dark_note = QLabel(
-            "Dark pulses: on a random subset of beats, briefly dip brightness toward black BEFORE "
-            "flashing - a rhythm-synced pause/strobe accent, on top of the hue and brightness above."
+        dark_section = beat_section(
+            "Dark pulses", "dark", checkable=True, checked=bs.dark_pulse_enabled,
+            tooltip="On a random subset of beats, briefly dip brightness toward black BEFORE flashing - a "
+            "rhythm-synced pause/strobe accent, on top of the hue and brightness above. White pulses "
+            "are unaffected either way.",
         )
-        beat_dark_note.setWordWrap(True)
-        beat_layout.addWidget(beat_dark_note)
-
-        self.beat_dark_enabled_checkbox = QCheckBox("Enabled")
-        self.beat_dark_enabled_checkbox.setChecked(bs.dark_pulse_enabled)
-        self.beat_dark_enabled_checkbox.setToolTip(
-            "Turns the dark-pulse accent on or off - leave unchecked if you never want this effect "
-            "(white pulses below are unaffected either way)."
-        )
+        beat_layout = dark_section.content_layout()
+        self.beat_dark_enabled_checkbox = dark_section.toggle
         self.beat_dark_enabled_checkbox.toggled.connect(self._on_beat_changed)
-        beat_layout.addWidget(self.beat_dark_enabled_checkbox)
         self.beat_dark_trigger_combo = self._trigger_combo(beat_layout, "Dark pulse on:", bs.dark_pulse_trigger)
-        self.beat_dark_note = inactive_note()
-        beat_layout.addWidget(self.beat_dark_note)
+        self.beat_dark_note = dark_section.note
 
         self.beat_dark_prob_slider = FloatSlider(
             "Dark pulse probability", 0.0, 1.0, bs.dark_pulse_probability, decimals=2,
@@ -450,23 +464,16 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
-        beat_white_pulse_note = QLabel(
-            "White pulses: on a subset of beats, a brief flash of the lamp's own white LEDs right as "
-            "the beat hits - e.g. a hi-hat/cymbal accent. Always the real white LEDs, never white mixed "
-            "from RGB, so the colored LEDs keep all their output for color. Independent of dark pulses "
-            "above - each rolls its own probability, so both, either, or neither can happen on a hit."
+        white_section = beat_section(
+            "White pulses", "white", checkable=True, checked=bs.white_pulse_enabled,
+            tooltip="On a subset of beats, a brief flash of the lamp's own white LEDs right as the beat "
+            "hits - e.g. a hi-hat/cymbal accent. Always the real white LEDs, never white mixed from RGB, "
+            "so the colored LEDs keep all their output for color. Independent of dark pulses - each rolls "
+            "its own probability, so both, either, or neither can happen on a hit.",
         )
-        beat_white_pulse_note.setWordWrap(True)
-        beat_layout.addWidget(beat_white_pulse_note)
-
-        self.beat_white_pulse_enabled_checkbox = QCheckBox("Enabled")
-        self.beat_white_pulse_enabled_checkbox.setChecked(bs.white_pulse_enabled)
-        self.beat_white_pulse_enabled_checkbox.setToolTip(
-            "Turns the white-flash accent on or off - leave unchecked if you never want this effect "
-            "(dark pulses above are unaffected either way)."
-        )
+        beat_layout = white_section.content_layout()
+        self.beat_white_pulse_enabled_checkbox = white_section.toggle
         self.beat_white_pulse_enabled_checkbox.toggled.connect(self._on_beat_changed)
-        beat_layout.addWidget(self.beat_white_pulse_enabled_checkbox)
 
         white_target_row = QHBoxLayout()
         white_target_row.addWidget(QLabel("True white lamps:"))
@@ -478,7 +485,7 @@ class ColorMappingTab(QWidget):
             "(default): every selected lamp at once. chase: the lamps the Chase highlight is on at that "
             "moment - if Chase moves more than one lamp between flashes, the white skips lamps. group: "
             "Group Switch's currently active group. rotate: the white gets its own rotation through the "
-            "Chase order ('Chase order' in the Per-Lamp table) - every flash moves exactly one lamp on, "
+            "Chase order ('Chase order' on the Devices & Setup tab) - every flash moves exactly one lamp on, "
             "so none is skipped however fast Chase moves; it turns the same way as Chase. The lamps are "
             "picked when the flash starts and kept for its whole duration. With too few positions for "
             "the chosen option, every lamp flashes."
@@ -501,8 +508,7 @@ class ColorMappingTab(QWidget):
         self.beat_white_rotators_note = inactive_note()
         beat_layout.addWidget(self.beat_white_rotators_note)
         self.beat_white_trigger_combo = self._trigger_combo(beat_layout, "White pulse on:", bs.white_pulse_trigger)
-        self.beat_white_note = inactive_note()
-        beat_layout.addWidget(self.beat_white_note)
+        self.beat_white_note = white_section.note
 
         self.beat_white_pulse_prob_slider = FloatSlider(
             "White pulse probability", 0.0, 1.0, bs.white_pulse_probability, decimals=2,
@@ -574,7 +580,7 @@ class ColorMappingTab(QWidget):
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
 
-        beat_layout.addWidget(self._build_sequencer_box(controller.config.sequencer))
+        beat_page.addWidget(self._build_sequencer_box(controller.config.sequencer))
 
         # The beat modes are built after the others but shown first - Beat Sync is the main mode.
         sub_tabs.insertTab(0, beat_widget, "Beat Sync")
@@ -794,8 +800,12 @@ class ColorMappingTab(QWidget):
                 page_layout.addStretch(1)
 
         # -- global ---------------------------------------------------------------------
-        global_box = QGroupBox("Global")
-        global_layout = QVBoxLayout(global_box)
+        global_box = CollapsibleSection(
+            "Global", key="color/global",
+            tooltip="Settings that apply in every colour mode: the response curve, how often and how the "
+            "lamps are sent their colours, and inverting the brightness.",
+        )
+        global_layout = global_box.content_layout()
         curve_row = QHBoxLayout()
         curve_row.addWidget(QLabel("Response curve:"))
         self.curve_combo = QComboBox()
@@ -867,8 +877,11 @@ class ColorMappingTab(QWidget):
         root.addWidget(global_box)
 
         # -- presets ------------------------------------------------------------------------
-        preset_box = QGroupBox("Presets")
-        preset_layout = QVBoxLayout(preset_box)
+        preset_box = CollapsibleSection(
+            "Presets", key="color/presets", expanded=True,
+            tooltip="Built-in looks, and your own saved snapshots of every colour setting.",
+        )
+        preset_layout = preset_box.content_layout()
 
         builtin_row = QHBoxLayout()
         builtin_row.addWidget(QLabel("Built-in look:"))
@@ -1297,9 +1310,13 @@ class ColorMappingTab(QWidget):
         layout.addLayout(row)
         return combo
 
-    def _build_rhythm_box(self, rh: RhythmConfig) -> QGroupBox:
-        box = QGroupBox("Rhythm - shared beat clock")
-        layout = QVBoxLayout(box)
+    def _build_rhythm_box(self, rh: RhythmConfig) -> CollapsibleSection:
+        box = CollapsibleSection(
+            "Rhythm · shared beat clock", key="color/rhythm",
+            tooltip="The one beat detector every layer can follow: tempo lock, bars, lead time - and what "
+            "to do when there's no beat.",
+        )
+        layout = box.content_layout()
         intro = QLabel(
             "One beat detector that every layer can follow, so the flash, the color changes, Chase and "
             "Group Switch all move on the same beats instead of each reacting to different hits. It "
@@ -1429,14 +1446,19 @@ class ColorMappingTab(QWidget):
 
     # -- pulse sequencer ---------------------------------------------------------------------
 
-    def _build_sequencer_box(self, sq: PulseSequencerConfig) -> QGroupBox:
-        box = QGroupBox("Pulse sequencer - white and dark pulses on musical positions")
-        layout = QVBoxLayout(box)
+    def _build_sequencer_box(self, sq: PulseSequencerConfig) -> CollapsibleSection:
+        box = CollapsibleSection(
+            "Pulse sequencer", key="beat/sequencer", checkable=True, checked=sq.enabled,
+            tooltip="White and dark pulses placed on musical positions - rhythm patterns, a white walk "
+            "round the lamp groups, phrase fills and breaths, strobes and colour sweeps - instead of a "
+            "probability roll on every beat. Needs the shared beat clock.",
+        )
+        layout = box.content_layout()
         intro = QLabel(
             "Instead of rolling a probability on every beat, places the white and dark pulses above "
             "like a lighting operator would: on rhythm patterns in 16th notes (also between the "
             "beats), with the white flash walking from lamp group to lamp group (the Group Switch "
-            "groups, 'Effect group' in the Per-Lamp table), phrase fills and a dark breath before each "
+            "groups, 'Effect group' on the Devices & Setup tab), phrase fills and a dark breath before each "
             "new phrase, and busier patterns when the music gets louder. Uses the pulse durations, "
             "true-white brightness and cool ratio set above. Needs the shared beat clock (Rhythm box) "
             "- while it isn't locked yet, the per-beat settings above apply."
@@ -1444,12 +1466,9 @@ class ColorMappingTab(QWidget):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        self.seq_enabled_checkbox = QCheckBox("Enabled")
-        self.seq_enabled_checkbox.setChecked(sq.enabled)
+        self.seq_enabled_checkbox = box.toggle
         self.seq_enabled_checkbox.toggled.connect(self._on_sequencer_changed)
-        layout.addWidget(self.seq_enabled_checkbox)
-        self.seq_note = inactive_note()
-        layout.addWidget(self.seq_note)
+        self.seq_note = box.note
 
         self.seq_white_combo = self._labeled_combo(
             layout, "White pattern:", WHITE_PATTERNS, sq.white_pattern,
@@ -1497,8 +1516,8 @@ class ColorMappingTab(QWidget):
         )
         self.seq_walk_positions_combo = self._labeled_combo(
             layout, "Walk through:", ("groups", "chase_order"), sq.walk_positions,
-            "What the walk steps through. groups: the Group Switch groups ('Effect group' in the "
-            "Per-Lamp table). chase_order: lamp by lamp in the Chase order ('Chase order'). How many "
+            "What the walk steps through. groups: the Group Switch groups ('Effect group' on the "
+            "Devices & Setup tab). chase_order: lamp by lamp in the Chase order ('Chase order'). How many "
             "lamps flash at once follows 'Rotating' next to True white lamps above.",
         )
         for combo in (self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo):
@@ -1587,10 +1606,10 @@ class ColorMappingTab(QWidget):
         self._build_strobe_controls(layout, sq)
         return box
 
-    def _build_strobe_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
-        self.seq_strobe_checkbox = QCheckBox("Strobe (now and then a short cool-white burst on every lamp at once)")
-        self.seq_strobe_checkbox.setChecked(sq.strobe_enabled)
-        self.seq_strobe_checkbox.setToolTip(
+    def _build_strobe_controls(self, parent_layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        section = CollapsibleSection(
+            "Strobe", key="beat/strobe", checkable=True, checked=sq.strobe_enabled, nested=True,
+            tooltip="Now and then a short cool-white burst on every lamp at once. "
             "A roll into the next phrase or bar: the end of a bar becomes a burst of fast cool-white "
             "flashes on every selected lamp at the same instant, on top of the show - the colours and the "
             "other pulses keep running underneath. Rare by default, so it stays an event; placement, "
@@ -1598,12 +1617,14 @@ class ColorMappingTab(QWidget):
             "long as a whole bar. The flash rate follows the tempo: the fastest subdivision of the beat "
             "under Max rate. Needs Lamp transitions 'direct' or 'smooth' (Global box).\n\n"
             "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy - "
-            "the usual recommendation for venues is at most 4 flashes per second."
+            "the usual recommendation for venues is at most 4 flashes per second.",
         )
+        parent_layout.addWidget(section)
+        layout = section.content_layout()
+        layout.addWidget(self._intro("Now and then a short cool-white burst on every lamp at once."))
+        self.seq_strobe_checkbox = section.toggle
         self.seq_strobe_checkbox.toggled.connect(self._on_sequencer_changed)
-        layout.addWidget(self.seq_strobe_checkbox)
-        self.seq_strobe_note = inactive_note()
-        layout.addWidget(self.seq_strobe_note)
+        self.seq_strobe_note = section.note
 
         self.seq_strobe_placement_combo = self._labeled_combo(
             layout, "Strobe placement:", STROBE_PLACEMENTS, sq.strobe_placement,
@@ -1693,16 +1714,14 @@ class ColorMappingTab(QWidget):
         test_row.addWidget(self.seq_strobe_test_label, stretch=1)
         layout.addLayout(test_row)
 
-        self._build_flash_strobe_controls(layout, sq)
-        self._build_color_sweep_controls(layout, sq)
+        self._build_flash_strobe_controls(parent_layout, sq)
+        self._build_color_sweep_controls(parent_layout, sq)
 
-    def _build_flash_strobe_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
-        self.seq_flash_strobe_checkbox = QCheckBox(
-            "Flash strobe (now and then one group's white flash becomes a short strobe)"
-        )
-        self.seq_flash_strobe_checkbox.setChecked(sq.flash_strobe_enabled)
-        self.seq_flash_strobe_checkbox.setToolTip(
-            "Along the white walk: now and then one of the walk's white flashes is played as a short "
+    def _build_flash_strobe_controls(self, parent_layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        section = CollapsibleSection(
+            "Flash strobe", key="beat/flash_strobe", checkable=True, checked=sq.flash_strobe_enabled,
+            nested=True,
+            tooltip="Now and then one group's white flash becomes a short strobe. Along the white walk: now and then one of the walk's white flashes is played as a short "
             "strobe on just that lamp group instead - so as the white goes round the room, a strobe shows "
             "up here and there, like a glitch. With several White rotators only the walk's own group "
             "strobes; the others keep their plain white flash. It starts on the flash's beat (never the "
@@ -1714,10 +1733,13 @@ class ColorMappingTab(QWidget):
             "pulses. With a white flash shorter than two strobe flashes it stays a plain flash. "
             "The rate and on-time are the Strobe's (Strobe max rate, Strobe on-time above). Independent "
             "of the Strobe checkbox. Needs Lamp transitions 'direct' or 'smooth' (Global box).\n\n"
-            "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy."
+            "Flashing light at these rates can trigger seizures in people with photosensitive epilepsy.",
         )
+        parent_layout.addWidget(section)
+        layout = section.content_layout()
+        layout.addWidget(self._intro("Now and then one group's white flash becomes a short strobe."))
+        self.seq_flash_strobe_checkbox = section.toggle
         self.seq_flash_strobe_checkbox.toggled.connect(self._on_sequencer_changed)
-        layout.addWidget(self.seq_flash_strobe_checkbox)
 
         self.seq_flash_strobe_placement_combo = self._labeled_combo(
             layout, "Flash strobe placement:", FLASH_STROBE_PLACEMENTS, sq.flash_strobe_placement,
@@ -1758,21 +1780,21 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_sequencer_changed)
             layout.addWidget(w)
 
-    def _build_color_sweep_controls(self, layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
-        self.seq_sweep_checkbox = QCheckBox(
-            "Color sweep (now and then a colour of its own runs fast round the lamps in Chase order)"
-        )
-        self.seq_sweep_checkbox.setChecked(sq.color_sweep_enabled)
-        self.seq_sweep_checkbox.setToolTip(
-            "Now and then the colour below runs once round the lamps in Chase order ('Chase order' in the "
-            "Per-Lamp table - lamps without one are left out), fast: over the Sweep length, each position "
+    def _build_color_sweep_controls(self, parent_layout: QVBoxLayout, sq: PulseSequencerConfig) -> None:
+        section = CollapsibleSection(
+            "Color sweep", key="beat/color_sweep", checkable=True, checked=sq.color_sweep_enabled, nested=True,
+            tooltip="Now and then the colour below runs once round the lamps in Chase order ('Chase order' in the "
+            "Devices & Setup tab - lamps without one are left out), fast: over the Sweep length, each position "
             "lit in turn for its share of it, on top of the show. Placed on the beat grid like the strobe: "
             "it ends on a bar line, so the downbeat lands clean, and never runs during the strobe (a strobe "
             "takes over from one still running). Uses only its own settings below - none of the Chase "
-            "overlay's (Chase itself can stay off)."
+            "overlay's (Chase itself can stay off).",
         )
+        parent_layout.addWidget(section)
+        layout = section.content_layout()
+        layout.addWidget(self._intro("Now and then a colour of its own runs fast round the lamps in Chase order."))
+        self.seq_sweep_checkbox = section.toggle
         self.seq_sweep_checkbox.toggled.connect(self._on_sequencer_changed)
-        layout.addWidget(self.seq_sweep_checkbox)
 
         self.seq_sweep_color_combo = self._labeled_combo(
             layout, "Sweep colour:", COLOR_SWEEP_COLORS, sq.color_sweep_color,
@@ -1878,6 +1900,13 @@ class ColorMappingTab(QWidget):
 
     def _on_strobe_test(self) -> None:
         self.seq_strobe_test_label.setText(self.controller.engine.trigger_strobe_test())
+
+    @staticmethod
+    def _intro(text: str) -> QLabel:
+        """A one-line explanation at the top of a section's settings."""
+        label = QLabel(text)
+        label.setWordWrap(True)
+        return label
 
     @staticmethod
     def _labeled_combo(layout: QVBoxLayout, label: str, items, value: str, tooltip: str) -> QComboBox:

@@ -401,6 +401,13 @@ Once this passes, update the confirmation table in `DEVICE_NOTES.md` and move on
 python main.py
 ```
 
+The window is dark throughout: settings sit in cards, and the features are **collapsible
+sections** - a header row with the feature's name and, for anything that can be switched
+on or off, its switch; click the name (or the chevron) to open that feature's settings,
+and only that one. Which sections you left open is remembered between runs
+(`ui.ini` next to `config.json`). A section whose feature can't run right now says why in
+its header, in orange, even when closed.
+
 ### Visualizer tab
 Pick your audio **Source**: loopback (default - your current default playback
 device, no microphone involved; WASAPI loopback on Windows, the output's monitor on
@@ -854,9 +861,9 @@ min interval, flash/sustain brightness, dark pulses) works exactly like Beat Syn
 > see `DEVICE_NOTES.md`. Test it via the manual app's White Balance tab first.
 
 ### Chase & Group Switch tab
-Two inner sub-tabs, one per overlay: **Chase Overlay** and **Group Switch**. Which lamps
-take part, and where, is set per lamp on the Devices & Setup tab (*Chase order*, *Chase
-dwell x*, *Effect group*).
+Two collapsible sections, one per overlay - **Chase** and **Group Switch** - each with its
+on/off switch in the header. Which lamps take part, and where, is set per lamp on the
+Devices & Setup tab (*Chase order*, *Chase dwell x*, *Effect group*).
 
 #### Chase / Rotating Light overlay
 An overlay effect layered on top of **whichever color mode is active** (RGB, HSV,

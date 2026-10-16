@@ -25,6 +25,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ...effects.pulse_sequencer import release_level
+from .. import theme
 
 _MODE_NAMES = {
     "beat_sync": "Beat Sync",
@@ -34,15 +35,15 @@ _MODE_NAMES = {
     "hsv_music": "HSV Music",
     "custom": "Custom",
 }
-_BG = QColor(24, 24, 28)
-_BORDER = QColor(70, 70, 76)
-_TEXT = QColor(170, 170, 178)
-_DIM = QColor(110, 110, 118)
-_BEAT_LINE = QColor(52, 52, 60)
-_BAR_LINE = QColor(105, 105, 115)
-_PHRASE = QColor(214, 170, 60)
-_NOW = QColor(235, 235, 240)
-_WHITE = QColor(245, 245, 250)
+_BG = QColor(theme.INPUT)
+_BORDER = QColor(theme.BORDER)
+_TEXT = QColor(theme.MUTED)
+_DIM = QColor(theme.DIM)
+_BEAT_LINE = QColor(theme.BORDER_SOFT)
+_BAR_LINE = QColor("#3a4454")
+_PHRASE = QColor(theme.WARN)
+_NOW = QColor(235, 238, 244)
+_WHITE = QColor(245, 247, 250)
 _FLASH_STROBE = QColor(255, 213, 74)
 _DARK = QColor(124, 104, 255)
 _STROBE = QColor(77, 208, 225)
@@ -228,8 +229,9 @@ class InfoPanel(QFrame):
         super().__init__(parent)
         self.controller = controller
         self.setFrameShape(QFrame.StyledPanel)
+        self.setProperty("role", "panel")
         root = QVBoxLayout(self)
-        root.setContentsMargins(8, 4, 8, 6)
+        root.setContentsMargins(10, 6, 10, 8)
         root.setSpacing(4)
 
         row = QHBoxLayout()
@@ -291,10 +293,10 @@ class InfoPanel(QFrame):
     def _clock_text(engine, config, beat, bpb: int) -> str:
         mode = _MODE_NAMES.get(config.color_mapping.mode, config.color_mapping.mode)
         if not engine.running:
-            return f"<span style='color:#999'>Stopped - press Start on the Visualizer tab. Mode: {mode}</span>"
+            return f"<span style='color:{theme.MUTED}'>Stopped - press Start on the Visualizer tab. Mode: {mode}</span>"
         parts = []
         if beat is None:
-            parts.append("<span style='color:#999'>Beat clock idle (nothing follows it in this mode)</span>")
+            parts.append(f"<span style='color:{theme.MUTED}'>Beat clock idle (nothing follows it in this mode)</span>")
         else:
             tempo = f"<b>{beat.bpm:.0f} BPM</b>" if beat.bpm else "<b>finding tempo...</b>"
             if beat.coasting:
@@ -340,4 +342,4 @@ class InfoPanel(QFrame):
             parts.append(f"last strobe: {status['strobe']['flashes']} flashes at {status['strobe']['hz']:.1f}/s")
         if sq.color_sweep_enabled and "sweep" in latest:
             parts.append(f"last sweep: {latest['sweep']['length']:g} beats ({latest['sweep']['reason']})")
-        return "<span style='color:#999'>" + "  &middot;  ".join(parts) + "</span>"
+        return f"<span style='color:{theme.MUTED}'>" + "  &middot;  ".join(parts) + "</span>"

@@ -8,10 +8,12 @@ def main() -> None:
     from PySide6.QtWidgets import QApplication
 
     from .keep_awake import allow_sleep, prevent_sleep
+    from .ui.theme import apply_theme
     from .ui.manual_main_window import ManualMainWindow
 
     app = QApplication(sys.argv)
     app.setApplicationName("Airam Manual Lights")
+    apply_theme(app)
     prevent_sleep()
     window = ManualMainWindow()
     window.show()

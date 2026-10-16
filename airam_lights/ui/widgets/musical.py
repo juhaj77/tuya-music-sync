@@ -79,7 +79,7 @@ def inactive_note() -> QLabel:
     """An initially hidden note that says why the settings around it are greyed out."""
     label = QLabel()
     label.setWordWrap(True)
-    label.setStyleSheet("color: #c8812a; font-style: italic;")
+    label.setProperty("role", "note")  # the theme colours it (ui/theme.py)
     label.hide()
     return label
 

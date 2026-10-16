@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 
 from ...color.models import Color
 from ...config.schema import DeviceConfig
+from .. import theme
 from ..controller import AppController
 from ..widgets.device_dialog import DeviceDialog
 from ..widgets.lamp_tile import LampListHeader, LampTile
@@ -110,7 +111,6 @@ class DevicesTab(QWidget):
             "manually. See README.md for details."
         )
         self.hint_label.setWordWrap(True)
-        self.hint_label.setStyleSheet("color: #999;")
         root.addWidget(self.hint_label)
 
         self._current_selected_id: "str | None" = None
@@ -169,7 +169,7 @@ class DevicesTab(QWidget):
             self._current_selected_id = device_id
             for t in self._tiles.values():
                 t.setStyleSheet("")
-            tile.setStyleSheet("background-color: rgba(100,140,255,40);")
+            tile.setStyleSheet(f"LampTile {{ background-color: {theme.ACCENT_DIM}; border-color: {theme.ACCENT}; }}")
 
         return handler
 

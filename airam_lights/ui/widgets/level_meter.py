@@ -5,6 +5,8 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
+from .. import theme
+
 
 class LevelMeter(QWidget):
     def __init__(self, parent=None):
@@ -23,7 +25,7 @@ class LevelMeter(QWidget):
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect()
 
-        painter.fillRect(rect, QColor(30, 30, 34))
+        painter.fillRect(rect, QColor(theme.INPUT))
 
         rms_w = int(rect.width() * self._rms)
         if rms_w > 0:
@@ -37,5 +39,5 @@ class LevelMeter(QWidget):
         painter.setPen(QColor(255, 255, 255))
         painter.drawLine(peak_x, 0, peak_x, rect.height())
 
-        painter.setPen(QColor(80, 80, 86))
+        painter.setPen(QColor(theme.BORDER))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))

@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QWidget
 
 from ...dsp.fft_engine import SpectrumFrame
+from .. import theme
 
 _NUM_BARS = 48
 _LOW_HZ = 20.0
@@ -46,7 +47,7 @@ class SpectrumWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
         rect = self.rect()
-        painter.fillRect(rect, QColor(24, 24, 28))
+        painter.fillRect(rect, QColor(theme.INPUT))
 
         n = len(self._levels)
         if n == 0:
@@ -59,5 +60,5 @@ class SpectrumWidget(QWidget):
             color = QColor.fromHsv(max(0, min(359, hue)), 200, 255)
             painter.fillRect(int(x), int(rect.height() - h), max(1, int(bar_w) - 1), int(h), color)
 
-        painter.setPen(QColor(70, 70, 76))
+        painter.setPen(QColor(theme.BORDER))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
