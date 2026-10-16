@@ -8,11 +8,13 @@ def main() -> None:
     from PySide6.QtWidgets import QApplication
 
     from .keep_awake import allow_sleep, prevent_sleep
+    from .ui import main_thread_gc
     from .ui.theme import apply_theme
     from .ui.main_window import MainWindow
 
     app = QApplication(sys.argv)
     app.setApplicationName("Airam Music Lights")
+    main_thread_gc.install(app)  # collect cycles (and the Qt objects in them) on this thread only
     apply_theme(app)
     prevent_sleep()
     window = MainWindow()
