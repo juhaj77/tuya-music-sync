@@ -10,7 +10,8 @@ right there, and open only the one being tuned.
     show_note(section.note, "why it's inactive")  # shows in the header, even when collapsed
 
 Which sections are open is remembered between runs (ui.ini, by `key`);
-on first run a feature's section is open when the feature is on.
+on first run they all start closed, so the page is a short list of features
+rather than every setting at once.
 """
 from __future__ import annotations
 
@@ -73,15 +74,15 @@ class CollapsibleSection(QFrame):
         checkable: bool = False,
         checked: bool = False,
         tooltip: str = "",
-        expanded: Optional[bool] = None,
+        expanded: bool = False,
         nested: bool = False,
         parent=None,
     ):
         """`key`: remembers whether the section is open between runs (None =
         not remembered). `checkable`: a feature with an on/off switch in the
-        header (`checked` its state). `expanded`: how it starts when there's
-        no remembered state - None = open when switched on (a plain section:
-        closed). `nested`: a section inside another's settings."""
+        header (`checked` its state). `expanded`: whether it starts open when
+        there's no remembered state (default: closed). `nested`: a section
+        inside another's settings."""
         super().__init__(parent)
         self._key = key
         self.setProperty("role", "section")
@@ -140,7 +141,7 @@ class CollapsibleSection(QFrame):
 
         remembered = self._remembered()
         if remembered is None:
-            remembered = expanded if expanded is not None else (checked if checkable else False)
+            remembered = expanded
         self.set_expanded(remembered, remember=False)
 
     # -- open / closed -------------------------------------------------------------------

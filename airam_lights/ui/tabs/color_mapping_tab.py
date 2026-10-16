@@ -878,7 +878,7 @@ class ColorMappingTab(QWidget):
 
         # -- presets ------------------------------------------------------------------------
         preset_box = CollapsibleSection(
-            "Presets", key="color/presets", expanded=True,
+            "Presets", key="color/presets",
             tooltip="Built-in looks, and your own saved snapshots of every colour setting.",
         )
         preset_layout = preset_box.content_layout()

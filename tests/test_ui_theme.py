@@ -71,12 +71,12 @@ def test_toggle_switch_has_a_check_boxs_api(qapp):
 def test_section_opens_and_closes_from_its_header(qapp, settings_dir):
     section = CollapsibleSection("Dark pulses", key="test/dark", checkable=True, checked=True, tooltip="dip")
     section.show()
-    assert section.is_expanded()  # a feature that's on starts open
+    assert not section.is_expanded()  # starts closed, even with the feature on
     assert section.toggle.isChecked()
     section._header.clicked.emit()
-    assert not section.is_expanded() and section.content_widget().isHidden()
+    assert section.is_expanded() and not section.content_widget().isHidden()
     section.toggle_expanded()
-    assert section.is_expanded()
+    assert not section.is_expanded() and section.content_widget().isHidden()
 
 
 def test_section_remembers_whether_it_was_open(qapp, settings_dir):

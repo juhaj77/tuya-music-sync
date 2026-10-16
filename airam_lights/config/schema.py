@@ -1445,19 +1445,33 @@ class AppConfig:
         from .default_look import DEFAULT_LOOK
 
         cfg = cls()
+        cm = cfg.color_mapping
         targets = {
-            "beat_sync": cfg.color_mapping.beat_sync,
-            "smoothing": cfg.color_mapping.smoothing,
+            "color_mapping": cm,
+            "beat_sync": cm.beat_sync,
+            "beat_sync_white": cm.beat_sync_white,
+            "peak_flash": cm.peak_flash,
+            "hsv": cm.hsv,
+            "rgb": cm.rgb,
+            "custom": cm.custom,
+            "smoothing": cm.smoothing,
             "rhythm": cfg.rhythm,
             "sequencer": cfg.sequencer,
             "chase": cfg.chase,
             "group_switch": cfg.group_switch,
+            "white_chase": cfg.white_chase,
             "network": cfg.network,
         }
-        for section, values in DEFAULT_LOOK.items():
-            target = targets[section]
+
+        def apply(target, values: dict, path: str) -> None:
             for key, value in values.items():
                 if not hasattr(target, key):
-                    raise KeyError(f"DEFAULT_LOOK: unknown setting {section}.{key}")
-                setattr(target, key, value)
+                    raise KeyError(f"DEFAULT_LOOK: unknown setting {path}.{key}")
+                if isinstance(value, dict):
+                    apply(getattr(target, key), value, f"{path}.{key}")  # e.g. rgb's "r" channel
+                else:
+                    setattr(target, key, value)
+
+        for section, values in DEFAULT_LOOK.items():
+            apply(targets[section], values, section)
         return cfg

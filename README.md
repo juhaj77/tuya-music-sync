@@ -59,19 +59,29 @@ part is new and hasn't been run on a real Linux desktop yet, so reports are very
 > peak, not just an RGB approximation, with warm and cool white flashes mixed in an
 > adjustable ratio rather than one fixed color temperature every time),
 > instead of the continuous, sometimes-muted blending the other modes do. A fresh
-> install starts with a tuned show built on it: Beat Sync on the **shared beat clock**,
-> the **pulse sequencer** walking true-white flashes from lamp group to lamp group (with
-> an occasional strobe roll), the **Group Switch** overlay in `hue_shift` mode, every hue
-> change gliding over 140 ms, and a *Lamp command rate* of 50/s so those glides stay
-> smooth. The **Chase / Rotating Light overlay** ships switched off but already set up to
-> match - turn it on and it fits the rest. Until you assign Group Switch groups (and a
-> Chase order) to the lamps on the Devices & Setup tab, the white flashes land on every lamp at once. **If
-> all your lamps are in one group, switch Group Switch off** (its own sub-tab) - it is
-> on by default, and with a single group there is nothing to switch between. See
+> install starts with a tuned show built on it: Beat Sync on the **shared beat clock**
+> with the colour stepping by the notes' pitch, the **pulse sequencer** walking
+> true-white flashes from lamp group to lamp group (with strobe rolls, flash strobes and
+> colour sweeps), the **Chase** and **Group Switch** overlays turning each lamp's own hue
+> with the music, and a *Lamp command rate* of 50/s so the glides stay smooth. Every
+> settings section starts closed - open only the feature you want to tune. See
 > [section 5](#5-running-the-full-application) for the full writeup, or jump straight to
 > [Beat Sync mode](#beat-sync-mode) or the [Chase overlay](#chase--rotating-light-overlay).
 > The Chase highlight's **width** should scale with how many lamps are in the chase - see
 > that section for a starting formula.
+
+> **Set up your lamps' order first - the default show is tuned for several lamps.**
+> **Chase** and **Group Switch** (Chase & Group Switch tab) need several lamps and each
+> lamp's place set on the **Devices & Setup** tab: a *Chase order* (0, 1, 2, ... round
+> the room) for Chase, an *Effect group* for Group Switch. The **white pulses** need an
+> order too - the pulse sequencer walks them through the Effect groups (or the Chase
+> order, its *Walk through* setting); without one, every white flash lands on every lamp
+> at once. With a **small or limited setup** (one lamp, or lamps all in one spot):
+> - switch **Group Switch off**,
+> - give the lamps at least a *Chase order* and check the Chase settings (its section on
+>   the Chase & Group Switch tab) - or switch **Chase off** too,
+> - for the white pulses, set the sequencer's *Walk through* to `chase_order`, or give the
+>   lamps Effect groups.
 
 > **Read `DEVICE_NOTES.md` first.** It separates *confirmed facts*, *assumptions*, and
 > *things you still need to test* about your specific bulbs. This README assumes you
@@ -122,7 +132,7 @@ to preview video files past a few MB, so they aren't committed directly into the
   key - and, while the pulse sequencer runs, a live timeline of its pulses.
 - **Chase / Rotating Light overlay** - a moving highlight (reversible, adjustable
   width/speed/falloff curve, optionally beat- or peak-synced) layered on top of any
-  mode - set up but switched off in a fresh install (see above).
+  mode - on in a fresh install; needs each lamp's Chase order (see above).
 - **Group Switch overlay** - a discrete alternative to Chase: lamps are grouped
   (independently of Chase's own grouping) and exactly one group is fully "active" at a
   time with a hard, instant switch instead of a gradient - useful when you want a clean
@@ -939,8 +949,9 @@ falloff-curve concept, since there's nothing to blend. Can run at the same time 
 Chase - Chase applies first, then Group Switch's discrete switch applies on top of
 whatever color Chase already produced for that lamp.
 
-Group Switch is **on in a fresh install**. If all your lamps are in one group, switch it
-off - with a single group there is nothing to switch between.
+Group Switch is **on in a fresh install**. It needs each lamp's *Effect group* (Devices &
+Setup tab); if all your lamps are in one group - or you have only a lamp or two - switch
+it off: with a single group there is nothing to switch between.
 
 **Active groups at once** (1 by default) makes that many groups active together, evenly
 spaced through the group order - the same spacing as Chase's *Number of rotators*. With
