@@ -192,9 +192,8 @@ class VisualizerTab(QWidget):
             slider._label.setMinimumWidth(190)
         self._show_mode_settings(cm.mode)
 
-        root.addWidget(quick_box)
-
         # -- start/stop ------------------------------------------------------------------
+        # Above the Quick Controls, so it's in view without scrolling in a small window.
         self.start_button = QPushButton("Start Music Visualization")
         self.start_button.setCheckable(True)
         self.start_button.toggled.connect(self._on_toggle_start)
@@ -202,6 +201,7 @@ class VisualizerTab(QWidget):
 
         self.status_label = QLabel("Stopped")
         root.addWidget(self.status_label)
+        root.addWidget(quick_box)
 
         controller.levelUpdated.connect(self.level_meter.set_level)
         controller.spectrumUpdated.connect(self.spectrum_widget.set_frame)
