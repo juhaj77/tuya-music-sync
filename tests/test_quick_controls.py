@@ -135,9 +135,28 @@ def test_the_unused_sensitivity_is_greyed_out(window):
     vis._update_sensitivity_states()
     assert own.isEnabled()
 
-    config.chase.enabled = config.group_switch.enabled = False
+    config.chase.enabled = config.group_switch.enabled = config.sequencer.enabled = False
     vis._mode_buttons["rgb_freq"].setChecked(True)  # nothing follows the clock now
     assert not vis.clock_sensitivity_slider.isEnabled()
     config.chase.enabled, config.chase.sync_mode = True, "clock"
     vis.hide(); vis.show()  # (coming back to the tab after changing it elsewhere)
     assert vis.clock_sensitivity_slider.isEnabled()
+    config.chase.enabled, config.sequencer.enabled = False, True  # the sequencer follows it in every mode
+    vis.hide(); vis.show()
+    assert vis.clock_sensitivity_slider.isEnabled()
+
+
+def test_window_fits_a_1080_screen_with_the_sequencer_row_shown(window, qapp):
+    """Every tab scrolls, so the window's minimum height stays well under a
+    1080 px screen's free area even with the info panel's sequencer row - and
+    the row keeps its place while the sequencer waits for the beat."""
+    config = window.controller.config
+    config.color_mapping.mode = "beat_sync"
+    config.sequencer.enabled = True
+    window.info_panel._refresh()
+    qapp.processEvents()
+    assert not window.info_panel.sequencer_box.isHidden()  # shown while waiting, too
+    assert "waiting" in window.info_panel.sequencer_label.text() or "stopped" in window.info_panel.sequencer_label.text()
+    assert window.minimumSizeHint().height() < 900
+    for i in range(window.tabs.count()):
+        assert window.tabs.widget(i).minimumSizeHint().height() < 600, window.tabs.tabText(i)

@@ -84,12 +84,41 @@ def test_logged_pulses_move_along_when_the_grid_jumps(monkeypatch):
     assert entry["pos"] == pytest.approx(before - 2.0, abs=0.1)
 
 
-def test_no_sequencer_status_outside_beat_sync(monkeypatch):
+def test_sequencer_status_in_every_mode_and_dark_only_in_beat_sync_white(monkeypatch):
+    import airam_lights.engine.visualization_engine as ve_module
+
     engine, clock = _busy_engine(monkeypatch)
+    monkeypatch.setattr(ve_module, "spectral_centroid_hz", lambda frame, *a: 800.0)  # HSV Music (fake frame)
+    monkeypatch.setattr(ve_module, "spectral_contrast", lambda frame, *a: 0.5)
     _run(engine, clock, 4.0)
     assert engine.sequencer_status is not None
-    engine.config.color_mapping.mode = "rgb_freq"
+    for mode in ("rgb_freq", "peak_flash", "hsv_music", "custom"):
+        engine.config.color_mapping.mode = mode
+        _run(engine, clock, 1.0)
+        status = engine.sequencer_status
+        assert status is not None and status["white_pattern"] is not None, mode
+        assert engine.seq_position is not None
+    engine.config.color_mapping.mode = "beat_sync_white"
+    _run(engine, clock, 1.0)
+    status = engine.sequencer_status
+    assert status is not None and status["white_pattern"] is None and status["strobe"] is None
+    # Switched off: gone at once, not only from the next tick on.
+    engine.config.sequencer.enabled = False
     assert engine.sequencer_status is None and engine.seq_position is None
+
+
+def test_beat_modes_need_the_shared_clock_for_the_sequencer_the_others_dont(monkeypatch):
+    engine, clock = _busy_engine(monkeypatch)
+    engine.config.rhythm.shared_clock = False
+    _run(engine, clock, 6.0)
+    assert engine.sequencer_status is None  # Beat Sync on its own detector: no sequencer
+    engine.config.color_mapping.mode = "rgb_freq"
+    _run(engine, clock, 6.0)
+    assert engine.clock_active and engine.sequencer_status is not None
+    engine.config.rhythm.tempo_lock = False  # no grid to place pulses on
+    engine._apply_rhythm_settings()  # (what apply_config does for the clock)
+    _run(engine, clock, 1.0)
+    assert engine.sequencer_status is None
 
 
 # -- what the lamps show ---------------------------------------------------------------------------
@@ -158,6 +187,21 @@ def test_info_panel_renders_the_clock_and_the_sequencer(qapp, monkeypatch):
     panel._ticks = 0
     panel._refresh()
     assert panel.sequencer_box.isHidden()
+
+
+def test_info_panel_says_dark_pulses_only_in_beat_sync_white(qapp, monkeypatch):
+    engine, clock = _busy_engine(monkeypatch)
+    engine.config.color_mapping.mode = "beat_sync_white"
+    _run(engine, clock, 10.0)
+    panel = InfoPanel(SimpleNamespace(engine=engine, config=engine.config))
+    panel._timer.stop()
+    panel.resize(1200, 140)
+    panel._ticks = 0
+    panel._refresh()
+    assert not panel.sequencer_box.isHidden()
+    text = panel.sequencer_label.text()
+    assert "dark pulses only" in text and "white" not in text and "strobe" not in text
+    assert not panel.grab().isNull()
 
 
 def test_flash_strobe_shows_on_the_strobe_lane_and_the_bars_strobe_cuts_it(monkeypatch):

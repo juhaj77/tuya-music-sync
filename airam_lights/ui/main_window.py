@@ -49,6 +49,31 @@ class MainWindow(QMainWindow):
         self.controller.configReplaced.connect(self._rebuild_settings_tabs, Qt.QueuedConnection)
         self.controller.showModeSettings.connect(self._show_mode_settings)
 
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not getattr(self, "_fitted", False):
+            self._fitted = True
+            self.fit_to_screen()
+
+    def fit_to_screen(self) -> None:
+        """Keeps the window within its screen's free area (above the taskbar),
+        so the info panel's bottom row isn't hidden on a 1080 px screen."""
+        screen = self.screen()
+        if screen is None or self.isMaximized() or self.isFullScreen():
+            return
+        free = screen.availableGeometry()
+        frame = self.frameGeometry()
+        extra_w, extra_h = frame.width() - self.width(), frame.height() - self.height()
+        width = min(self.width(), free.width() - extra_w)
+        height = min(self.height(), free.height() - extra_h)
+        if (width, height) != (self.width(), self.height()):
+            self.resize(width, height)
+        frame = self.frameGeometry()
+        x = min(max(frame.x(), free.left()), free.right() + 1 - frame.width())
+        y = min(max(frame.y(), free.top()), free.bottom() + 1 - frame.height())
+        if (x, y) != (frame.x(), frame.y()):
+            self.move(x, y)
+
     def _rebuild_settings_tabs(self) -> None:
         """Recreates the settings tabs so every widget shows the current
         config after a preset changed many values at once."""

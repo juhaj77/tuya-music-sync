@@ -509,7 +509,9 @@ class BeatSyncWhiteModeConfig:
     Sync, but drives the bulb's WHITE work_mode (brightness + color
     temperature, DPs 22/23) instead of RGB color (DP 24) - warm/cool flashes
     on the beat instead of hue jumps. Uses its own independent beat detector
-    and dark-pulse handling, identical in spirit to Beat Sync's."""
+    (unless it follows the shared clock) and per-beat dark pulses, identical
+    in spirit to Beat Sync's; with the pulse sequencer on, the sequencer
+    places its dark pulses instead (it takes nothing else from it)."""
 
     detect_low_hz: float = 40.0
     detect_high_hz: float = 200.0
@@ -521,6 +523,11 @@ class BeatSyncWhiteModeConfig:
     temp_min: float = 0.0  # 0..1, 0 = warmest
     temp_max: float = 1.0  # 0..1, 1 = coolest
     min_temp_jump: float = 0.35  # used when temp_mode == "random": force a visibly different temp each hit
+    # Every beat still flashes, but the temperature only changes on every Nth
+    # beat - with the shared beat clock counted from the bar start like Beat
+    # Sync's hue_every_n_beats (2 = beats 1 and 3, 4 = once per bar), so it
+    # lands on the strong beats instead of changing on every hit.
+    temp_every_n_beats: int = 1
 
     flash_brightness: float = 1.0
     sustain_brightness: float = 0.25
@@ -548,6 +555,7 @@ class BeatSyncWhiteModeConfig:
             temp_min=float(d.get("temp_min", 0.0)),
             temp_max=float(d.get("temp_max", 1.0)),
             min_temp_jump=float(d.get("min_temp_jump", 0.35)),
+            temp_every_n_beats=max(1, int(d.get("temp_every_n_beats", 1))),
             flash_brightness=float(d.get("flash_brightness", 1.0)),
             sustain_brightness=float(d.get("sustain_brightness", 0.25)),
             temp_attack_ms=float(d.get("temp_attack_ms", 40.0)),
@@ -1116,8 +1124,9 @@ class ManualStateConfig:
 @dataclass
 class RhythmConfig:
     """The shared beat clock (dsp.beat_clock.BeatClock): one beat source
-    that Beat Sync (when `shared_clock` is on) and the Chase / Group Switch
-    overlays (sync_mode "clock") all follow, instead of each running its own
+    that Beat Sync / Beat Sync White (when `shared_clock` is on), the pulse
+    sequencer (in every colour mode) and the Chase / Group Switch overlays
+    (sync_mode "clock") all follow, instead of each running its own
     detector and reacting to different hits at different moments.
 
     The defaults target kick drums. `sensitivity` is a ratio on a dB-scaled
@@ -1166,12 +1175,16 @@ class RhythmConfig:
 
 @dataclass
 class PulseSequencerConfig:
-    """Beat Sync's pulses placed on musical positions (effects/
-    pulse_sequencer.py) instead of a probability roll per beat: rhythm
-    patterns on a 16th-note grid, white flashes walking from lamp group to
-    lamp group (Group Switch's groups), phrase fills and breaths, and
-    loudness-following density. Needs the shared beat clock to be locked;
-    until it is, Beat Sync's normal per-beat pulse settings apply."""
+    """Pulses placed on musical positions (effects/pulse_sequencer.py)
+    instead of a probability roll per beat: rhythm patterns on a 16th-note
+    grid, white flashes walking from lamp group to lamp group (Group
+    Switch's groups), phrase fills and breaths, and loudness-following
+    density. One set of settings for every colour mode (see engine.rules):
+    the pulses look the way Beat Sync's dark / white pulse settings say, and
+    Beat Sync White takes only the dark pulses. Needs the shared beat clock
+    to be locked (Lock to tempo; in Beat Sync / Beat Sync White also
+    `shared_clock`); until it is, Beat Sync's per-beat pulse settings apply
+    and the other modes have no pulses."""
 
     enabled: bool = False
     white_pattern: str = "auto"  # see pulse_sequencer.WHITE_PATTERNS

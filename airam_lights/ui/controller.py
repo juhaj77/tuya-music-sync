@@ -27,6 +27,7 @@ from ..audio.capture import AudioCapture, AudioCaptureError
 from ..config.schema import AppConfig, DeviceConfig, PerLampEffect
 from ..config.store import ConfigStore
 from ..diagnostics.logger import get_log_buffer, setup_logging
+from ..engine.rules import sequencer_enabled_for
 from ..engine.visualization_engine import VisualizationEngine
 from ..lamps.manager import LampManager
 
@@ -196,7 +197,7 @@ class AppController(QObject):
             parts.append(f"fade={'on' if bs.fade_brightness else 'off'}")
             parts.append(f"glide_hue={bs.hue_glide_timing if bs.glide_hue else 'off'}")
             parts.append(f"white_pulses={'on' if bs.white_pulse_enabled else 'off'}")
-            parts.append(f"sequencer={'on' if cfg.sequencer.enabled and cfg.rhythm.shared_clock else 'off'}")
+        parts.append(f"sequencer={'on' if sequencer_enabled_for(cfg) else 'off'}")
         parts.append(f"chase={cfg.chase.sync_mode if cfg.chase.enabled else 'off'}")
         parts.append(f"group_switch={cfg.group_switch.sync_mode if cfg.group_switch.enabled else 'off'}")
         parts.append(f"lamp_command_rate={cfg.network.lamp_command_rate_hz:g}/s")

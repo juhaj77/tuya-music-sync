@@ -9,8 +9,8 @@ config value and follow each other through AppController.linkedSettingChanged
 
 The sensitivities are four different things, so they're named apart:
 - Beat clock sensitivity: the shared beat clock (Rhythm box) - what Beat Sync
-  and Beat Sync White react to when they follow it, and Chase / Group Switch
-  on speed source 'clock'.
+  and Beat Sync White react to when they follow it, the pulse sequencer, and
+  Chase / Group Switch on speed source 'clock'.
 - Beat detector sensitivity: Beat Sync's / Beat Sync White's own detector,
   used only when they don't follow the clock.
 - Peak sensitivity: Peak Flash's peak detector (it never uses the clock).
@@ -21,6 +21,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, List
+
+from ..engine import rules
 
 
 @dataclass(frozen=True)
@@ -38,7 +40,8 @@ CLOCK_SENSITIVITY = QuickSetting(
     "rhythm.sensitivity", "Beat clock sensitivity", 1.01, 2.0,
     tooltip="The shared beat clock (Color Mapping -> Rhythm): how far above the recent average a kick "
     "must rise to count - higher = only the clearest kicks. Beat Sync and Beat Sync White follow it "
-    "when they use the shared clock, Chase and Group Switch with speed source 'clock'.",
+    "when they use the shared clock, the Pulse sequencer always, Chase and Group Switch with speed "
+    "source 'clock'.",
 )
 
 _DETECTOR_SENSITIVITY_TIP = (
@@ -113,13 +116,9 @@ QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
 
 
 def clock_in_use(config) -> bool:
-    """Whether anything follows the shared beat clock right now (the same
-    rule as VisualizationEngine._tick_beat_clock)."""
-    return (
-        (config.rhythm.shared_clock and config.color_mapping.mode in ("beat_sync", "beat_sync_white"))
-        or (config.chase.enabled and config.chase.sync_mode == "clock")
-        or (config.group_switch.enabled and config.group_switch.sync_mode == "clock")
-    )
+    """Whether anything follows the shared beat clock right now - the
+    engine's own rule (engine.rules.clock_in_use)."""
+    return rules.clock_in_use(config)
 
 
 def get_value(config, path: str) -> float:

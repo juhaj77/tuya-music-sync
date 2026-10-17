@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QPushButton,
     QRadioButton,
+    QScrollArea,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -43,7 +44,17 @@ class VisualizerTab(QWidget):
         super().__init__(parent)
         self.controller = controller
 
-        root = QVBoxLayout(self)
+        # In a scroll area, so the tab never sets the window's minimum height:
+        # on a 1080 px screen the window (with the info panel under the tabs)
+        # must still fit above the taskbar.
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        outer.addWidget(scroll)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        root = QVBoxLayout(inner)
 
         # -- audio -----------------------------------------------------------------
         audio_box = QGroupBox("Audio")
@@ -294,8 +305,8 @@ class VisualizerTab(QWidget):
         set_active(
             [self.clock_sensitivity_slider], clock_in_use(config),
             "Nothing follows the shared beat clock right now: Beat Sync and Beat Sync White do when "
-            "'follow the shared clock' is on (Color Mapping -> Rhythm), Chase and Group Switch with "
-            "speed source 'clock'.",
+            "'follow the shared clock' is on (Color Mapping -> Rhythm), the Pulse sequencer when it's on, "
+            "Chase and Group Switch with speed source 'clock'.",
         )
         own = [self.quick_sliders[(mode, f"color_mapping.{mode}.sensitivity")] for mode in ("beat_sync", "beat_sync_white")]
         set_active(

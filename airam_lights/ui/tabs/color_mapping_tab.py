@@ -1,6 +1,11 @@
-"""Color Mapping tab: full detail controls for RGB Frequency / Custom / HSV
-Music modes, the shared beat clock, plus global response curve, smoothing,
-and presets."""
+"""Color Mapping tab: full detail controls for every colour mode, the shared
+beat clock, plus global response curve, smoothing, and presets.
+
+The Dark pulses, White pulses and Pulse sequencer sections are shared by the
+modes - one set of settings, so a mode can be tried without tuning them all
+over again. They're one set of widgets, moved to the bottom of whichever mode
+page is showing (see _place_pulse_box), with what that mode doesn't use
+greyed out or hidden."""
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
@@ -46,6 +51,7 @@ from ...config.schema import (
     RGBModeConfig,
     RhythmConfig,
 )
+from ...engine.rules import BEAT_MODES, sequencer_dark_only
 from ..controller import AppController
 from ..widgets.channel_map_editor import ChannelMapEditor
 from ..widgets.hue_slider import HueSlider
@@ -60,6 +66,15 @@ from ..widgets.musical import (
 from ..quick_settings import QUICK_SETTINGS, get_value, link_slider
 from ..widgets.param_slider import FloatSlider
 from ..widgets.section import CollapsibleSection
+
+_MODE_NAMES = {
+    "beat_sync": "Beat Sync",
+    "beat_sync_white": "Beat Sync White",
+    "peak_flash": "Peak Flash",
+    "rgb_freq": "RGB Frequency",
+    "hsv_music": "HSV Music",
+    "custom": "Custom",
+}
 
 
 class RGBModeEditor(QWidget):
@@ -429,16 +444,35 @@ class ColorMappingTab(QWidget):
         self.beat_hue_glide_slider.valueChanged.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_hue_glide_slider)
 
-        dark_section = beat_section(
+        # -- the pulses, shared by every mode (see _place_pulse_box) ----------------------
+        # Dark pulses, White pulses and the Pulse sequencer, in one box that
+        # moves to the bottom of the mode page showing. The settings in them
+        # belong to Beat Sync's config (they're its pulses' look), which the
+        # sequencer uses in every mode.
+        self.pulse_box = QWidget()
+        pulse_layout = QVBoxLayout(self.pulse_box)
+        pulse_layout.setContentsMargins(0, 0, 0, 0)
+        self._pulse_mode = "beat_sync"  # the mode page the box is on
+
+        def pulse_section(title: str, key: str, **kw) -> CollapsibleSection:
+            section = CollapsibleSection(title, key=f"beat/{key}", **kw)
+            pulse_layout.addWidget(section)
+            return section
+
+        dark_section = pulse_section(
             "Dark pulses", "dark", checkable=True, checked=bs.dark_pulse_enabled,
-            tooltip="On a random subset of beats, briefly dip brightness toward black BEFORE flashing - a "
-            "rhythm-synced pause/strobe accent, on top of the hue and brightness above. White pulses "
-            "are unaffected either way.",
+            tooltip="A brief dip toward black - a rhythm-synced pause before the next hit. In Beat Sync on a "
+            "random share of beats (probability and trigger below), or wherever the Pulse sequencer puts "
+            "them; in the other modes only from the Pulse sequencer (Beat Sync White's own per-beat ones "
+            "are on its page). The look below is the same in every mode. White pulses are unaffected "
+            "either way.",
         )
         beat_layout = dark_section.content_layout()
         self.beat_dark_enabled_checkbox = dark_section.toggle
         self.beat_dark_enabled_checkbox.toggled.connect(self._on_beat_changed)
-        self.beat_dark_trigger_combo = self._trigger_combo(beat_layout, "Dark pulse on:", bs.dark_pulse_trigger)
+        self.beat_dark_trigger_combo, self.beat_dark_trigger_row = self._trigger_combo(
+            beat_layout, "Dark pulse on:", bs.dark_pulse_trigger
+        )
         self.beat_dark_note = dark_section.note
 
         self.beat_dark_prob_slider = FloatSlider(
@@ -475,19 +509,26 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_changed)
             beat_layout.addWidget(w)
 
-        white_section = beat_section(
+        white_section = pulse_section(
             "White pulses", "white", checkable=True, checked=bs.white_pulse_enabled,
-            tooltip="On a subset of beats, a brief flash of the lamp's own white LEDs right as the beat "
-            "hits - e.g. a hi-hat/cymbal accent. Always the real white LEDs, never white mixed from RGB, "
-            "so the colored LEDs keep all their output for color. Independent of dark pulses - each rolls "
-            "its own probability, so both, either, or neither can happen on a hit.",
+            tooltip="A brief flash of the lamp's own white LEDs - e.g. a hi-hat/cymbal accent. In Beat Sync on "
+            "a subset of beats (probability and trigger below), or wherever the Pulse sequencer puts them; "
+            "in Peak Flash, RGB Frequency, HSV Music and Custom only from the Pulse sequencer; never in "
+            "Beat Sync White, which is white already. Always the real white LEDs, never white mixed from "
+            "RGB, so the colored LEDs keep all their output for color. The look below is the same in every "
+            "mode. Independent of dark pulses - both, either, or neither can happen on a hit.",
         )
         beat_layout = white_section.content_layout()
         self.beat_white_pulse_enabled_checkbox = white_section.toggle
         self.beat_white_pulse_enabled_checkbox.toggled.connect(self._on_beat_changed)
 
         white_target_row = QHBoxLayout()
-        white_target_row.addWidget(QLabel("True white lamps:"))
+        # "True white lamps" is for Beat Sync's per-beat flashes only - its own
+        # box, so it can go on the other modes' pages (see _update_pulse_states).
+        self.beat_white_target_box = QWidget()
+        target_box_layout = QHBoxLayout(self.beat_white_target_box)
+        target_box_layout.setContentsMargins(0, 0, 0, 0)
+        target_box_layout.addWidget(QLabel("True white lamps:"))
         self.beat_white_pulse_target_combo = QComboBox()
         self.beat_white_pulse_target_combo.addItems(["all", "chase", "group", "rotate"])
         self.beat_white_pulse_target_combo.setCurrentText(bs.white_pulse_target)
@@ -502,8 +543,9 @@ class ColorMappingTab(QWidget):
             "the chosen option, every lamp flashes."
         )
         self.beat_white_pulse_target_combo.currentTextChanged.connect(self._on_beat_changed)
-        white_target_row.addWidget(self.beat_white_pulse_target_combo)
-        white_target_row.addSpacing(16)
+        target_box_layout.addWidget(self.beat_white_pulse_target_combo)
+        target_box_layout.addSpacing(16)
+        white_target_row.addWidget(self.beat_white_target_box)
         white_target_row.addWidget(QLabel("Rotating:"))
         self.beat_white_rotators_combo = choice_combo(
             [(1, "1 lamp"), (2, "2 opposite lamps"), (3, "3 evenly spaced"), (4, "4 evenly spaced")],
@@ -518,7 +560,9 @@ class ColorMappingTab(QWidget):
         beat_layout.addLayout(white_target_row)
         self.beat_white_rotators_note = inactive_note()
         beat_layout.addWidget(self.beat_white_rotators_note)
-        self.beat_white_trigger_combo = self._trigger_combo(beat_layout, "White pulse on:", bs.white_pulse_trigger)
+        self.beat_white_trigger_combo, self.beat_white_trigger_row = self._trigger_combo(
+            beat_layout, "White pulse on:", bs.white_pulse_trigger
+        )
         self.beat_white_note = white_section.note
 
         self.beat_white_pulse_prob_slider = FloatSlider(
@@ -602,7 +646,8 @@ class ColorMappingTab(QWidget):
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
 
-        beat_page.addWidget(self._build_sequencer_box(controller.config.sequencer))
+        pulse_layout.addWidget(self._build_sequencer_box(controller.config.sequencer))
+        beat_page.addWidget(self.pulse_box)
 
         # The beat modes are built after the others but shown first - Beat Sync is the main mode.
         sub_tabs.insertTab(0, beat_widget, "Beat Sync")
@@ -657,10 +702,26 @@ class ColorMappingTab(QWidget):
         bsw_temp_mode_row.addStretch(1)
         bsw_layout.addLayout(bsw_temp_mode_row)
         bsw_temp_mode_note = QLabel(
-            "random: a new temperature every hit. alternate: ping-pongs between the warm and cool ends."
+            "random: a new temperature on every change. alternate: ping-pongs between the warm and cool ends."
         )
         bsw_temp_mode_note.setWordWrap(True)
         bsw_layout.addWidget(bsw_temp_mode_note)
+
+        bsw_every_row = QHBoxLayout()
+        bsw_every_row.addWidget(QLabel("Change temperature:"))
+        self.bsw_temp_every_combo = choice_combo(
+            beat_divisions(controller.config.rhythm.beats_per_bar), bsw.temp_every_n_beats,
+            "Every beat still flashes, but the temperature only changes on these beats - fewer changes, so "
+            "it doesn't flicker warm-cool on every hit. With the shared beat clock and Lock to tempo (Rhythm "
+            "box) it's counted from the bar start, so the change lands on the strong beats: every 2 beats = "
+            "beats 1 and 3, every bar = the downbeat. The choices follow Beats per bar in the Rhythm box.",
+        )
+        self.bsw_temp_every_combo.currentIndexChanged.connect(self._on_beat_white_changed)
+        bsw_every_row.addWidget(self.bsw_temp_every_combo)
+        bsw_every_row.addStretch(1)
+        bsw_layout.addLayout(bsw_every_row)
+        self.bsw_temp_every_note = inactive_note()
+        bsw_layout.addWidget(self.bsw_temp_every_note)
 
         self.bsw_temp_min_slider = FloatSlider("Temp range min (warm)", 0.0, 1.0, bsw.temp_min, decimals=2)
         self.bsw_temp_max_slider = FloatSlider("Temp range max (cool)", 0.0, 1.0, bsw.temp_max, decimals=2)
@@ -683,7 +744,11 @@ class ColorMappingTab(QWidget):
             w.valueChanged.connect(self._on_beat_white_changed)
             bsw_layout.addWidget(w)
 
-        bsw_dark_note = QLabel("Dark pulses: same as Beat Sync - a rhythm-synced pause toward black before flashing.")
+        bsw_dark_note = QLabel(
+            "Dark pulses on the beat: a rhythm-synced pause toward black before flashing, on a random share of "
+            "beats. While the Pulse sequencer (below) runs, it places the dark pulses instead - shaped by the "
+            "Dark pulses section below, as in every mode."
+        )
         bsw_dark_note.setWordWrap(True)
         bsw_layout.addWidget(bsw_dark_note)
         self.bsw_dark_prob_slider = FloatSlider("Dark pulse probability", 0.0, 1.0, bsw.dark_pulse_probability, decimals=2)
@@ -694,6 +759,8 @@ class ColorMappingTab(QWidget):
         for w in (self.bsw_dark_prob_slider, self.bsw_dark_duration_slider, self.bsw_dark_depth_slider):
             w.valueChanged.connect(self._on_beat_white_changed)
             bsw_layout.addWidget(w)
+        self.bsw_dark_seq_note = inactive_note()
+        bsw_layout.addWidget(self.bsw_dark_seq_note)
 
         self.bsw_low_spin.valueChanged.connect(self._on_beat_white_changed)
         self.bsw_high_spin.valueChanged.connect(self._on_beat_white_changed)
@@ -837,6 +904,9 @@ class ColorMappingTab(QWidget):
             page_layout = sub_tabs.widget(index).layout()
             if isinstance(page_layout, QBoxLayout):
                 page_layout.addStretch(1)
+        # The shared pulse sections follow the page shown (they start on Beat Sync's).
+        self._page_modes = {page: mode for mode, page in self._mode_pages.items()}
+        sub_tabs.currentChanged.connect(lambda index: self._place_pulse_box(sub_tabs.widget(index)))
 
         # -- global ---------------------------------------------------------------------
         global_box = CollapsibleSection(
@@ -960,15 +1030,15 @@ class ColorMappingTab(QWidget):
         root.addStretch(1)
         self._update_beat_states()
 
-    # -- which Beat Sync settings are in use right now --------------------------------
+    # -- which settings are in use right now ---------------------------------------------
 
     def _update_beat_states(self) -> None:
-        """Grey out the Beat Sync / sequencer settings the current combination
-        doesn't use, and say why - so changing one never looks ignored."""
+        """Grey out the settings the current combination doesn't use, and say
+        why - so changing one never looks ignored: Beat Sync's own, the shared
+        pulse sections (by the mode page they're on), Beat Sync White's."""
         cfg = self.controller.config
-        bs, rh, sq = cfg.color_mapping.beat_sync, cfg.rhythm, cfg.sequencer
+        bs, rh = cfg.color_mapping.beat_sync, cfg.rhythm
         shared = rh.shared_clock
-        sequencing = shared and sq.enabled
 
         clock_reason = "Beat Sync follows the shared beat clock (Rhythm box at the top)."
         set_active(
@@ -1003,143 +1073,253 @@ class ColorMappingTab(QWidget):
         set_active([self.beat_hue_glide_slider, self.beat_glide_timing_combo], bs.glide_hue, "Glide hue is off.")
         set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
 
-        seq_reason = "the Pulse sequencer (below) places the pulses."
-        no_clock_reason = "accent/downbeat need the shared beat clock (Rhythm box)."
-        for enabled, prob, trigger, others, note, name in (
-            (bs.dark_pulse_enabled, self.beat_dark_prob_slider, self.beat_dark_trigger_combo,
-             [self.beat_dark_duration_slider, self.beat_dark_depth_slider, self.beat_dark_attack_slider,
-              self.beat_dark_release_slider], self.beat_dark_note, "Dark"),
-            (bs.white_pulse_enabled, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo,
-             [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
-              self.beat_white_pulse_release_slider, self.beat_white_pulse_white_brightness_slider,
-              self.beat_white_temp_combo, self.beat_white_hybrid_slider], self.beat_white_note, "White"),
-        ):
-            off_reason = f"{name} pulses are switched off."
-            set_active(others, enabled, off_reason)
-            set_active([prob], enabled and not sequencing, off_reason if not enabled else seq_reason.capitalize())
-            set_active(
-                [trigger], enabled and shared and not sequencing,
-                off_reason if not enabled else (seq_reason.capitalize() if sequencing else no_clock_reason.capitalize()),
-            )
-            if enabled and sequencing:
-                show_note(note, f"{name} pulses are placed by the Pulse sequencer, so the probability and "
-                          "trigger here are greyed out; durations and strength still apply.")
-            elif enabled and not shared:
-                show_note(note, "'accent' and 'downbeat' triggers need the shared beat clock (Rhythm box) - "
-                          "without it every beat rolls the probability.")
-            else:
-                show_note(note, "")
+        self._update_pulse_states()
+        self._update_bsw_states()
 
-        white = bs.white_pulse_enabled
-        legacy = self.controller.config.network.lamp_transitions == "legacy"
+    def _sequencer_state(self, mode: str) -> "tuple[bool, bool, str]":
+        """The pulse sequencer in `mode` (see engine.rules): (can it run there,
+        does it place the pulses there - once the clock locks, why not)."""
+        cfg = self.controller.config
+        rh = cfg.rhythm
+        if mode in BEAT_MODES and not rh.shared_clock:
+            return False, False, (
+                f"The sequencer needs {_MODE_NAMES.get(mode, mode)} to follow the shared beat clock - turn on "
+                "'Beat Sync (and Beat Sync White) follow the shared clock' in the Rhythm box at the top."
+            )
+        if not rh.tempo_lock:
+            return False, False, (
+                "The sequencer places the pulses on the beat clock's grid - turn on Lock to tempo in the "
+                "Rhythm box at the top."
+            )
+        if not cfg.sequencer.enabled:
+            return True, False, "The sequencer is off."
+        return True, True, ""
+
+    def _update_pulse_states(self) -> None:
+        """The shared Dark pulses / White pulses / Pulse sequencer sections, for
+        the mode page they're on (self._pulse_mode): Beat Sync rolls per-beat
+        pulses of its own too, the other modes get only the sequencer's, Beat
+        Sync White only its dark ones. What a mode never has is hidden on its
+        page (Beat Sync's per-beat probability, trigger and lamps), what it
+        doesn't use right now greyed out."""
+        cfg = self.controller.config
+        bs, rh, sq = cfg.color_mapping.beat_sync, cfg.rhythm, cfg.sequencer
+        mode = self._pulse_mode
+        name = _MODE_NAMES.get(mode, mode)
+        beat_sync = mode == "beat_sync"
+        dark_only = sequencer_dark_only(mode)
+        shared = rh.shared_clock
+        can_run, sequencing, seq_off = self._sequencer_state(mode)
+        dark, white = bs.dark_pulse_enabled, bs.white_pulse_enabled
+        temp_mode = bs.white_pulse_temp_mode
+        legacy = cfg.network.lamp_transitions == "legacy"
+        dark_only_reason = f"{name} takes only the dark pulses from the sequencer."
+
+        for widget in (self.beat_dark_trigger_row, self.beat_dark_prob_slider, self.beat_white_target_box,
+                       self.beat_white_trigger_row, self.beat_white_pulse_prob_slider):
+            widget.setVisible(beat_sync)  # Beat Sync's per-beat pulses - no other mode has them
+
+        dark_look = [self.beat_dark_duration_slider, self.beat_dark_depth_slider, self.beat_dark_attack_slider,
+                     self.beat_dark_release_slider]
+        white_look = [self.beat_white_pulse_duration_slider, self.beat_white_pulse_attack_slider,
+                      self.beat_white_pulse_release_slider, self.beat_white_pulse_white_brightness_slider,
+                      self.beat_white_temp_combo, self.beat_white_hybrid_slider]
+
+        if beat_sync:
+            seq_reason = "The Pulse sequencer (below) places the pulses."
+            no_clock_reason = "Accent/downbeat need the shared beat clock (Rhythm box)."
+            set_active([self.beat_dark_enabled_checkbox, self.beat_white_pulse_enabled_checkbox], True, "")
+            for enabled, prob, trigger, look, note, kind in (
+                (dark, self.beat_dark_prob_slider, self.beat_dark_trigger_combo, dark_look, self.beat_dark_note,
+                 "Dark"),
+                (white, self.beat_white_pulse_prob_slider, self.beat_white_trigger_combo, white_look,
+                 self.beat_white_note, "White"),
+            ):
+                off_reason = f"{kind} pulses are switched off."
+                set_active(look, enabled, off_reason)
+                set_active([prob], enabled and not sequencing, off_reason if not enabled else seq_reason)
+                set_active(
+                    [trigger], enabled and shared and not sequencing,
+                    off_reason if not enabled else (seq_reason if sequencing else no_clock_reason),
+                )
+                if enabled and sequencing:
+                    show_note(note, f"{kind} pulses are placed by the Pulse sequencer, so the probability and "
+                              "trigger here are greyed out; durations and strength still apply.")
+                elif enabled and not shared:
+                    show_note(note, "'accent' and 'downbeat' triggers need the shared beat clock (Rhythm box) - "
+                              "without it every beat rolls the probability.")
+                else:
+                    show_note(note, "")
+            set_active(
+                [self.beat_white_pulse_target_combo], white and not sequencing,
+                "White pulses are switched off." if not white else seq_reason + " Its group walk decides the lamps.",
+            )
+            if white and temp_mode in ("bar", "phrase") and not shared:
+                show_note(self.beat_white_temp_note, f"Warm/cool '{temp_mode}' needs the shared beat clock (Rhythm "
+                          "box) to know where the bar is - until then each flash is rolled with the cool ratio.")
+            else:
+                show_note(self.beat_white_temp_note, "")
+            white_used = white  # by the per-beat flashes or the sequencer's
+            white_off = "" if white else "White pulses are switched off."
+            rotating = (bs.white_pulse_target == "rotate") if not sequencing else (sq.group_walk != "all")
+        else:
+            # Here every pulse comes from the sequencer.
+            if sequencing:
+                only_seq = ""
+            elif can_run:
+                only_seq = f"In {name} only the Pulse sequencer (below) places these - it's off."
+            else:
+                only_seq = f"In {name} only the Pulse sequencer places these. {seq_off}"
+            dark_note = only_seq
+            if dark_only and not sequencing:
+                dark_note = (
+                    "In Beat Sync White these shape only the Pulse sequencer's dark pulses (its own per-beat "
+                    "ones are set above). " + seq_off
+                )
+            set_active([self.beat_dark_enabled_checkbox], sequencing, dark_note)
+            set_active(dark_look, sequencing and dark, dark_note or "Dark pulses are switched off.")
+            show_note(self.beat_dark_note, dark_note)
+            if dark_only:
+                white_off = "Not used in Beat Sync White - it's white already, and takes only the sequencer's dark pulses."
+                set_active([self.beat_white_pulse_enabled_checkbox] + white_look, False, white_off)
+                show_note(self.beat_white_note, "Not used in Beat Sync White (it's white already).")
+                white_used = False
+            else:
+                white_off = only_seq or ("" if white else "White pulses are switched off.")
+                set_active([self.beat_white_pulse_enabled_checkbox], sequencing, only_seq)
+                set_active(white_look, sequencing and white, white_off)
+                show_note(self.beat_white_note, only_seq)
+                white_used = sequencing and white
+            show_note(self.beat_white_temp_note, "")  # the sequencer's flashes always know their place in the bar
+            rotating = sq.group_walk != "all"
+
+        # The release curve shapes only the sequencer's flashes (the per-beat ones fade out exponentially).
         set_active(
-            [self.beat_white_release_curve_combo], white and sequencing and not legacy,
-            "White pulses are switched off." if not white else (
+            [self.beat_white_release_curve_combo], white_used and sequencing and not legacy,
+            white_off or (
                 "The release curve shapes the Pulse sequencer's flashes (the per-beat ones fade out "
-                "exponentially) - the sequencer is off." if not sequencing else
+                "exponentially). " + seq_off if not sequencing else
                 "With 'legacy' Lamp transitions the bulb fades on its own."
             ),
         )
         set_active(
-            [self.beat_white_pulse_target_combo], white and not sequencing,
-            "White pulses are switched off." if not white else
-            seq_reason.capitalize() + " Its group walk decides the lamps.",
+            [self.beat_white_pulse_cool_ratio_slider], white_used and temp_mode == "random",
+            white_off or f"Warm/cool is '{temp_mode}', not random.",
         )
-        temp_mode = bs.white_pulse_temp_mode
+        self._show_rotators_warning(white_used and rotating, sequencing)
         set_active(
-            [self.beat_white_pulse_cool_ratio_slider], white and temp_mode == "random",
-            "White pulses are switched off." if not white else f"Warm/cool is '{temp_mode}', not random.",
-        )
-        if white and temp_mode in ("bar", "phrase") and not shared:
-            show_note(self.beat_white_temp_note, f"Warm/cool '{temp_mode}' needs the shared beat clock (Rhythm "
-                      "box) to know where the bar is - until then each flash is rolled with the cool ratio.")
-        else:
-            show_note(self.beat_white_temp_note, "")
-        rotating = (bs.white_pulse_target == "rotate") if not sequencing else (sq.group_walk != "all")
-        self._show_rotators_warning(white and rotating, sequencing)
-        set_active(
-            [self.beat_white_rotators_combo], white and rotating,
-            "White pulses are switched off." if not white else (
+            [self.beat_white_rotators_combo], white_used and rotating,
+            white_off or (
                 "The sequencer's Group walk is 'all' - every lamp flashes." if sequencing else
                 "True white lamps isn't 'rotate'."
             ),
         )
 
-        seq_controls = [
-            self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo, self.seq_white_density_slider, self.seq_double_slider,
-            self.seq_focus_slider, self.seq_build_slider, self.seq_repeat_checkbox, self.seq_gap_slider, self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider,
-            self.seq_phrase_combo, self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
-            self.seq_dynamics_checkbox,
-        ]
-        set_active([self.seq_enabled_checkbox], shared, "The sequencer needs the shared beat clock.")
-        set_active(seq_controls, sequencing, "The sequencer is off." if shared else "The sequencer needs the shared beat clock.")
-        set_active(
-            [self.seq_dynamics_slider], sequencing and sq.pulse_dynamics,
-            "Pulse dynamics is off." if sequencing else "The sequencer is off.",
-        )
-        if shared and white and temp_mode == "phrase":
-            set_active([self.seq_phrase_combo], True, "")  # warm/cool 'phrase' uses it too
-        if not shared:
-            show_note(self.seq_note, "The sequencer places pulses on the shared beat clock's grid - turn on "
-                      "'Beat Sync follows the shared clock' in the Rhythm box at the top first.")
+        # -- the sequencer --------------------------------------------------------------
+        set_active([self.seq_enabled_checkbox], can_run, seq_off)
+        if not can_run:
+            show_note(self.seq_note, seq_off)
+        elif dark_only and sq.enabled:
+            show_note(self.seq_note, "Beat Sync White takes only its dark pulses.")
         else:
             show_note(self.seq_note, "")
+        white_controls = [
+            self.seq_white_combo, self.seq_walk_combo, self.seq_walk_positions_combo, self.seq_white_density_slider,
+            self.seq_double_slider, self.seq_focus_slider, self.seq_build_slider, self.seq_repeat_checkbox,
+            self.seq_gap_slider, self.seq_dynamics_checkbox,
+        ]
+        # The phrase, fills, accents and drops place dark pulses too.
+        dark_controls = [
+            self.seq_dark_combo, self.seq_dark_density_slider, self.seq_dark_length_slider, self.seq_phrase_combo,
+            self.seq_fills_checkbox, self.seq_accent_checkbox, self.seq_drop_checkbox,
+        ]
+        set_active(white_controls, sequencing and not dark_only, seq_off or dark_only_reason)
+        set_active(dark_controls, sequencing, seq_off)
+        set_active(
+            [self.seq_dynamics_slider], sequencing and not dark_only and sq.pulse_dynamics,
+            seq_off or (dark_only_reason if dark_only else "Pulse dynamics is off."),
+        )
+        if beat_sync and shared and white and temp_mode == "phrase":
+            set_active([self.seq_phrase_combo], True, "")  # the per-beat flashes' warm/cool 'phrase' uses it too
 
         # Strobe: placed by the sequencer, and only with instant lamp transitions.
         direct = cfg.network.lamp_transitions in INSTANT_TRANSITIONS
         not_direct = "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box)."
-        seq_off = "The sequencer is off." if shared else "The sequencer needs the shared beat clock."
-        set_active([self.seq_strobe_checkbox], sequencing and direct, seq_off if not sequencing else not_direct)
+        extras = sequencing and not dark_only  # the strobes and the sweep: white light and RGB colour
+        extras_off = seq_off or (dark_only_reason if dark_only else "")
+        set_active([self.seq_strobe_checkbox], extras and direct, extras_off or not_direct)
         set_active(
             [self.seq_strobe_placement_combo, self.seq_strobe_level_combo, self.seq_strobe_chance_slider,
-             self.seq_strobe_gap_slider],
-            sequencing and direct and sq.strobe_enabled,
-            seq_off if not sequencing else not_direct if not direct else "The strobe is off.",
-        )
-        set_active(
-            [self.seq_strobe_length_combo, self.seq_strobe_wave_combo, self.seq_strobe_brightness_slider,
-             self.seq_strobe_test_button],
-            sequencing and direct and sq.strobe_enabled,
-            seq_off if not sequencing else not_direct if not direct else "The strobe is off.",
+             self.seq_strobe_gap_slider, self.seq_strobe_length_combo, self.seq_strobe_wave_combo,
+             self.seq_strobe_brightness_slider, self.seq_strobe_test_button],
+            extras and direct and sq.strobe_enabled,
+            extras_off or (not_direct if not direct else "The strobe is off."),
         )
         # The rate and on-time are the flash strobe's too.
         set_active(
             [self.seq_strobe_rate_slider, self.seq_strobe_duty_slider],
-            sequencing and direct and (sq.strobe_enabled or sq.flash_strobe_enabled),
-            seq_off if not sequencing else not_direct if not direct else "The strobe and the flash strobe are off.",
+            extras and direct and (sq.strobe_enabled or sq.flash_strobe_enabled),
+            extras_off or (not_direct if not direct else "The strobe and the flash strobe are off."),
         )
         set_active(
-            [self.seq_flash_strobe_checkbox], sequencing and direct and white,
-            seq_off if not sequencing else not_direct if not direct else "White pulses are off.",
+            [self.seq_flash_strobe_checkbox], extras and direct and white,
+            extras_off or (not_direct if not direct else "White pulses are off."),
         )
         set_active(
             [self.seq_flash_strobe_placement_combo, self.seq_flash_strobe_level_combo,
-             self.seq_flash_strobe_chance_slider,
-             self.seq_flash_strobe_gap_slider, self.seq_flash_strobe_brightness_slider],
-            sequencing and direct and white and sq.flash_strobe_enabled,
-            seq_off if not sequencing else not_direct if not direct
-            else "White pulses are off." if not white else "Flash strobe is off.",
+             self.seq_flash_strobe_chance_slider, self.seq_flash_strobe_gap_slider,
+             self.seq_flash_strobe_brightness_slider],
+            extras and direct and white and sq.flash_strobe_enabled,
+            extras_off or (not_direct if not direct else "White pulses are off." if not white else "Flash strobe is off."),
         )
         # Color sweep: on the RGB colour, so any lamp transitions do.
-        set_active([self.seq_sweep_checkbox], sequencing, seq_off)
+        set_active([self.seq_sweep_checkbox], extras, extras_off)
         set_active(
             [self.seq_sweep_color_combo, self.seq_sweep_saturation_slider, self.seq_sweep_brightness_slider,
-             self.seq_sweep_length_combo, self.seq_sweep_rotators_spin, self.seq_sweep_width_spin, self.seq_sweep_direction_combo,
-             self.seq_sweep_placement_combo, self.seq_sweep_level_combo, self.seq_sweep_chance_slider,
-             self.seq_sweep_gap_slider, self.seq_sweep_test_button],
-            sequencing and sq.color_sweep_enabled,
-            seq_off if not sequencing else "Color sweep is off.",
+             self.seq_sweep_length_combo, self.seq_sweep_rotators_spin, self.seq_sweep_width_spin,
+             self.seq_sweep_direction_combo, self.seq_sweep_placement_combo, self.seq_sweep_level_combo,
+             self.seq_sweep_chance_slider, self.seq_sweep_gap_slider, self.seq_sweep_test_button],
+            extras and sq.color_sweep_enabled,
+            extras_off or "Color sweep is off.",
         )
         set_active(
-            [self.seq_sweep_hue_slider], sequencing and sq.color_sweep_enabled and sq.color_sweep_color == "custom",
-            seq_off if not sequencing else "Color sweep is off." if not sq.color_sweep_enabled
-            else "Sweep colour is 'dynamic'.",
+            [self.seq_sweep_hue_slider], extras and sq.color_sweep_enabled and sq.color_sweep_color == "custom",
+            extras_off or ("Color sweep is off." if not sq.color_sweep_enabled else "Sweep colour is 'dynamic'."),
         )
-        if sequencing and not direct:
+        if extras and not direct:
             show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Global box): only then "
                       "do the bulbs take a change instantly and show white and colour at the same time.")
         else:
             show_note(self.seq_strobe_note, "")
+
+    def _update_bsw_states(self) -> None:
+        """Beat Sync White's own settings: its detector while it doesn't follow
+        the clock, its per-beat dark pulses while the sequencer doesn't place
+        them, and what 'Change temperature' is counted from."""
+        cfg = self.controller.config
+        rh, bsw = cfg.rhythm, cfg.color_mapping.beat_sync_white
+        set_active(
+            [self.bsw_low_spin, self.bsw_high_spin, self.bsw_sensitivity_slider, self.bsw_min_interval_slider,
+             self.bsw_min_energy_slider],
+            not rh.shared_clock, "Beat Sync White follows the shared beat clock (Rhythm box at the top).",
+        )
+        _, sequencing, _ = self._sequencer_state("beat_sync_white")
+        set_active(
+            [self.bsw_dark_prob_slider, self.bsw_dark_duration_slider, self.bsw_dark_depth_slider], not sequencing,
+            "The Pulse sequencer (below) places Beat Sync White's dark pulses - shaped by the Dark pulses section.",
+        )
+        show_note(self.bsw_dark_seq_note, (
+            "The Pulse sequencer places the dark pulses here (shaped by the Dark pulses section below), so these "
+            "per-beat ones are greyed out - they apply again while the sequencer is off or the beat clock hasn't "
+            "locked yet."
+        ) if sequencing else "")
+        if bsw.temp_every_n_beats > 1 and not (rh.shared_clock and rh.tempo_lock):
+            show_note(self.bsw_temp_every_note, (
+                "Counted from the bar start only with the shared beat clock and Lock to tempo (Rhythm box) - "
+                "now it counts the detected beats, so the changes can drift off the strong beats."
+            ))
+        else:
+            show_note(self.bsw_temp_every_note, "")
 
     def _add_smoothing_sliders(self, layout) -> "tuple[FloatSlider, FloatSlider]":
         """Attack/Release of the level smoothing - one setting shared by RGB
@@ -1189,6 +1369,24 @@ class ColorMappingTab(QWidget):
         page = self._mode_pages.get(mode)
         if page is not None:
             self.sub_tabs.setCurrentWidget(page)
+
+    def _place_pulse_box(self, page) -> None:
+        """Moves the shared Dark pulses / White pulses / Pulse sequencer box to
+        the bottom of mode page `page` (above its closing stretch) - one set of
+        widgets for every mode, so the settings are the same everywhere - and
+        sets what that mode uses in it."""
+        mode = self._page_modes.get(page)
+        if mode is None:
+            return
+        if self.pulse_box.parentWidget() is not page:
+            old = self.pulse_box.parentWidget()
+            if old is not None and old.layout() is not None:
+                old.layout().removeWidget(self.pulse_box)
+            layout = page.layout()
+            layout.insertWidget(max(0, layout.count() - 1), self.pulse_box)
+            self.pulse_box.show()
+        self._pulse_mode = mode
+        self._update_beat_states()
 
     # -- handlers -----------------------------------------------------------------------
 
@@ -1274,6 +1472,7 @@ class ColorMappingTab(QWidget):
         bsw.temp_min = self.bsw_temp_min_slider.value()
         bsw.temp_max = self.bsw_temp_max_slider.value()
         bsw.min_temp_jump = self.bsw_min_jump_slider.value()
+        bsw.temp_every_n_beats = self.bsw_temp_every_combo.currentData()
         bsw.flash_brightness = self.bsw_flash_slider.value()
         bsw.sustain_brightness = self.bsw_sustain_slider.value()
         bsw.temp_attack_ms = self.bsw_temp_attack_slider.value()
@@ -1282,6 +1481,7 @@ class ColorMappingTab(QWidget):
         bsw.dark_pulse_probability = self.bsw_dark_prob_slider.value()
         bsw.dark_pulse_duration_ms = self.bsw_dark_duration_slider.value()
         bsw.dark_pulse_depth = self.bsw_dark_depth_slider.value()
+        self._update_bsw_states()
         self.controller.apply_config_changes()
 
     def _on_peak_changed(self, *_args) -> None:
@@ -1387,8 +1587,12 @@ class ColorMappingTab(QWidget):
     # -- shared beat clock -------------------------------------------------------------------
 
     @staticmethod
-    def _trigger_combo(layout: QVBoxLayout, label: str, value: str) -> QComboBox:
-        row = QHBoxLayout()
+    def _trigger_combo(layout: QVBoxLayout, label: str, value: str) -> "tuple[QComboBox, QWidget]":
+        """A pulse's trigger choice (Beat Sync's per-beat pulses) - and its row,
+        which the other modes' pages hide."""
+        row_widget = QWidget()
+        row = QHBoxLayout(row_widget)
+        row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(QLabel(label))
         combo = QComboBox()
         combo.addItems(list(PULSE_TRIGGERS))
@@ -1400,8 +1604,8 @@ class ColorMappingTab(QWidget):
         )
         row.addWidget(combo)
         row.addStretch(1)
-        layout.addLayout(row)
-        return combo
+        layout.addWidget(row_widget)
+        return combo, row_widget
 
     def _build_rhythm_box(self, rh: RhythmConfig) -> CollapsibleSection:
         box = CollapsibleSection(
@@ -1414,8 +1618,8 @@ class ColorMappingTab(QWidget):
             "One beat detector that every layer can follow, so the flash, the color changes, Chase and "
             "Group Switch all move on the same beats instead of each reacting to different hits. It "
             "locks onto the tempo, ignores off-beat hits (hi-hats, vocals), fills in a missed kick, and "
-            "counts bars so slower layers can change on bar starts. Chase / Group Switch follow it with "
-            "Speed source 'clock' (Chase & Group Switch tab)."
+            "counts bars so slower layers can change on bar starts. The Pulse sequencer follows it in every "
+            "colour mode; Chase / Group Switch with Speed source 'clock' (Chase & Group Switch tab)."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)
@@ -1423,8 +1627,10 @@ class ColorMappingTab(QWidget):
         self.rhythm_shared_checkbox = QCheckBox("Beat Sync (and Beat Sync White) follow the shared clock")
         self.rhythm_shared_checkbox.setChecked(rh.shared_clock)
         self.rhythm_shared_checkbox.setToolTip(
-            "On: Beat Sync flashes on the clock's beats instead of its own detector (whose band/"
-            "sensitivity settings are then unused), and its pulse triggers can use accents/bar starts."
+            "On: Beat Sync and Beat Sync White flash on the clock's beats instead of their own detectors "
+            "(whose band/sensitivity settings are then unused), their pulse triggers can use accents/bar "
+            "starts, and 'Change hue' / 'Change temperature' count from the bar start. The Pulse sequencer "
+            "needs it in these two modes, so their flashes and its pulses go by the same beats."
         )
         self.rhythm_shared_checkbox.toggled.connect(self._on_rhythm_changed)
         layout.addWidget(self.rhythm_shared_checkbox)
@@ -1543,18 +1749,22 @@ class ColorMappingTab(QWidget):
         box = CollapsibleSection(
             "Pulse sequencer", key="beat/sequencer", checkable=True, checked=sq.enabled,
             tooltip="White and dark pulses placed on musical positions - rhythm patterns, a white walk "
-            "round the lamp groups, phrase fills and breaths, strobes and colour sweeps - instead of a "
-            "probability roll on every beat. Needs the shared beat clock.",
+            "round the lamp groups, phrase fills and breaths, strobes and colour sweeps - in every colour "
+            "mode, with the same settings (Beat Sync White takes only the dark pulses). Follows the shared "
+            "beat clock: needs Lock to tempo, and in Beat Sync / Beat Sync White 'follow the shared clock' "
+            "(Rhythm box).",
         )
         layout = box.content_layout()
         intro = QLabel(
-            "Instead of rolling a probability on every beat, places the white and dark pulses above "
-            "like a lighting operator would: on rhythm patterns in 16th notes (also between the "
-            "beats), with the white flash walking from lamp group to lamp group (the Group Switch "
-            "groups, 'Effect group' on the Devices & Setup tab), phrase fills and a dark breath before each "
-            "new phrase, and busier patterns when the music gets louder. Uses the pulse durations, "
-            "true-white brightness and cool ratio set above. Needs the shared beat clock (Rhythm box) "
-            "- while it isn't locked yet, the per-beat settings above apply."
+            "Places the white and dark pulses like a lighting operator would: on rhythm patterns in 16th "
+            "notes (also between the beats), with the white flash walking from lamp group to lamp group "
+            "(the Group Switch groups, 'Effect group' on the Devices & Setup tab), phrase fills and a dark "
+            "breath before each new phrase, and busier patterns when the music gets louder. The same in every "
+            "colour mode: these settings and the pulses' look (Dark pulses and White pulses above) are "
+            "shared, so trying another mode keeps them - Beat Sync White takes only the dark pulses. Follows "
+            "the shared beat clock (Rhythm box): needs Lock to tempo, and in Beat Sync and Beat Sync White "
+            "'follow the shared clock'. Until the clock has locked, Beat Sync rolls its per-beat pulses "
+            "(probability above) and the other modes have none."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)

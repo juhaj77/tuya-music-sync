@@ -4,11 +4,13 @@ never scrolls away): what the music sync is hearing and doing right now.
 - First row: the beat clock - beats of the bar (the current one lit, the
   downbeat bigger), tempo and lock state - then the phrase position,
   loudness, drums share, the note and key, and the colour mode.
-- Second row, while the pulse sequencer runs: a timeline of the last two
-  bars on the clock's grid, scrolling left as the music plays - white
-  flashes, dark pulses, strobes and color sweeps in their own lanes, the
-  bar lines, the phrase starts - and a line of text naming the patterns
-  playing and the latest pulses.
+- Second row, whenever the colour mode uses the pulse sequencer (also while
+  it waits for the beat clock to lock, so the panel keeps its height): a
+  timeline of the last two bars on the clock's grid, scrolling left as the
+  music plays - white flashes, dark pulses, strobes and color sweeps in their
+  own lanes, the bar lines, the phrase starts - and a line of text naming the
+  patterns playing and the latest pulses (in Beat Sync White, which takes
+  only the dark pulses, just those).
 
 Reads the engine's state (VisualizationEngine.latest_clock_beat,
 sequencer_status, seq_position, seq_events, ...) on its own timer; it
@@ -25,6 +27,7 @@ from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPolyg
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ...effects.pulse_sequencer import light_share, release_level
+from ...engine.rules import sequencer_enabled_for
 from .. import theme
 
 _MODE_NAMES = {
@@ -128,7 +131,8 @@ class SequencerTimeline(QWidget):
         if now is None or status is None:
             painter.setPen(_DIM)
             painter.drawText(
-                QRectF(left, 0, width, rect.height()), Qt.AlignCenter, "Waiting for the beat clock to lock..."
+                QRectF(left, 0, width, rect.height()), Qt.AlignCenter,
+                "Waiting for the beat clock to lock..." if self.engine.running else "Stopped",
             )
             self._border(painter, rect)
             return
@@ -336,8 +340,11 @@ class InfoPanel(QFrame):
         self.beat_dots.set_state(bpb, beat.bar_position if locked else None, beat.beat_count if beat else -1)
 
         status = engine.sequencer_status
-        self.sequencer_box.setVisible(status is not None)
-        if status is not None:
+        # Shown whenever the mode uses the sequencer - also while it waits for
+        # the beat clock to lock (again), the timeline saying so - so the panel
+        # doesn't change height each time the beat is lost and found.
+        self.sequencer_box.setVisible(sequencer_enabled_for(config, config.color_mapping.mode))
+        if self.sequencer_box.isVisibleTo(self):
             self.timeline.beats_per_bar = bpb
             self.timeline.update()
 
@@ -347,6 +354,9 @@ class InfoPanel(QFrame):
         self.clock_label.setText(self._clock_text(engine, config, beat, bpb))
         if status is not None:
             self.sequencer_label.setText(self._sequencer_text(engine, status))
+        else:
+            what = "waiting for the beat clock to lock" if running else "stopped"
+            self.sequencer_label.setText(f"<span style='color:{theme.MUTED}'>Sequencer: {what}</span>")
 
     @staticmethod
     def _clock_text(engine, config, beat, bpb: int) -> str:
@@ -385,7 +395,10 @@ class InfoPanel(QFrame):
     @staticmethod
     def _sequencer_text(engine, status: dict) -> str:
         sq = engine.config.sequencer
-        parts = [f"Sequencer: white <b>{status['white_pattern']}</b>", f"dark {' + '.join(status['dark_patterns'])}"]
+        dark = " + ".join(status["dark_patterns"])
+        if status["white_pattern"] is None:  # Beat Sync White: its dark pulses only
+            return f"<span style='color:{theme.MUTED}'>Sequencer, dark pulses only: <b>{dark}</b></span>"
+        parts = [f"Sequencer: white <b>{status['white_pattern']}</b>", f"dark {dark}"]
         latest = {}
         for e in engine.seq_events:
             latest[e["kind"]] = e

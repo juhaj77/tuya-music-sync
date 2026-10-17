@@ -42,9 +42,12 @@ themselves. On top of that grid:
 - Color sweep (optional): now and then a colour of its own runs once round
   the lamps in Chase order, fast - over a beat, say - ending on a bar line
   (or starting on any beat), never while the strobe runs.
+- Dark only (tick(dark_only=True), for Beat Sync White, which is all white
+  already): just the dark pulses - no white flashes, strobes or sweeps, and
+  so nothing white keeps a dark pulse off its step either.
 
 Pure logic: returns events, never touches lamps. The engine turns events
-into lamp commands (see VisualizationEngine._apply_sequencer_events).
+into lamp commands (see VisualizationEngine._apply_sequencer_event).
 """
 from __future__ import annotations
 
@@ -405,6 +408,7 @@ class PulseSequencer:
         self._phrase_origin_bar = 0
         self._loudness = LoudnessTracker()
         self._bar_intensities: List[float] = []  # this bar's intensity samples, for drop detection
+        self._dark_only = False  # see tick()
         self.intensity = 0.5
         self.level = "groove"
         self.phrase_bar = 0
@@ -427,11 +431,18 @@ class PulseSequencer:
     # -- main entry point ---------------------------------------------------------------
 
     def tick(
-        self, position: Optional[float], energy: float, now_s: float, dt: float, num_groups: int, beats_per_bar: int
+        self, position: Optional[float], energy: float, now_s: float, dt: float, num_groups: int, beats_per_bar: int,
+        dark_only: bool = False,
     ) -> List[PulseEvent]:
         """position: BeatClock.position() (None when not locked -> no events).
-        energy: broadband loudness level (0..1) for the dynamics. Returns the
-        events for every 16th step crossed since the previous tick."""
+        energy: broadband loudness level (0..1) for the dynamics. dark_only:
+        only the dark pulses (Beat Sync White) - the phrases, fills, drops
+        and loudness levels go on as usual, so switching it on or off mid-song
+        keeps the place in the music. Returns the events for every 16th step
+        crossed since the previous tick."""
+        self._dark_only = dark_only
+        if dark_only:
+            self._pending_doubles.clear()  # a double decided before is a white flash too
         self._track_intensity(energy, now_s, dt)
         if position is None:
             # No bar lines while the clock isn't locked: nothing would ever
@@ -489,7 +500,7 @@ class PulseSequencer:
             self._rolls.clear()  # a new phrase, a new variation of the groove
 
         # -- strobe (announced one 16th before it starts) ----------------------------
-        strobe = self._strobe_for_step(step, steps_per_bar, phrase_bars)
+        strobe = None if self._dark_only else self._strobe_for_step(step, steps_per_bar, phrase_bars)
         if strobe is not None:
             events.append(strobe)
         strobing = self._strobe_from_step <= step < self._strobe_until_step
@@ -499,14 +510,14 @@ class PulseSequencer:
         strobe_just_ended = self._strobe_from_step < self._strobe_until_step == step
 
         # -- color sweep (on the RGB colour, so the pulses keep going) ----------------
-        sweep = self._color_sweep_for_step(step, bar_step, steps_per_bar, phrase_bars)
+        sweep = None if self._dark_only else self._color_sweep_for_step(step, bar_step, steps_per_bar, phrase_bars)
         if sweep is not None:
             events.append(sweep)
 
         # -- white (the strobe has the white LEDs to itself while it runs) -------------
         white_group: Optional[int] = None
         white_reason = ""
-        if cfg.white_pattern != "off" and not strobing and not strobe_just_ended:
+        if cfg.white_pattern != "off" and not self._dark_only and not strobing and not strobe_just_ended:
             if phrase_start and cfg.phrase_accent:
                 white_reason = "phrase"
             elif in_fill and self._fill_step(bar_step, steps_per_bar):

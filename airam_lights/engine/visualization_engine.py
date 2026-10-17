@@ -9,8 +9,8 @@ config.schema.NetworkConfig.visual_update_hz):
 - `tick_visual()`: reads the latest FFT frame, extracts whatever
   bands/features the current color mode needs, applies attack/release
   smoothing, runs the color mapping and the overlays (Chase, Group Switch,
-  the sequencer's pulses), and finally hands the per-lamp target colors to
-  the LampManager.
+  the pulse sequencer's pulses - in every color mode, see _tick_sequencer),
+  and finally hands the per-lamp target colors to the LampManager.
 
 The LampManager's own per-lamp worker threads then independently rate-limit
 actual network sends to `lamp_command_rate_hz` and drop unchanged updates -
@@ -66,6 +66,7 @@ from ..dsp.hue_step import SOURCES as HUE_STEP_SOURCES, HueStepSignals
 from ..dsp.pitch import PitchTracker
 from ..dsp.spectral_features import FeatureFrame, SpectralFeatures
 from ..lamps.manager import LampManager
+from .rules import clock_in_use, sequencer_dark_only, sequencer_enabled_for
 
 logger = logging.getLogger("airam_lights.engine")
 
@@ -199,10 +200,19 @@ class VisualizationEngine:
             sensitivity=bsw.sensitivity, min_interval_ms=bsw.min_interval_ms, min_energy=bsw.min_energy
         )
         self._beat_white_target_temp = random.uniform(bsw.temp_min, bsw.temp_max)
-        self._temp_smoother_beat_white = AttackReleaseSmoother(bsw.temp_attack_ms, initial=self._beat_white_target_temp)
+        # Temp snap speed both ways: toward warm as fast as toward cool (with
+        # only an attack time a change toward warm took the smoother's 300 ms
+        # default release - it lagged well behind the beat).
+        self._temp_smoother_beat_white = AttackReleaseSmoother(
+            bsw.temp_attack_ms, bsw.temp_attack_ms, initial=self._beat_white_target_temp
+        )
         self._smoother_beat_white_value = AttackReleaseSmoother(bsw.brightness_attack_ms, bsw.brightness_release_ms)
         self._beat_white_dark_until: Optional[float] = None
         self.last_beat_time_white: Optional[float] = None
+        # "Change temperature every N beats" (temp_every_n_beats), like Beat
+        # Sync's hue: decided on the beat, used on the flash that follows it.
+        self._bsw_temp_due = True
+        self._bsw_beat_count = 0
 
         self._chase_animator = ChaseAnimator(config.chase)
         self._group_switch_animator = GroupSwitchAnimator(config.group_switch)
@@ -248,10 +258,16 @@ class VisualizationEngine:
         # each one (see _hue_glide_progress).
         self._glide_beats_done = 0
 
-        # Pulse sequencer (see effects/pulse_sequencer.py): per-lamp white
-        # flash state, since its flashes walk between groups and overlap.
+        # Pulse sequencer (see effects/pulse_sequencer.py and _tick_sequencer):
+        # per-lamp white flash state, since its flashes walk between groups
+        # and overlap. Its dark pulses share Beat Sync's dark pulse state
+        # (_beat_dark_until, _smoother_beat_dark) in every mode.
         self._sequencer = PulseSequencer(config.sequencer)
         self._sequencing = False
+        self._mode: Optional[str] = None  # the colour mode of the last tick (see _leave_mode)
+        # The hue the lamps show (before the overlays), for the color sweep's
+        # "dynamic" colour - None while there's no clear one.
+        self._show_hue: Optional[float] = None
         self._seq_groups: list = []
         self._seq_white_until: Dict[str, float] = {}
         self._seq_white_started: Dict[str, float] = {}
@@ -367,7 +383,8 @@ class VisualizationEngine:
         self._beat_detector_white.sensitivity = bsw.sensitivity
         self._beat_detector_white.min_interval_ms = bsw.min_interval_ms
         self._beat_detector_white.min_energy = bsw.min_energy
-        self._temp_smoother_beat_white.time_constant_ms = bsw.temp_attack_ms
+        self._temp_smoother_beat_white.attack_ms = bsw.temp_attack_ms
+        self._temp_smoother_beat_white.release_ms = bsw.temp_attack_ms
         self._smoother_beat_white_value.attack_ms = bsw.brightness_attack_ms
         self._smoother_beat_white_value.release_ms = bsw.brightness_release_ms
 
@@ -393,17 +410,20 @@ class VisualizationEngine:
 
     @property
     def sequencer_status(self) -> Optional[dict]:
-        """Phrase position and loudness level while the pulse sequencer runs, for display."""
-        if not self._sequencing or not self.running or self.config.color_mapping.mode != "beat_sync":
+        """Phrase position and loudness level while the pulse sequencer runs, for display.
+        white_pattern is None in Beat Sync White, which takes only its dark pulses."""
+        mode = self.config.color_mapping.mode
+        if not self._sequencing or not self.running or not sequencer_enabled_for(self.config, mode):
             return None
+        dark_only = sequencer_dark_only(mode)
         return {
             "phrase_bar": self._sequencer.phrase_bar,
             "phrase_bars": self.config.sequencer.phrase_bars,
             "level": self._sequencer.level,
             "intensity": self._sequencer.intensity,
-            "white_pattern": self._sequencer.white_pattern_now,
+            "white_pattern": None if dark_only else self._sequencer.white_pattern_now,
             "dark_patterns": self._sequencer.dark_patterns_now,
-            "strobe": self.last_strobe if self.config.sequencer.strobe_enabled else None,
+            "strobe": self.last_strobe if self.config.sequencer.strobe_enabled and not dark_only else None,
         }
 
     @property
@@ -462,12 +482,18 @@ class VisualizationEngine:
             return
 
         mode = self.config.color_mapping.mode
-        self._beat_sync_white_targets = {}  # only _tick_beat_sync_mode ever (re-)populates this
+        if mode != self._mode:
+            if self._mode is not None:
+                self._leave_mode(self._mode, mode)
+            self._mode = mode
+        # Set again by _tick_beat_sync_mode / _apply_pulses (the lamps mid white flash this tick).
+        self._beat_sync_white_targets = {}
         self._under_white_fraction = {}
         self._white_targets_preselected = False
         self._tick_beat_clock(frame, wall_now, mode)
         self._tick_music_signals(frame, dt, mode)
         self.hue_step_status = self.group_hue_step_status = None  # set again by an overlay that runs
+        self._tick_sequencer(frame, dt, wall_now, selected_ids, mode)
 
         if mode == "beat_sync_white":
             # A different physical DP (brightness+temp, work_mode='white')
@@ -497,13 +523,18 @@ class VisualizationEngine:
         else:
             logger.warning("Unknown color mapping mode '%s'", mode)
 
+        if mode != "beat_sync":
+            # Beat Sync shows the sequencer's pulses itself (they interact with its beat flash).
+            self._show_hue = self._clear_hue(colors)
+            self._apply_pulses(colors, dt, wall_now)
+
         if colors and self.config.chase.enabled:
             colors = self._apply_chase_overlay(colors, frame, dt, wall_now, selected_ids)
 
         if colors and self.config.group_switch.enabled:
             colors = self._apply_group_switch_overlay(colors, frame, dt, wall_now, selected_ids)
 
-        # (The sequencer's sweeps only come in Beat Sync; the Test button's play in any colour mode.)
+        # The sequencer's sweeps (every colour mode but Beat Sync White) and the Test button's.
         swept = self._apply_color_sweep(colors, selected_ids) if colors else set()
 
         if self._beat_sync_white_targets and (self.config.chase.enabled or self.config.group_switch.enabled or swept):
@@ -533,12 +564,7 @@ class VisualizationEngine:
 
     def _tick_beat_clock(self, frame: SpectrumFrame, wall_now: float, mode: str) -> None:
         rh = self.config.rhythm
-        chase, gs = self.config.chase, self.config.group_switch
-        self.clock_active = (
-            (rh.shared_clock and mode in ("beat_sync", "beat_sync_white"))
-            or (chase.enabled and chase.sync_mode == "clock")
-            or (gs.enabled and gs.sync_mode == "clock")
-        )
+        self.clock_active = clock_in_use(self.config, mode)
         if not self.clock_active:
             self._clock_beat = ClockBeat()
             return
@@ -686,20 +712,20 @@ class VisualizationEngine:
         # test_rapid_repeated_beats_do_not_extend_pulse_forever).
         dark_ready = self._beat_dark_until is None
         white_ready = self._beat_white_pulse_until is None and self._last_white_amount <= _WHITE_PULSE_EPSILON
-        # With the pulse sequencer running (and the clock locked, so there's
-        # a grid to place pulses on) it decides every pulse; the per-beat
-        # probability rolls below step aside.
-        sequencer_on = self.config.sequencer.enabled and clock is not None
-        self._sequencing = sequencer_on and clock.locked
+        # With the pulse sequencer running (see _tick_sequencer - the clock
+        # locked, so there's a grid to place pulses on) it decides every
+        # pulse; the per-beat probability rolls below step aside.
         roll_pulses = not self._sequencing
 
         flash_now = False
         if is_beat:
             every_n = max(1, int(cfg.hue_every_n_beats))
+            # A change still waiting for its flash (held back by a dark pulse
+            # this beat came in the middle of) isn't dropped by this beat.
             if clock is not None:
-                self._beat_hue_due = beat_divides(clock, every_n)
+                self._beat_hue_due = self._beat_hue_due or beat_divides(clock, every_n)
             else:
-                self._beat_hue_due = self._beat_sync_beat_count % every_n == 0
+                self._beat_hue_due = self._beat_hue_due or self._beat_sync_beat_count % every_n == 0
                 self._beat_sync_beat_count += 1
 
             # Also gated on "not currently active" for dark, so a fixed-
@@ -732,11 +758,6 @@ class VisualizationEngine:
                     cfg, self._beat_white_pulse_temp
                 )
                 self._beat_white_pulse_started = wall_now
-
-        if sequencer_on:
-            self._run_sequencer(frame, dt, wall_now, selected_ids, cfg)
-        if cfg.white_pulse_temp_mode == "loudness":
-            self._loudness.update(band_energy(frame, 20.0, 16000.0), wall_now, dt)
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
@@ -891,18 +912,7 @@ class VisualizationEngine:
 
             white_mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
             if self._sequencing and self._seq_white_active(device_id, wall_now):
-                peak = self._seq_white_brightness.get(device_id, 1.0)
-                level = self._seq_white_envelope(device_id, wall_now, cfg)
-                white_targets[device_id] = WhiteTarget(
-                    brightness=cfg.white_pulse_white_brightness * level * white_mult,
-                    temp=self._glide_temp(
-                        self._seq_white_temp.get(device_id, 1.0), self._seq_white_temp_end.get(device_id),
-                        wall_now - self._seq_white_started.get(device_id, wall_now),
-                        (self._seq_white_attack.get(device_id, 0.0), self._seq_white_hold.get(device_id, 0.0),
-                         self._seq_white_release.get(device_id, 0.0), self._seq_white_curve.get(device_id, "linear")),
-                    ),
-                    under=self._under_white(color, level / peak if peak > 0.0 else 1.0, device_id),
-                ).clamped()
+                white_targets[device_id] = self._seq_white_target(device_id, color, wall_now, cfg)
             elif shared_white_target is not None:
                 white_targets[device_id] = WhiteTarget(
                     brightness=shared_white_target.brightness * white_mult,
@@ -957,7 +967,99 @@ class VisualizationEngine:
 
     # -- pulse sequencer ------------------------------------------------------------------
 
-    def _run_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, cfg) -> None:
+    def _tick_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, mode: str) -> None:
+        """The pulse sequencer, the same in every colour mode (see
+        engine.rules): it places the white flashes, dark pulses, strobes and
+        color sweeps on the shared beat clock's grid - Beat Sync White gets
+        only the dark pulses. Decided here, before the mode's own tick; each
+        mode then shows them - Beat Sync in _tick_beat_sync_mode, Beat Sync
+        White in _tick_beat_sync_white_mode, the others in _apply_pulses. It
+        places nothing until the clock has locked: until then Beat Sync rolls
+        its per-beat pulses and the other modes have none."""
+        on = sequencer_enabled_for(self.config, mode)
+        self._sequencing = on and self._clock_beat.locked
+        if on:
+            self._run_sequencer(frame, dt, wall_now, selected_ids, sequencer_dark_only(mode))
+        else:
+            # Starts afresh when it's back - a stale position would read as a
+            # jump of the grid and move the timeline's old pulses to now.
+            self._seq_position = None
+        if self.config.color_mapping.beat_sync.white_pulse_temp_mode == "loudness":
+            self._loudness.update(band_energy(frame, 20.0, 16000.0), wall_now, dt)
+
+    def _apply_pulses(self, colors: Dict[str, Color], dt: float, wall_now: float) -> None:
+        """The sequencer's pulses on a colour mode with no beat flash of its
+        own (Peak Flash, RGB Frequency, HSV Music, Custom), in place: a dark
+        pulse dips the mode's colour toward black - by Beat Sync's dark pulse
+        depth, on its dark pulse attack/release - and a white flash lights
+        the lamps' white LEDs over that colour, exactly as in Beat Sync (see
+        _seq_white_target). Runs every tick, so a dip still fading when the
+        sequencer stops eases back instead of jumping."""
+        bs = self.config.color_mapping.beat_sync
+        if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
+            self._beat_dark_until = None
+        dark_amount = self._smoother_beat_dark.update(1.0 if self._beat_dark_until is not None else 0.0, dt)
+        if dark_amount > 1e-3:
+            keep = 1.0 - clip(dark_amount * bs.dark_pulse_depth)
+            for device_id, color in colors.items():
+                colors[device_id] = Color(color.r * keep, color.g * keep, color.b * keep)
+        white_targets: Dict[str, WhiteTarget] = {}
+        if self._sequencing:
+            for device_id, color in colors.items():
+                if self._seq_white_active(device_id, wall_now):
+                    white_targets[device_id] = self._seq_white_target(device_id, color, wall_now, bs)
+        if self._strobe_running():
+            white_targets = {}  # the strobe has the white LEDs to itself (as in Beat Sync)
+        self._beat_sync_white_targets = white_targets
+        self._white_targets_preselected = True  # the sequencer's walk picked the lamps
+
+    def _seq_white_target(self, device_id: str, color: Color, wall_now: float, cfg) -> WhiteTarget:
+        """What a lamp mid sequencer flash is sent: the flash's envelope
+        (attack, hold, release along its curve) times its brightness and the
+        lamp's true-white multiplier, at its warm/cool - gliding for a
+        hybrid - with `color` crossfading under it (see _under_white). `cfg`:
+        Beat Sync's settings, which hold the white pulse look."""
+        effect = self.config.per_lamp_effects.get(device_id)
+        white_mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+        peak = self._seq_white_brightness.get(device_id, 1.0)
+        level = self._seq_white_envelope(device_id, wall_now, cfg)
+        return WhiteTarget(
+            brightness=cfg.white_pulse_white_brightness * level * white_mult,
+            temp=self._glide_temp(
+                self._seq_white_temp.get(device_id, 1.0), self._seq_white_temp_end.get(device_id),
+                wall_now - self._seq_white_started.get(device_id, wall_now),
+                (self._seq_white_attack.get(device_id, 0.0), self._seq_white_hold.get(device_id, 0.0),
+                 self._seq_white_release.get(device_id, 0.0), self._seq_white_curve.get(device_id, "linear")),
+            ),
+            under=self._under_white(color, level / peak if peak > 0.0 else 1.0, device_id),
+        ).clamped()
+
+    @staticmethod
+    def _clear_hue(colors: Dict[str, Color]) -> Optional[float]:
+        """The hue the lamps show (the first one's - before the overlays
+        every lamp has the same colour), or None when it's too pale or dark
+        to have a clear one."""
+        for color in colors.values():
+            hue, saturation, value = color.to_hsv()
+            return hue if saturation >= 0.25 and value >= 0.05 else None
+        return None
+
+    def _leave_mode(self, old: str, new: str) -> None:
+        """On the first tick in a new colour mode: lets go of what only the old
+        mode was showing, so none of it comes back stale later (Beat Sync's
+        per-beat white flash, say, replaying when Beat Sync is picked again).
+        The sequencer and its dark pulses carry on - they're shared."""
+        if old == "beat_sync":
+            self._beat_white_pulse_until = None
+            self._smoother_beat_white.reset(0.0)
+            self._last_white_amount = 0.0
+            self._white_pulse_lamps = None
+        elif old == "beat_sync_white":
+            self._beat_white_dark_until = None
+        if sequencer_dark_only(new) and self._color_sweep is not None:
+            self._end_color_sweep(self._seq_position)  # no colour to sweep over in Beat Sync White
+
+    def _run_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, dark_only: bool) -> None:
         position = self._beat_clock.position(wall_now) if self._sequencing else None
         last = self._seq_position
         if position is not None and last is not None and not 0.0 <= position - last <= 1.0:
@@ -972,13 +1074,17 @@ class VisualizationEngine:
         else:
             self._seq_groups = get_group_switch_groups(self.config.per_lamp_effects, selected_ids)
         events = self._sequencer.tick(
-            position, loudness, wall_now, dt, len(self._seq_groups), self.config.rhythm.beats_per_bar
+            position, loudness, wall_now, dt, len(self._seq_groups), self.config.rhythm.beats_per_bar,
+            dark_only=dark_only,
         )
+        cfg = self.config.color_mapping.beat_sync  # the pulses' look, in every mode
         for event in events:
+            if dark_only and event.kind != "dark":
+                continue
             self._apply_sequencer_event(event, cfg, wall_now, selected_ids)
 
     def _apply_sequencer_event(self, event: PulseEvent, cfg, wall_now: float, selected_ids) -> None:
-        # Beat Sync's pulse Enabled checkboxes stay the master switches.
+        # The Dark pulses / White pulses switches (Beat Sync's settings) stay the master switches.
         if event.kind == "dark":
             if cfg.dark_pulse_enabled and self._beat_dark_until is None and cfg.dark_pulse_duration_ms > 0.0:
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0 * event.length
@@ -1268,7 +1374,8 @@ class VisualizationEngine:
         "dynamic" one picked to stand out from the show (dynamic_sweep_hue)."""
         sq = self.config.sequencer
         if sq.color_sweep_color == "dynamic":
-            hue = dynamic_sweep_hue(self._beat_target_hue, self._last_sweep_hue, random)
+            shown = self._beat_target_hue if self.config.color_mapping.mode == "beat_sync" else self._show_hue
+            hue = dynamic_sweep_hue(shown, self._last_sweep_hue, random)
         else:
             hue = sq.color_sweep_hue_deg
         self._last_sweep_hue = hue
@@ -1516,36 +1623,58 @@ class VisualizationEngine:
         """Same rhythm-reactive envelope as Beat Sync (including dark
         pulses), but the "hue" being jumped between beats is a color
         TEMPERATURE (warm<->cool) instead - drives the bulb's WHITE
-        work_mode (brightness + temp_value_v2) rather than RGB. Returns
-        (real WhiteTargets to send, approximate RGB preview Colors for the
-        UI only)."""
-        cfg = self.config.color_mapping.beat_sync_white
+        work_mode (brightness + temp_value_v2) rather than RGB. Every beat
+        flashes; the temperature changes on every temp_every_n_beats-th one -
+        counted from the bar start on the shared clock, like Beat Sync's hue.
 
-        if self.config.rhythm.shared_clock:
+        The pulse sequencer gives it only its dark pulses (see
+        _tick_sequencer). While it runs they replace the per-beat dark pulse
+        roll, and as in Beat Sync a beat in the middle of one flashes when it
+        ends; the dip itself uses the Dark pulses settings every mode shares
+        (Beat Sync's depth and attack/release). Returns (real WhiteTargets to
+        send, approximate RGB preview Colors for the UI only)."""
+        cfg = self.config.color_mapping.beat_sync_white
+        bs = self.config.color_mapping.beat_sync
+
+        clock = self._clock_beat if self.config.rhythm.shared_clock else None
+        if clock is not None:
             raw_energy = self._clock_energy
-            is_beat = self._clock_beat.is_beat
+            is_beat = clock.is_beat
         else:
             raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
             is_beat = self._beat_detector_white.update(raw_energy, wall_now)
 
         flash_now = False
         if is_beat:
+            every_n = max(1, int(cfg.temp_every_n_beats))
+            # (A change still waiting for its flash isn't dropped by this beat.)
+            if clock is not None:
+                self._bsw_temp_due = self._bsw_temp_due or beat_divides(clock, every_n)
+            else:
+                self._bsw_temp_due = self._bsw_temp_due or self._bsw_beat_count % every_n == 0
+                self._bsw_beat_count += 1
             if (
-                cfg.dark_pulse_probability > 0.0
+                not self._sequencing
+                and cfg.dark_pulse_probability > 0.0
                 and cfg.dark_pulse_duration_ms > 0.0
                 and random.random() < cfg.dark_pulse_probability
             ):
                 self._beat_white_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
             else:
                 self._beat_white_dark_until = None
-                flash_now = True
+                flash_now = self._beat_dark_until is None  # a sequencer dark pulse holds it until it ends
 
         if self._beat_white_dark_until is not None and wall_now >= self._beat_white_dark_until:
             self._beat_white_dark_until = None
             flash_now = True
+        if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
+            self._beat_dark_until = None
+            flash_now = True
 
         if flash_now:
-            self._beat_white_target_temp = self._pick_next_white_temp(cfg)
+            if self._bsw_temp_due:
+                self._beat_white_target_temp = self._pick_next_white_temp(cfg)
+                self._bsw_temp_due = False
             self.last_beat_time_white = wall_now
 
         in_dark_pulse = self._beat_white_dark_until is not None
@@ -1558,13 +1687,19 @@ class VisualizationEngine:
         else:
             target_value = cfg.sustain_brightness
         value_s = self._smoother_beat_white_value.update(target_value, dt)
+        # The sequencer's dark pulse: a dip on top, on its own attack/release
+        # (a multiplier, so the brightness envelope underneath carries on).
+        in_seq_dark = self._beat_dark_until is not None
+        dark_amount = self._smoother_beat_dark.update(1.0 if in_seq_dark else 0.0, dt)
+        if dark_amount > 0.0:
+            value_s *= 1.0 - clip(dark_amount * bs.dark_pulse_depth)
 
         self.latest_band3_levels = {
             "beat_energy": raw_energy,
             "temp": temp_s,
             "value": value_s,
             "beat": 1.0 if is_beat else 0.0,
-            "dark_pulse": 1.0 if in_dark_pulse else 0.0,
+            "dark_pulse": 1.0 if in_dark_pulse or in_seq_dark else 0.0,
         }
         target = WhiteTarget(brightness=value_s, temp=temp_s).clamped()
         targets = {device_id: target for device_id in selected_ids}
