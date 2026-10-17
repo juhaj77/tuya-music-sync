@@ -274,12 +274,21 @@ every tab.
 
 ## Visualizer tab
 
+![Visualizer tab: the spectrum, the mode, Stop Music Visualization and Beat Sync's Quick Controls, with the info panel at the bottom](Visualizer.png)
+
+From top to bottom:
+
 1. **Source** - *Loopback* (what the PC plays, the default) or *Microphone* (room sound;
    it has its own gain slider, since microphones are much quieter).
 2. **Level** and **Spectrum** show the sound coming in.
 3. **Mode** - the colour mode ([Color Mapping tab](#color-mapping-tab) describes each).
-4. **Quick Controls** - the settings worth reaching for first.
-5. **Start Music Visualization**.
+4. **Start Music Visualization** (Stop while it runs), with *Running* / *Stopped* under it.
+5. **Quick Controls** - the settings worth reaching for first.
+
+In the picture: Beat Sync running, scrolled down past the Source and Level rows. The
+Quick Controls show Beat Sync's own settings; *Beat detector sensitivity* is greyed out
+because Beat Sync follows the shared beat clock. At the bottom is the
+[info panel](#info-panel).
 
 **Quick Controls** are *Brightness*, *Saturation* and *Beat clock sensitivity* (every mode),
 plus a few of the selected mode's own settings, which change with the mode:
@@ -307,7 +316,7 @@ For all of them: **higher = fewer, clearer hits**, except the gain, where higher
 
 ## Devices & Setup tab
 
-![Devices & Setup tab: eight lamps with their Chase order, Chase dwell, Effect group and True white multiplier](devices_setup.png)
+![Devices & Setup tab: eight lamps with their Chase order, Chase dwell, Effect group and True white multiplier](DevicesAndSetup.png)
 
 **The lamp list** - one row per lamp (hover a column title for its details):
 
@@ -341,9 +350,16 @@ A lamp that stops answering is handled automatically - see
 
 ## Color Mapping tab
 
+![Color Mapping tab: the RGB Frequency page with its three channels, the level smoothing and the Dark pulses, White pulses and Pulse sequencer sections](ColorMapping.png)
+
 From top to bottom: the **Rhythm** section (the shared beat clock), a page per colour mode -
 each ending with the shared [Dark pulses, White pulses](#dark-and-white-pulses) and
 [Pulse sequencer](#pulse-sequencer) sections - the **Global** section and **Presets**.
+
+In the picture: the [RGB Frequency](#rgb-frequency-custom-and-hsv-music) page, with the
+Rhythm section closed above the mode pages. The page ends with the three pulse sections,
+all switched on and closed. The page shown doesn't have to be the running mode (the info
+panel at the bottom says *mode HSV Music*): the pulse settings are the same on every page.
 
 ### Rhythm - the shared beat clock
 
@@ -629,7 +645,8 @@ Each has its own *Level sensitivity (gain)*. **Attack** / **Release** - the leve
 smoothing, one setting shared by the three modes: how fast the light follows rising /
 falling sound. The Global *Response curve* applies to these modes only. With the
 [pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and colour
-sweeps play on top of the colour.
+sweeps play on top of the colour (the [Color Mapping picture](#color-mapping-tab) shows
+the RGB Frequency page).
 
 ### Global settings
 
@@ -671,6 +688,13 @@ Two overlays on top of whichever colour mode runs (not Beat Sync White), each a 
 with its on/off switch. Both are on in a fresh install, and both need the lamps' place set
 on the [Devices & Setup tab](#devices--setup-tab). They can run together: Chase applies
 first, then Group Switch.
+
+![Chase & Group Switch tab: Chase closed and on, Group Switch open with speed source clock and group color hue_shift_relative](ChaseAndGroup.png)
+
+In the picture: Chase is on but its section is closed. Group Switch is open: it moves one
+group every 2 beats on the shared clock (*Speed source* `clock`), so the overlay's own
+detector settings are greyed out. *Group color* is `hue_shift_relative`, with the hue
+step taken from the brightness (2.2-90 deg, 60 deg right now).
 
 ### Chase
 
@@ -728,13 +752,15 @@ group, switch it off.
 
 ## Info panel
 
-Along the bottom of the window, on every tab:
+Along the bottom of the window, on every tab (see the bottom of each picture above, e.g.
+the [Visualizer tab](#visualizer-tab)):
 
 - **First row** - the beats of the bar as dots (the downbeat bigger and golden), the tempo
   and whether the clock is locked, the phrase bar and loudness (while the sequencer runs),
   the drums share, the note and key (while something follows the pitch) and the mode.
-- **Second row, while the pulse sequencer runs** (in any mode; in Beat Sync White its dark
-  pulses only) - a timeline of the last two bars, scrolling left (the bright line is now):
+- **Second row, whenever the mode uses the pulse sequencer** (in any mode; in Beat Sync
+  White its dark pulses only; while it waits for the beat clock to lock, the row stays in
+  place and says so) - a timeline of the last two bars, scrolling left (the bright line is now):
   - **White** - each flash drawn as its envelope (up over the attack, flat through the
     duration, down over the release, as tall as it's bright), in its **warm (amber)** or
     **cool (blue-white)** white, a hybrid as a gradient; the walk's flashes carry their
