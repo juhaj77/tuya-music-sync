@@ -1,7 +1,8 @@
 """Real-time log-spaced bar spectrum display.
 
 Independent of the configured color-mapping bands - always shows ~48
-log-spaced bars from 20 Hz to 16 kHz, purely so you can visually confirm
+log-spaced bars from 20 Hz to 16 kHz (the lowest ones, narrower than an
+FFT bin, interpolated between the bins), purely so you can visually confirm
 audio capture + FFT are working (Phase 3) and get a feel for where energy
 sits in the spectrum.
 """
@@ -30,18 +31,28 @@ class SpectrumWidget(QWidget):
         self.setMinimumHeight(120)
 
     def set_frame(self, frame: SpectrumFrame, floor_db: float = -90.0) -> None:
-        levels = np.zeros(_NUM_BARS)
-        for i in range(_NUM_BARS):
-            lo, hi = self._edges[i], self._edges[i + 1]
-            mask = (frame.freqs >= lo) & (frame.freqs < hi)
-            if np.any(mask):
-                avg_db = float(np.mean(frame.magnitude_db[mask]))
-                levels[i] = max(0.0, min(1.0, (avg_db - floor_db) / (0.0 - floor_db)))
+        db = self._bar_db(frame)
+        levels = np.clip((db - floor_db) / (0.0 - floor_db), 0.0, 1.0)
         # light attack/release smoothing purely for a nicer-looking display
         rising = levels > self._levels
         alpha = np.where(rising, 0.6, 0.25)
         self._levels = self._levels + (levels - self._levels) * alpha
         self.update()
+
+    def _bar_db(self, frame: SpectrumFrame) -> np.ndarray:
+        """Each bar's level in dB: the mean of the FFT bins inside it. At the
+        low end a bar is narrower than the bin spacing (2048-point FFT at
+        48 kHz = 23 Hz per bin, while the bars below ~150 Hz are narrower),
+        so it may hold no bin at all - it takes the spectrum interpolated
+        at its centre instead of showing as a gap."""
+        freqs, mags = frame.freqs, frame.magnitude_db
+        lo_idx = np.searchsorted(freqs, self._edges[:-1], side="left")
+        hi_idx = np.searchsorted(freqs, self._edges[1:], side="left")
+        sums = np.concatenate(([0.0], np.cumsum(mags, dtype=np.float64)))
+        counts = hi_idx - lo_idx
+        means = (sums[hi_idx] - sums[lo_idx]) / np.maximum(counts, 1)
+        centres = np.sqrt(self._edges[:-1] * self._edges[1:])
+        return np.where(counts > 0, means, np.interp(centres, freqs, mags))
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
