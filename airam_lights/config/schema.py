@@ -281,6 +281,10 @@ class BeatSyncModeConfig:
     dark_pulse_depth: float = 1.0  # 0..1: how dark (1.0 = fully black)
     dark_pulse_attack_ms: float = 15.0  # how fast brightness snaps down into the pause
     dark_pulse_release_ms: float = 150.0  # how fast it eases back out once the pause ends
+    # 0..1: the colour's saturation falls along with the brightness into the
+    # dip and comes back with it - 1 = it reaches zero just as the brightness
+    # does (at depth 1), so the colour washes out as it fades. 0 = keeps it.
+    dark_pulse_desaturate: float = 0.0
 
     # "White pulses": on a subset of beats, a brief flash of the bulb's own
     # white LEDs, right in sync with that beat's flash - e.g. a hi-hat/cymbal
@@ -400,6 +404,7 @@ class BeatSyncModeConfig:
             dark_pulse_depth=float(d.get("dark_pulse_depth", 1.0)),
             dark_pulse_attack_ms=float(d.get("dark_pulse_attack_ms", 15.0)),
             dark_pulse_release_ms=float(d.get("dark_pulse_release_ms", 150.0)),
+            dark_pulse_desaturate=float(d.get("dark_pulse_desaturate", 0.0)),
             white_pulse_enabled=bool(d.get("white_pulse_enabled", True)),
             white_pulse_probability=float(d.get("white_pulse_probability", 0.26)),
             white_pulse_trigger=_pulse_trigger(d.get("white_pulse_trigger")),
@@ -1293,6 +1298,30 @@ class PulseSequencerConfig:
     color_sweep_chance: float = 0.3  # chance an eligible spot actually gets one
     color_sweep_min_gap_bars: int = 4  # never two closer than this many bars (0 = no minimum)
     color_sweep_min_level: str = "groove"  # only when the music is at least this loud - see LEVELS
+    # Dark sweep: like the color sweep, but a dark spot runs round the lamps
+    # in Chase order - each lamp dips toward black in turn, like a dark pulse
+    # passing by, on top of the show (white flashes on it dim too). Easier to
+    # see than a colour. dark_sweep_depth: how dark (1 = black);
+    # attack/release: how fast a lamp dims as the spot reaches it and how
+    # slowly it comes back after (a tail behind the spot).
+    # dark_sweep_desaturate: the colour's saturation falls along with the
+    # brightness and comes back with it - 1 = it reaches zero just as the
+    # brightness does (at depth 1), so the colour washes out as it fades.
+    # Placed like the color sweep, with its own settings; the two never run
+    # at once (they share the info panel's Sweep lane).
+    dark_sweep_enabled: bool = False
+    dark_sweep_depth: float = 1.0
+    dark_sweep_desaturate: float = 0.0
+    dark_sweep_attack_ms: float = 15.0
+    dark_sweep_release_ms: float = 200.0
+    dark_sweep_beats: float = 1.0  # how long one sweep takes: 0.5, 1, 2 or 4 beats
+    dark_sweep_rotators: int = 1
+    dark_sweep_width: int = 1
+    dark_sweep_direction: str = "forward"  # see pulse_sequencer.COLOR_SWEEP_DIRECTIONS
+    dark_sweep_placement: str = "bars"  # see pulse_sequencer.COLOR_SWEEP_PLACEMENTS
+    dark_sweep_chance: float = 0.3
+    dark_sweep_min_gap_bars: int = 4
+    dark_sweep_min_level: str = "groove"
 
     def to_dict(self) -> dict:
         return asdict(self)

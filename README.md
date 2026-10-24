@@ -25,7 +25,7 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
     - [Rhythm - the shared beat clock](#rhythm---the-shared-beat-clock)
     - [Beat Sync](#beat-sync) - beat detection, colour, between beats, per-beat pulses
     - [Dark and white pulses](#dark-and-white-pulses) - the same in every mode
-    - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep)
+    - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep), [dark sweep](#dark-sweep)
     - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [RGB Frequency, Custom and HSV Music](#rgb-frequency-custom-and-hsv-music)
     - [Global settings](#global-settings) - lamp transitions, command rate
     - [Presets and built-in looks](#presets-and-built-in-looks)
@@ -459,14 +459,18 @@ the pulses as they were. Which pulses a mode gets:
 | Mode | Pulses |
 |---|---|
 | Beat Sync | its [per-beat pulses](#beat-sync), or the sequencer's while it runs |
-| Peak Flash, RGB Frequency, HSV Music, Custom | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep |
+| Peak Flash, RGB Frequency, HSV Music, Custom | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
 | Beat Sync White | the sequencer's dark pulses only (it's white already); without the sequencer its own per-beat dark pulses |
 
 What a mode doesn't use is greyed out on its page, with the reason in the tooltip.
 
 **Dark pulses** (on) - a brief dip toward black (*depth*, *duration*, *attack*, *release*):
 a rhythm-synced breath before the next hit. In Beat Sync and Beat Sync White a beat that
-comes during one flashes when it ends.
+comes during one flashes when it ends. *Dark pulse desaturate* lets the colour's saturation
+move with the dip: it falls as the light dims and comes back as it returns - at 1 (with
+depth 1) the saturation reaches zero just as the brightness does, so the colour washes out
+as it fades and comes back from white. 0 (the default) keeps the colour. Not in Beat Sync
+White (white has no saturation).
 
 **White pulses** (on) - a short **true-white** flash: the bulb's own white LEDs, never mixed
 from RGB. With [Lamp transitions](#global-settings) `direct` or `smooth` the colour and white
@@ -590,6 +594,24 @@ with any lamp transitions.
 - A white flash on a lamp being swept shows on top of the sweep colour, which stays full.
 - **Test sweep now** plays it 4 times in a row on the selected lamps, with the settings
   above (the visualizer must be running).
+
+#### Dark sweep
+
+The same run round the lamps in **Chase order**, but with a **dark spot** instead of a colour:
+each lamp dips toward black in turn, like a dark pulse passing by - easier to see than a
+colour sweep. On top of the show, with any lamp transitions; a white flash on a lamp it
+darkens dims with it (with `direct`, `smooth` or `gradient` lamp transitions).
+
+- **Dark sweep depth** - how dark (1 = black). **Desaturate** - the colour's saturation
+  falls as a lamp dims and comes back with the light; at 1 it reaches zero just as the
+  brightness does, so the colour washes out on its way to black.
+- **Attack** - how fast a lamp dims as the spot reaches it. **Release** - how slowly it
+  comes back once the spot has moved on: a longer release leaves a dark tail behind the spot.
+- **Length**, **Rotators**, **Width**, **direction**, **placement**, loudness, chance and
+  minimum gap - as in the [color sweep](#color-sweep), with their own values.
+- A dark sweep and a color sweep never run at the same time (they share the info panel's
+  *Sweep* lane), and neither runs during the strobe. Not in Beat Sync White.
+- **Test dark sweep now** plays it 4 times in a row on the selected lamps.
 
 ### Beat Sync White
 
@@ -768,7 +790,7 @@ the [Visualizer tab](#visualizer-tab)):
   - **Dark** pulses;
   - **Strobe** - bursts in cyan, flash strobes in yellow (each flash as tall as the white
     curve at that moment; a strobe drawn over one is the one that took over);
-  - **Sweep** - colour sweeps in their colour.
+  - **Sweep** - colour sweeps in their colour, dark sweeps as a black bar edged in purple.
 
   Grey lines are bar lines, the golden one a phrase start. Below: the patterns playing now
   and the latest pulses in words.

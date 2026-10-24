@@ -42,8 +42,12 @@ themselves. On top of that grid:
 - Color sweep (optional): now and then a colour of its own runs once round
   the lamps in Chase order, fast - over a beat, say - ending on a bar line
   (or starting on any beat), never while the strobe runs.
+- Dark sweep (optional): the same, placed by its own settings, with a dark
+  spot instead of a colour - each lamp dips toward black in turn. Never at
+  the same time as a color sweep.
 - Dark only (tick(dark_only=True), for Beat Sync White, which is all white
-  already): just the dark pulses - no white flashes, strobes or sweeps, and
+  already): just the dark pulses - no white flashes, strobes or sweeps (dark
+  sweeps neither: they dim the RGB colour), and
   so nothing white keeps a dark pulse off its step either.
 
 Pure logic: returns events, never touches lamps. The engine turns events
@@ -102,10 +106,10 @@ _SHORT_TIME_CONSTANT_S = 0.6
 
 @dataclass
 class PulseEvent:
-    kind: str  # "white" | "dark" | "strobe" | "sweep"
+    kind: str  # "white" | "dark" | "strobe" | "sweep" | "dark_sweep"
     group: Optional[int] = None  # index into the lamp groups; None = every lamp
     # White/dark: multiplier on the configured pulse duration. Strobe and
-    # sweep: the length in beats (a sweep starts on its own `step`).
+    # sweeps: the length in beats (a sweep starts on its own `step`).
     length: float = 1.0
     reason: str = ""  # for diagnostics/tests: "pattern", "double", "fill", "phrase", "drop", ...
     # Where in the music it happens (e.g. for the warm/cool choice of a white flash).
@@ -401,10 +405,11 @@ class PulseSequencer:
         self._strobe_until_step = 0
         self._last_strobe_start: Optional[int] = None  # the 16th the previous strobe started on
         self._last_flash_strobe: Optional[int] = None  # the 16th the previous flash strobe started on
-        # The 16ths [from, until) a color sweep covers, and where the previous one started.
+        # The 16ths [from, until) a color or dark sweep covers, and where the
+        # previous one of each kind ("sweep", "dark_sweep") started.
         self._sweep_from_step = 0
         self._sweep_until_step = 0
-        self._last_sweep_start: Optional[int] = None
+        self._last_sweep_starts: Dict[str, int] = {}
         self._phrase_origin_bar = 0
         self._loudness = LoudnessTracker()
         self._bar_intensities: List[float] = []  # this bar's intensity samples, for drop detection
@@ -509,10 +514,11 @@ class PulseSequencer:
         # more strobe flash that came late, so that step stays without one.
         strobe_just_ended = self._strobe_from_step < self._strobe_until_step == step
 
-        # -- color sweep (on the RGB colour, so the pulses keep going) ----------------
-        sweep = None if self._dark_only else self._color_sweep_for_step(step, bar_step, steps_per_bar, phrase_bars)
-        if sweep is not None:
-            events.append(sweep)
+        # -- color / dark sweep (on the RGB colour, so the pulses keep going) -------------
+        for kind in ("sweep", "dark_sweep"):
+            sweep = None if self._dark_only else self._sweep_for_step(kind, step, bar_step, steps_per_bar, phrase_bars)
+            if sweep is not None:
+                events.append(sweep)
 
         # -- white (the strobe has the white LEDs to itself while it runs) -------------
         white_group: Optional[int] = None
@@ -631,23 +637,26 @@ class PulseSequencer:
             "strobe", None, length_steps / STEPS_PER_BEAT, spot, lead=1.0 / STEPS_PER_BEAT
         )
 
-    def _color_sweep_for_step(
-        self, step: int, bar_step: int, steps_per_bar: int, phrase_bars: int
+    def _sweep_for_step(
+        self, kind: str, step: int, bar_step: int, steps_per_bar: int, phrase_bars: int
     ) -> Optional[PulseEvent]:
-        """A color sweep starting on this 16th: with placement "phrase" or
-        "bars" one that ends on the bar line (into a new phrase / any bar),
-        with "beats" one that starts on a beat and ends by the bar line at
-        the latest - the downbeat always lands clean. Every condition has to
-        hold: the spot is one the placement allows, no strobe is decided for
-        that stretch, the previous sweep is over and far enough back, the
-        music is loud enough, and the chance roll comes up. A strobe decided
-        later still comes: it takes over (see the engine)."""
+        """A color sweep (`kind` "sweep") or dark sweep ("dark_sweep")
+        starting on this 16th, by its own settings: with placement "phrase"
+        or "bars" one that ends on the bar line (into a new phrase / any
+        bar), with "beats" one that starts on a beat and ends by the bar line
+        at the latest - the downbeat always lands clean. Every condition has
+        to hold: the spot is one the placement allows, no strobe is decided
+        for that stretch, no sweep of either kind is running (they share the
+        info panel's Sweep lane), the previous one of this kind is far enough
+        back, the music is loud enough, and the chance roll comes up. A strobe
+        decided later still comes: it takes over (see the engine)."""
         cfg = self.config
-        if not cfg.color_sweep_enabled:
+        prefix = "color_sweep" if kind == "sweep" else kind
+        if not getattr(cfg, f"{prefix}_enabled"):
             return None
-        length = max(1, min(steps_per_bar, int(round(cfg.color_sweep_beats * STEPS_PER_BEAT))))
+        length = max(1, min(steps_per_bar, int(round(getattr(cfg, f"{prefix}_beats") * STEPS_PER_BEAT))))
         end = step + length
-        placement = cfg.color_sweep_placement
+        placement = getattr(cfg, f"{prefix}_placement")
         if placement == "beats":
             if bar_step % STEPS_PER_BEAT or bar_step + length > steps_per_bar:
                 return None
@@ -658,19 +667,20 @@ class PulseSequencer:
         if step < self._strobe_until_step and self._strobe_from_step < end:
             return None  # the strobe has (or is about to have) the stage
         if step < self._sweep_until_step:
-            return None  # the previous one is still running
-        last = self._last_sweep_start
-        if last is not None and 0 <= step - last < max(0, int(cfg.color_sweep_min_gap_bars)) * steps_per_bar:
+            return None  # a sweep is still running
+        last = self._last_sweep_starts.get(kind)
+        if last is not None and 0 <= step - last < max(0, int(getattr(cfg, f"{prefix}_min_gap_bars"))) * steps_per_bar:
             return None
-        min_level = cfg.color_sweep_min_level if cfg.color_sweep_min_level in LEVELS else LEVELS[0]
+        min_level = getattr(cfg, f"{prefix}_min_level")
+        min_level = min_level if min_level in LEVELS else LEVELS[0]
         if LEVELS.index(self.level) < LEVELS.index(min_level):
             return None
-        if self._rng.random() >= cfg.color_sweep_chance:
+        if self._rng.random() >= getattr(cfg, f"{prefix}_chance"):
             return None
-        self._last_sweep_start = step
+        self._last_sweep_starts[kind] = step
         self._sweep_from_step = step
         self._sweep_until_step = end
-        return PulseEvent("sweep", None, length / STEPS_PER_BEAT, placement)
+        return PulseEvent(kind, None, length / STEPS_PER_BEAT, placement)
 
     def _flash_strobe_steps(self, step: int, bar_step: int, steps_per_bar: int) -> int:
         """How many 16ths a flash strobe the walk's white flash on this step

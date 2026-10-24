@@ -7,8 +7,8 @@ never scrolls away): what the music sync is hearing and doing right now.
 - Second row, whenever the colour mode uses the pulse sequencer (also while
   it waits for the beat clock to lock, so the panel keeps its height): a
   timeline of the last two bars on the clock's grid, scrolling left as the
-  music plays - white flashes, dark pulses, strobes and color sweeps in their
-  own lanes, the bar lines, the phrase starts - and a line of text naming the
+  music plays - white flashes, dark pulses, strobes and color / dark sweeps
+  in their own lanes, the bar lines, the phrase starts - and a line of text naming the
   patterns playing and the latest pulses (in Beat Sync White, which takes
   only the dark pulses, just those).
 
@@ -51,8 +51,12 @@ _COOL = QColor(175, 215, 255)  # a cool one
 _FLASH_STROBE = QColor(255, 213, 74)
 _DARK = QColor(124, 104, 255)
 _STROBE = QColor(77, 208, 225)
+_DARK_SWEEP = QColor(0, 0, 0)  # on the dark blue background
 _LANES = ("White", "Dark", "Strobe", "Sweep")
-_LANE_OF = {"white": "White", "dark": "Dark", "strobe": "Strobe", "flash_strobe": "Strobe", "sweep": "Sweep"}
+_LANE_OF = {
+    "white": "White", "dark": "Dark", "strobe": "Strobe", "flash_strobe": "Strobe", "sweep": "Sweep",
+    "dark_sweep": "Sweep",
+}
 _LANE_LABEL_W = 52
 _WINDOW_BARS = 2
 _NOW_AT = 0.85  # where "now" sits across the timeline: the rest shows the beats coming up
@@ -174,6 +178,11 @@ class SequencerTimeline(QWidget):
                 self._draw_white(painter, e, x, top, h, scale)
             elif e["kind"] == "dark":
                 painter.fillRect(QRectF(x, top, w, h), _DARK)
+            elif e["kind"] == "dark_sweep":  # black, edged in the dark pulses' colour so it shows
+                painter.fillRect(QRectF(x, top, w, h), _DARK_SWEEP)
+                painter.setPen(QPen(_DARK, 1.5))
+                painter.setBrush(Qt.NoBrush)
+                painter.drawRect(QRectF(x + 0.75, top + 0.75, max(0.0, w - 1.5), max(0.0, h - 1.5)))
             elif e["kind"] == "flash_strobe":
                 self._draw_flash_strobe(painter, e, x, top, h, scale)
             elif e["kind"] == "strobe":
@@ -316,7 +325,7 @@ class InfoPanel(QFrame):
             "flashes (the phrase start), yellow when played as a flash strobe. Dark: the dark pulses. Strobe: the "
             "bursts in cyan; a flash strobe in yellow, each flash as tall as the white flash's envelope at "
             "that moment - a burst drawn over it took over from it. Sweep: the color sweeps, in their "
-            "colour. Grey lines are bar lines, the golden one a phrase start."
+            "colour, and the dark sweeps in black, edged in purple. Grey lines are bar lines, the golden one a phrase start."
         )
         seq_layout.addWidget(self.timeline)
         self.sequencer_label = QLabel()
@@ -414,4 +423,7 @@ class InfoPanel(QFrame):
             parts.append(f"last strobe: {status['strobe']['flashes']} flashes at {status['strobe']['hz']:.1f}/s")
         if sq.color_sweep_enabled and "sweep" in latest:
             parts.append(f"last sweep: {latest['sweep']['length']:g} beats ({latest['sweep']['reason']})")
+        if sq.dark_sweep_enabled and "dark_sweep" in latest:
+            dark_sweep = latest["dark_sweep"]
+            parts.append(f"last dark sweep: {dark_sweep['length']:g} beats ({dark_sweep['reason']})")
         return f"<span style='color:{theme.MUTED}'>" + "  &middot;  ".join(parts) + "</span>"

@@ -28,7 +28,7 @@ def sequencer_enabled_for(config: AppConfig, mode: Optional[str] = None) -> bool
 
 def sequencer_dark_only(mode: str) -> bool:
     """Beat Sync White drives the lamps' white LEDs already, so it takes only
-    the sequencer's dark pulses - no white flashes, strobes or colour sweeps."""
+    the sequencer's dark pulses - no white flashes, strobes, colour or dark sweeps."""
     return mode == "beat_sync_white"
 
 

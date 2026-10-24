@@ -120,11 +120,17 @@ def test_main_window_builds_on_the_sections(qapp, settings_dir):
         sections = tab.findChildren(CollapsibleSection)
         titles = {s._title.text() for s in sections}
         assert {"Beat detection", "Colour on the beat", "Between beats", "Dark pulses", "White pulses",
-                "Pulse sequencer", "Strobe", "Flash strobe", "Color sweep", "Global", "Presets"} <= titles
+                "Pulse sequencer", "Strobe", "Flash strobe", "Color sweep", "Dark sweep", "Global", "Presets"} <= titles
         # The feature switches are the sections' toggles, and still drive the config.
         sq = window.controller.config.sequencer
         tab.seq_sweep_checkbox.setChecked(not sq.color_sweep_enabled)
         assert sq.color_sweep_enabled == tab.seq_sweep_checkbox.isChecked()
+        tab.seq_dark_sweep_checkbox.setChecked(not sq.dark_sweep_enabled)
+        assert sq.dark_sweep_enabled == tab.seq_dark_sweep_checkbox.isChecked()
+        tab.seq_dark_sweep_desaturate_slider._spin.setValue(0.8)
+        assert sq.dark_sweep_desaturate == pytest.approx(0.8)
+        tab.beat_dark_desaturate_slider._spin.setValue(0.4)
+        assert window.controller.config.color_mapping.beat_sync.dark_pulse_desaturate == pytest.approx(0.4)
         overlays = window.tabs.widget(3)
         assert overlays.chase_enabled_checkbox is overlays.chase_box.toggle
         overlays.chase_enabled_checkbox.setChecked(False)

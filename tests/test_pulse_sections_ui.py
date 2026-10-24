@@ -111,9 +111,11 @@ def test_beat_sync_white_page_uses_only_the_dark_pulses(window, qapp):
     assert "only its dark pulses" in cmt.seq_note.text()
     assert cmt.seq_dark_combo.isEnabled() and cmt.seq_phrase_combo.isEnabled() and cmt.beat_dark_depth_slider.isEnabled()
     for widget in (cmt.seq_white_combo, cmt.seq_walk_combo, cmt.seq_dynamics_slider, cmt.seq_strobe_checkbox,
-                   cmt.seq_flash_strobe_checkbox, cmt.seq_sweep_checkbox, cmt.beat_white_pulse_enabled_checkbox,
-                   cmt.beat_white_pulse_duration_slider):
+                   cmt.seq_flash_strobe_checkbox, cmt.seq_sweep_checkbox, cmt.seq_dark_sweep_checkbox,
+                   cmt.beat_white_pulse_enabled_checkbox, cmt.beat_white_pulse_duration_slider,
+                   cmt.beat_dark_desaturate_slider):
         assert not widget.isEnabled()
+    assert "no saturation" in cmt.beat_dark_desaturate_slider.toolTip()
     assert "Beat Sync White" in cmt.seq_strobe_checkbox.toolTip()
     # Its own per-beat dark pulses step aside while the sequencer places them...
     assert not cmt.bsw_dark_prob_slider.isEnabled() and cmt.bsw_dark_seq_note.isVisibleTo(cmt)
@@ -125,6 +127,7 @@ def test_beat_sync_white_page_uses_only_the_dark_pulses(window, qapp):
     cmt.seq_enabled_checkbox.setChecked(True)
     cmt = _tab(window, qapp, "custom")
     assert cmt.seq_white_combo.isEnabled() and cmt.beat_white_pulse_enabled_checkbox.isEnabled()
+    assert cmt.seq_dark_sweep_checkbox.isEnabled() and cmt.beat_dark_desaturate_slider.isEnabled()
 
 
 def test_beat_sync_white_detector_greys_out_on_the_shared_clock(window, qapp):
