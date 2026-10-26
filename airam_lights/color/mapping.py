@@ -7,19 +7,19 @@ color system be tested and iterated on completely independently of both the
 audio capture and the lamp-control layers (see README architecture section).
 
 Continuous behavior is the whole point here: every function below is a smooth
-(if sometimes non-linear via gamma/response-curve) function of its inputs -
+(if sometimes non-linear via the response curve) function of its inputs -
 there is no discrete "if bass > threshold: red" branching anywhere.
 """
 from __future__ import annotations
 
 import math
 
-from ..config.schema import ColorMappingConfig, ChannelMap, HSVModeConfig, RGBModeConfig
+from ..config.schema import BandColorsModeConfig, ColorMappingConfig, HSVModeConfig
 from .models import Color, clip, lerp
 
 
 def apply_response_curve(x: float, curve: str) -> float:
-    """Reshape a 0..1 level before gain/gamma are applied.
+    """Reshape a 0..1 level before it becomes brightness.
 
     - linear: unchanged.
     - log:    boosts quiet detail (log-like loudness perception).
@@ -33,19 +33,6 @@ def apply_response_curve(x: float, curve: str) -> float:
     return x
 
 
-def _map_channel(level: float, ch: ChannelMap, sensitivity: float, curve: str, extra_mult: float = 1.0) -> float:
-    x = clip(level) * sensitivity * extra_mult
-    x = apply_response_curve(x, curve)
-    x *= ch.gain
-    span = ch.max_level - ch.min_level
-    if span <= 1e-6:
-        windowed = 0.0
-    else:
-        windowed = clip((x - ch.min_level) / span)
-    gamma = max(ch.gamma, 1e-3)
-    return windowed ** (1.0 / gamma)
-
-
 class ColorMappingEngine:
     """Stateless (no smoothing/history here - that lives in the engine layer
     so it can be applied uniformly to the final RGB output regardless of
@@ -57,24 +44,15 @@ class ColorMappingEngine:
     def update_config(self, config: ColorMappingConfig) -> None:
         self.config = config
 
-    # -- RGB Frequency / Custom (same mechanism, different default ranges) --
+    # -- Band Colors mode ---------------------------------------------------
 
-    def compute_rgb(
-        self,
-        level_r: float,
-        level_g: float,
-        level_b: float,
-        cfg: "RGBModeConfig | None" = None,
-        mult_r: float = 1.0,
-        mult_g: float = 1.0,
-        mult_b: float = 1.0,
-    ) -> Color:
-        cfg = cfg or self.config.rgb
-        curve = self.config.response_curve
-        r = _map_channel(level_r, cfg.r, cfg.sensitivity, curve, mult_r)
-        g = _map_channel(level_g, cfg.g, cfg.sensitivity, curve, mult_g)
-        b = _map_channel(level_b, cfg.b, cfg.sensitivity, curve, mult_b)
-        return self.apply_global(Color(r, g, b))
+    def compute_band_colors(self, hue_deg: float, level: float, cfg: "BandColorsModeConfig | None" = None) -> Color:
+        """The engine's BandColorTracker (effects/band_colors.py) works out
+        the hue and a 0..1 level from the bands; this maps the level through
+        the response curve onto Brightness min..max."""
+        cfg = cfg or self.config.band_colors
+        value = lerp(cfg.brightness_min, cfg.brightness_max, apply_response_curve(level, self.config.response_curve))
+        return self.apply_global(Color.from_hsv(hue_deg, clip(cfg.saturation), value))
 
     # -- HSV Music mode -------------------------------------------------------
 
@@ -124,7 +102,7 @@ class ColorMappingEngine:
 
     def apply_global(self, color: Color) -> Color:
         """Called as the last step by every single mode's compute_*() method
-        (RGB, HSV, Beat Sync, Peak Flash) - so global settings here
+        (Band Colors, HSV, Beat Sync, Peak Flash) - so global settings here
         apply uniformly across all of them without each mode needing its own
         copy of this logic."""
         h, s, v = color.to_hsv()

@@ -1,25 +1,29 @@
 """Unit tests for the color mapping engine - pure functions, no audio or
 network dependencies (this is the whole point of the module split)."""
+import pytest
+
 from airam_lights.color.mapping import ColorMappingEngine
 from airam_lights.color.models import Color
 from airam_lights.config.schema import ColorMappingConfig
 
 
-def test_rgb_mode_is_continuous_not_discrete():
-    engine = ColorMappingEngine(ColorMappingConfig())
+def test_band_colors_brightness_is_continuous_between_min_and_max():
+    cfg = ColorMappingConfig()
+    engine = ColorMappingEngine(cfg)
     levels = [0.0, 0.1, 0.2, 0.3, 0.5, 0.7, 0.9, 1.0]
-    reds = [engine.compute_rgb(lv, 0.0, 0.0).r for lv in levels]
+    values = [engine.compute_band_colors(0.0, lv).to_hsv()[2] for lv in levels]
     # Strictly non-decreasing, and no big jump between adjacent small steps in input.
-    assert reds == sorted(reds)
-    for i in range(1, len(reds)):
-        assert abs(reds[i] - reds[i - 1]) < 0.5
+    assert values == sorted(values)
+    for i in range(1, len(values)):
+        assert abs(values[i] - values[i - 1]) < 0.5
+    assert values[0] == pytest.approx(cfg.band_colors.brightness_min, abs=0.01)
+    assert values[-1] == pytest.approx(cfg.band_colors.brightness_max, abs=0.01)
 
 
-def test_rgb_mode_maps_bands_to_correct_channels_by_default():
+def test_band_colors_keeps_the_hue_and_saturation():
     engine = ColorMappingEngine(ColorMappingConfig())
-    color = engine.compute_rgb(1.0, 0.0, 0.0)
-    assert color.r > color.g
-    assert color.r > color.b
+    hue, saturation, _ = engine.compute_band_colors(240.0, 1.0).to_hsv()
+    assert hue == pytest.approx(240.0, abs=1.0) and saturation == pytest.approx(1.0, abs=0.01)
 
 
 def test_hsv_mode_low_freq_vs_high_freq_hue_differs():
@@ -61,9 +65,9 @@ def test_invert_brightness_flips_value_for_every_mode():
     cfg.invert_brightness = True
     engine = ColorMappingEngine(cfg)
 
-    # RGB mode: level 0 should now be bright, level 1 should now be black.
-    dark_input = engine.compute_rgb(0.0, 0.0, 0.0)
-    bright_input = engine.compute_rgb(1.0, 1.0, 1.0)
+    # Band Colors: level 0 should now be bright, level 1 should now be dark.
+    dark_input = engine.compute_band_colors(0.0, 0.0)
+    bright_input = engine.compute_band_colors(0.0, 1.0)
     _, _, v_dark_input = dark_input.to_hsv()
     _, _, v_bright_input = bright_input.to_hsv()
     assert v_dark_input > v_bright_input  # inverted: input 0 -> bright, input 1 -> dark

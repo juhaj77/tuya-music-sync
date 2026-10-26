@@ -92,7 +92,7 @@ def test_sequencer_status_in_every_mode_and_dark_only_in_beat_sync_white(monkeyp
     monkeypatch.setattr(ve_module, "spectral_contrast", lambda frame, *a: 0.5)
     _run(engine, clock, 4.0)
     assert engine.sequencer_status is not None
-    for mode in ("rgb_freq", "peak_flash", "hsv_music", "custom"):
+    for mode in ("band_colors", "peak_flash", "hsv_music"):
         engine.config.color_mapping.mode = mode
         _run(engine, clock, 1.0)
         status = engine.sequencer_status
@@ -108,11 +108,14 @@ def test_sequencer_status_in_every_mode_and_dark_only_in_beat_sync_white(monkeyp
 
 
 def test_beat_modes_need_the_shared_clock_for_the_sequencer_the_others_dont(monkeypatch):
+    import airam_lights.engine.visualization_engine as ve_module
+
     engine, clock = _busy_engine(monkeypatch)
+    monkeypatch.setattr(ve_module, "spectral_centroid_hz", lambda frame, *a: 800.0)  # Band Colors' chord turn
     engine.config.rhythm.shared_clock = False
     _run(engine, clock, 6.0)
     assert engine.sequencer_status is None  # Beat Sync on its own detector: no sequencer
-    engine.config.color_mapping.mode = "rgb_freq"
+    engine.config.color_mapping.mode = "band_colors"
     _run(engine, clock, 6.0)
     assert engine.clock_active and engine.sequencer_status is not None
     engine.config.rhythm.tempo_lock = False  # no grid to place pulses on

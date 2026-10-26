@@ -13,10 +13,10 @@ from airam_lights.config.schema import (
     AmbientSceneConfig,
     AppConfig,
     AudioConfig,
+    BandColorsModeConfig,
     BandDefinition,
     BeatSyncModeConfig,
     BeatSyncWhiteModeConfig,
-    ChannelMap,
     ChaseEffectConfig,
     ColorMappingConfig,
     DeviceConfig,
@@ -25,7 +25,6 @@ from airam_lights.config.schema import (
     NetworkConfig,
     PeakFlashModeConfig,
     PerLampEffect,
-    RGBModeConfig,
     SmoothingConfig,
     WhiteChaseEffectConfig,
 )
@@ -40,8 +39,11 @@ def _build_fully_populated_config() -> AppConfig:
         id="dev-1", name="Test Lamp", ip="192.168.9.9", local_key="s3cr3t-key", version="3.4",
         enabled=False, selected=False,
     )
-    channel = ChannelMap(low_hz=33.0, high_hz=444.0, gain=1.75, min_level=0.05, max_level=0.95, gamma=1.6)
-    rgb = RGBModeConfig(r=channel, g=channel, b=channel, sensitivity=1.23)
+    band_colors = BandColorsModeConfig(
+        bass_mid_hz=180.0, mid_treble_hz=3300.0, bass_hue_deg=10.0, mid_hue_deg=100.0, treble_hue_deg=200.0,
+        focus=0.33, range_memory_s=7.5, chord_turn_deg=45.0, saturation=0.8, brightness_min=0.2,
+        brightness_max=0.9, attack_ms=12.0, release_ms=420.0,
+    )
     hsv = HSVModeConfig(
         hue_min_deg=11.0, hue_max_deg=222.0, brightness_min=0.11, brightness_max=0.88,
         saturation_base=0.44, saturation_contrast_gain=0.33, sensitivity=1.11,
@@ -75,7 +77,7 @@ def _build_fully_populated_config() -> AppConfig:
     smoothing = SmoothingConfig(attack_ms=61.0, release_ms=301.0, min_change_threshold=0.016)
 
     color_mapping = ColorMappingConfig(
-        mode="beat_sync_white", rgb=rgb, custom=rgb, hsv=hsv,
+        mode="beat_sync_white", band_colors=band_colors, hsv=hsv,
         beat_sync=beat_sync, peak_flash=peak_flash, beat_sync_white=beat_sync_white,
         smoothing=smoothing, brightness=0.87, saturation=0.86, response_curve="log",
         invert_brightness=True,
@@ -172,7 +174,7 @@ def test_old_config_missing_newer_fields_loads_with_sane_defaults(tmp_path: Path
     cfg = store.load()
 
     assert cfg.devices[0].id == "old-1"
-    assert cfg.color_mapping.mode == "rgb_freq"
+    assert cfg.color_mapping.mode == "band_colors"  # RGB Frequency's successor
     assert cfg.chase.enabled is False  # not present in the old file -> default
     assert cfg.group_switch.enabled is False
     assert cfg.white_chase.enabled is False
@@ -208,7 +210,7 @@ def test_fresh_install_starts_with_the_default_look():
     assert cfg.rhythm.shared_clock is True and cfg.sequencer.enabled is True
     assert cfg.sequencer.color_sweep_enabled is True and cfg.sequencer.flash_strobe_enabled is True
     assert cfg.network.lamp_command_rate_hz == 50.0
-    assert cfg.color_mapping.rgb.r.gain == 4.0  # nested settings (a channel) apply too
+    assert cfg.color_mapping.hsv.hue_max_deg == 360.0  # a mode's settings apply too
     assert cfg.color_mapping.beat_sync.white_pulse_hybrid_chance == 0.5
     # The neutral dataclass defaults underneath are untouched.
     assert AppConfig().sequencer.enabled is False

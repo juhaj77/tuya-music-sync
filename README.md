@@ -23,7 +23,7 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
   - [Devices & Setup tab](#devices--setup-tab) - lamps and their place in the effects
   - [Color Mapping tab](#color-mapping-tab) - each colour mode's own settings
     - [Beat Sync](#beat-sync) - beat detection, colour, between beats, per-beat pulses
-    - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [RGB Frequency, Custom and HSV Music](#rgb-frequency-custom-and-hsv-music)
+    - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [HSV Music](#hsv-music) · [Band Colors](#band-colors)
     - [Global settings](#global-settings) - lamp transitions, command rate
     - [Presets and built-in looks](#presets-and-built-in-looks)
   - [Global Effects tab](#global-effects-tab) - what every colour mode shares
@@ -70,8 +70,10 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
 
 **What a fresh install plays:** *Beat Sync* on the shared beat clock, the colour stepping
 by the notes' pitch; the pulse sequencer walking true-white flashes from lamp group to
-lamp group, with occasional strobe rolls, flash strobes and colour sweeps; Chase and
-Group Switch turning each lamp's hue with the music; lamps updated 50 times a second.
+lamp group on the beats, dark stutters in the phrase fills, colour sweeps, a dark sweep
+into each new phrase, and occasional strobe rolls and flash strobes; Chase and Group
+Switch turning each lamp's hue with the music; lamps updated 50 times a second. The
+other colour modes start from tuned settings too.
 
 > **Photosensitivity warning:** the strobe and flash strobe flash at rates that can
 > trigger seizures in people with photosensitive epilepsy.
@@ -80,8 +82,8 @@ Group Switch turning each lamp's hue with the music; lamps updated 50 times a se
 
 - **Every lamp in sync, locally** - loopback audio from the PC (or a microphone) and the
   Tuya LAN protocol; no cloud round-trip, no phone app once set up. Any number of lamps.
-- **Six colour modes** - **Beat Sync** (the main mode: a flash on every beat, on the
-  shared beat clock), Beat Sync White, Peak Flash, RGB Frequency, HSV Music and Custom.
+- **Five colour modes** - **Beat Sync** (the main mode: a flash on every beat, on the
+  shared beat clock), Beat Sync White, Peak Flash, HSV Music and Band Colors.
 - **Pulses in every mode** - the pulse sequencer places dark breaths, true-white flashes
   walking round the room, strobes and colour sweeps on the beat grid, with the same
   settings in every colour mode (Beat Sync White takes the dark ones).
@@ -299,7 +301,8 @@ plus a few of the selected mode's own settings, which change with the mode:
 | Beat Sync | Beat detector sensitivity, Sustain brightness, Brightness decay, Hue snap speed |
 | Beat Sync White | Beat detector sensitivity, Sustain brightness, Brightness decay, Temp snap speed |
 | Peak Flash | Peak sensitivity, Flash decay, Whiteness amount, Color richness (hue flow), Baseline brightness min |
-| RGB Frequency / HSV Music / Custom | Level sensitivity (gain), Attack, Release |
+| HSV Music | Level sensitivity (gain), Attack, Release |
+| Band Colors | Color focus, Chord turn, Range memory, Band release |
 
 Each is the same setting as in the Color Mapping tab (*Beat clock sensitivity*: the Global
 Effects tab) - change it in either place and the other follows. **More ... settings in
@@ -312,7 +315,7 @@ Color Mapping** opens the mode's page there.
 | **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Global Effects -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
 | **Beat detector sensitivity** | Beat Sync's / Beat Sync White's own beat detector | only when that mode does *not* follow the clock (greyed out otherwise) |
 | **Peak sensitivity** | Peak Flash's peak detector | Peak Flash (it never uses the clock) |
-| **Level sensitivity (gain)** | how strongly the sound level turns into light | RGB Frequency, Custom, HSV Music - each its own |
+| **Level sensitivity (gain)** | how strongly the sound level turns into light | HSV Music |
 
 For all of them: **higher = fewer, clearer hits**, except the gain, where higher = brighter.
 
@@ -352,15 +355,14 @@ A lamp that stops answering is handled automatically - see
 
 ## Color Mapping tab
 
-![Color Mapping tab: the RGB Frequency page with its three channels and the level smoothing](ColorMapping.png)
+![Color Mapping tab: a colour mode's page](ColorMapping.png)
 
 Each colour mode's own settings: a page per mode, then the **Global** section and
 **Presets**. What every mode shares - the shared beat clock, Chase and Group Switch, the
 pulses and the pulse sequencer - is on the [Global Effects tab](#global-effects-tab).
 
-In the picture: the [RGB Frequency](#rgb-frequency-custom-and-hsv-music) page. The page
-shown doesn't have to be the running mode (the info panel at the bottom says *mode HSV
-Music*).
+The page shown doesn't have to be the running mode - the info panel at the bottom names the
+running one.
 
 ### Beat Sync
 
@@ -439,6 +441,8 @@ temperature instead of colour - the lamps stay white and move warm <-> cool on t
   sequencer's dark pulses (only those), shaped by the shared
   [Dark pulses](#dark-and-white-pulses) section; otherwise its own per-beat ones (*Dark
   pulse probability*, *duration*, *depth*).
+- **Dark sweep** - the sequencer's [dark sweep](#dark-sweep) runs round the lamps here too,
+  dimming the white.
 
 Chase and Group Switch don't run in this mode (a hue overlay has nothing to work on in
 white). The white control path is the least verified part against real hardware - see
@@ -461,23 +465,52 @@ A softer, continuous cousin of Beat Sync:
 With the [pulse sequencer](#pulse-sequencer) on, its pulses play on top - as in the
 continuous modes below.
 
-### RGB Frequency, Custom and HSV Music
+### HSV Music
 
-The continuous modes - the light follows the sound level rather than beats:
+A continuous mode - the light follows the sound rather than beats: hue from the spectral
+centroid, the sound's energy-weighted centre frequency on a log scale (*Hue @ low freq* ..
+*Hue @ high freq*: bass-heavy toward the first, bright hi-hats and cymbals toward the
+second), brightness from the overall energy (*Brightness min/max*, *Level sensitivity
+(gain)*), saturation from spectral contrast (*Saturation base* + contrast x *Saturation
+from contrast*: a clear tone or kick vivid, noise and distortion paler). **Attack** /
+**Release** - how fast the light follows rising / falling sound. With the
+[pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and sweeps play
+on top of the colour.
 
-- **RGB Frequency** - bass drives red, mids green, treble blue. Each channel has its
-  frequency range, *Gain*, *Min/Max level* and *Gamma*.
-- **Custom** - the same mechanism with your own frequency ranges.
-- **HSV Music** - hue from the spectral centroid (*Hue @ low freq* .. *Hue @ high freq*),
-  brightness from the overall energy (*Brightness min/max*), saturation from spectral
-  contrast.
+### Band Colors
 
-Each has its own *Level sensitivity (gain)*. **Attack** / **Release** - the level
-smoothing, one setting shared by the three modes: how fast the light follows rising /
-falling sound. The Global *Response curve* applies to these modes only. With the
-[pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and colour
-sweeps play on top of the colour (the [Color Mapping picture](#color-mapping-tab) shows
-the RGB Frequency page).
+Bass, mids and treble each have a colour of their own (red, green and blue by default), and
+the lamps show the band playing out the most right now: a kick turns them to the bass
+colour, a chord or a voice to the mid colour, a hi-hat to the treble colour - two bands at
+once to the colour between theirs (bass + treble: magenta), at full saturation rather than
+a pale mix (`effects/band_colors.py`).
+
+The trick: each band is measured against **its own recent range**, not against an absolute
+level or the other bands. Loud music fills every band at once, so their raw levels rise and
+fall together - which is why plain bass/mid/treble -> R/G/B (the old RGB Frequency mode)
+mostly sat on one colour. Against its own range each band reads high at its own hits and
+low between them, so the colour keeps moving even when everything is loud.
+
+- **Bass / mid split**, **Mid / treble split** - the bands (30 Hz - 250 Hz - 4 kHz - 12 kHz
+  by default), and **Bass / Mid / Treble colour**.
+- **Color focus** - 0 = the bands' colours blend, 1 = the band out the most takes the
+  colour alone, so it jumps from band to band.
+- **Chord turn** (90° by default) - the whole palette turns with the music's note: its
+  place on the circle of fifths, as Beat Sync's `pitch` spectrum hue uses it, so a chord
+  change moves every colour along while the bands keep their places relative to each
+  other. Where no note stands out (drums, noise) it follows the sound's loudness and
+  brightness instead. 0 = off.
+- **Range memory** (4 s) - how long each band remembers its loudest and quietest: short =
+  it reacts to every hit, long = only to what stands out from the last few bars.
+- **Band attack / release** - how fast a band's activity rises at its hit and falls back:
+  a longer release lets a band's colour linger between hits.
+- **Saturation**, **Brightness min / max** - the brightness follows the most active band
+  (through the Global *Response curve*); silence fades to Brightness min. A band has to be
+  audible at all to take the colour, so a near-silent band's noise can't.
+
+The line at the bottom of the page shows how active each band is and how far the chord
+turn has moved the palette. Band Colors replaced RGB Frequency and Custom: a config or
+preset saved in either loads into it.
 
 ### Global settings
 
@@ -496,8 +529,7 @@ the RGB Frequency page).
   With `direct` every command shows as a step, so smooth fades and glides want a high rate.
 - **Min change threshold** - skips sends that would barely change the colour.
 - **Response curve** (`linear` / `log` / `exp2`) - reshapes the level before it becomes light,
-  in RGB Frequency, Custom and HSV Music only: `log` brings out quiet detail, `exp2` the
-  opposite.
+  in HSV Music and Band Colors only: `log` brings out quiet detail, `exp2` the opposite.
 - **Invert brightness** - quiet parts bright, loud parts dark, in every mode.
 
 Colours go out at the datapoint's own resolution (hue in degrees, saturation and
@@ -636,8 +668,8 @@ pulses a mode gets:
 | Mode | Pulses |
 |---|---|
 | Beat Sync | its [per-beat pulses](#beat-sync), or the sequencer's while it runs |
-| Peak Flash, RGB Frequency, HSV Music, Custom | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
-| Beat Sync White | the sequencer's dark pulses only (it's white already); without the sequencer its own per-beat dark pulses |
+| Peak Flash, HSV Music, Band Colors | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
+| Beat Sync White | the sequencer's dark pulses and dark sweeps only (it's white already); without the sequencer its own per-beat dark pulses |
 
 What the active mode doesn't use is greyed out, with the reason in the tooltip.
 
@@ -676,7 +708,7 @@ white, so a lamp can never look stuck in white. Warm white builds up slower than
 ### Pulse sequencer
 
 On in a fresh install, in **every colour mode** (Beat Sync White takes only its dark
-pulses). Instead of a probability roll on every beat, it places the white and dark pulses
+pulses and dark sweeps). Instead of a probability roll on every beat, it places the white and dark pulses
 the way a lighting operator or a drummer would, on a 16th-note grid of the
 [shared beat clock](#rhythm---the-shared-beat-clock) (`effects/pulse_sequencer.py`). It needs
 *Lock to tempo*, and in Beat Sync and Beat Sync White *follow the shared clock*, so their
@@ -787,7 +819,8 @@ darkens dims with it (with `direct`, `smooth` or `gradient` lamp transitions).
 - **Length**, **Rotators**, **Width**, **direction**, **placement**, loudness, chance and
   minimum gap - as in the [color sweep](#color-sweep), with their own values.
 - A dark sweep and a color sweep never run at the same time (they share the info panel's
-  *Sweep* lane), and neither runs during the strobe. Not in Beat Sync White.
+  *Sweep* lane), and neither runs during the strobe. In Beat Sync White it dims the white
+  (*Desaturate* is greyed out there - white has no saturation).
 - **Test dark sweep now** plays it 4 times in a row on the selected lamps.
 
 ## Info panel
@@ -799,8 +832,9 @@ the [Visualizer tab](#visualizer-tab)):
   and whether the clock is locked, the phrase bar and loudness (while the sequencer runs),
   the drums share, the note and key (while something follows the pitch) and the mode.
 - **Second row, whenever the mode uses the pulse sequencer** (in any mode; in Beat Sync
-  White its dark pulses only; while it waits for the beat clock to lock, the row stays in
-  place and says so) - a timeline of the last two bars, scrolling left (the bright line is now):
+  White its dark pulses and dark sweeps only; while it waits for the beat clock to lock,
+  the row stays in place and says so) - a timeline of the last two bars, scrolling left
+  (the bright line is now):
   - **White** - each flash drawn as its envelope (up over the attack, flat through the
     duration, down over the release, as tall as it's bright), in its **warm (amber)** or
     **cool (blue-white)** white, a hybrid as a gradient; the walk's flashes carry their
@@ -814,6 +848,8 @@ the [Visualizer tab](#visualizer-tab)):
   and the latest pulses in words.
 
 ## Diagnostics tab
+
+![Diagnostics tab: update rates, the lamps' state and command counts, and the log](Diagnostics.png)
 
 Audio callback, analysis and visual update rates; per lamp the online state, bulb type,
 latency and command counts (sent, failed, skipped as unchanged); and a live log viewer.

@@ -15,8 +15,8 @@ The sensitivities are four different things, so they're named apart:
 - Beat detector sensitivity: Beat Sync's / Beat Sync White's own detector,
   used only when they don't follow the clock.
 - Peak sensitivity: Peak Flash's peak detector (it never uses the clock).
-- Level sensitivity (gain): how strongly RGB Frequency / Custom / HSV Music
-  turn the sound level into light - a gain, not a detector.
+- Level sensitivity (gain): how strongly HSV Music turns the sound level
+  into light - a gain, not a detector.
 """
 from __future__ import annotations
 
@@ -50,15 +50,35 @@ _DETECTOR_SENSITIVITY_TIP = (
     "(Global Effects -> Rhythm). Higher = only sharp, obvious hits count as a beat."
 )
 _LEVEL_SENSITIVITY_TIP = "How strongly the sound level turns into light - a gain: higher = brighter, livelier."
-_SMOOTHING_NOTE = " Shared by RGB Frequency, Custom and HSV Music."
 
+# Band Colors' settings, the same text on the Color Mapping page.
+BAND_FOCUS_TIP = (
+    "How clearly the band playing out the most takes the colour: 0 = the bands' colours blend (two at once "
+    "give the hue between theirs), 1 = the strongest band's colour alone, so the colour jumps from band to "
+    "band - a kick to the bass colour, a hi-hat to the treble's."
+)
+BAND_CHORD_TURN_TIP = (
+    "How far the whole palette turns with the music's note - its place on the circle of fifths, so a chord "
+    "change moves every colour along while the bands keep their places relative to each other. Where no "
+    "note stands out (drums, noise) it follows the sound's loudness and brightness instead. 0 = off: the "
+    "band colours stay exactly as set."
+)
+BAND_RANGE_MEMORY_TIP = (
+    "Each band is measured against its own loudest and quietest of about this long ago - that's what lets "
+    "every band swing through its whole range even when all of them are loud. Short = it reacts to every "
+    "hit, even in a steady section; long = only to what stands out from the last few bars."
+)
+BAND_RELEASE_TIP = (
+    "How fast a band's activity falls back after its hit - longer = a band's colour lingers between hits, "
+    "shorter = the colour flicks back right away."
+)
 _ATTACK = QuickSetting(
     "color_mapping.smoothing.attack_ms", "Attack", 1.0, 1000.0, 0, " ms",
-    "How fast the colour follows the music when it gets louder - low = instant." + _SMOOTHING_NOTE,
+    "How fast the colour follows the music when it gets louder - low = instant.",
 )
 _RELEASE = QuickSetting(
     "color_mapping.smoothing.release_ms", "Release", 1.0, 2000.0, 0, " ms",
-    "How fast the colour falls back when the music gets quieter - high = a long tail." + _SMOOTHING_NOTE,
+    "How fast the colour falls back when the music gets quieter - high = a long tail.",
 )
 
 QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
@@ -95,23 +115,21 @@ QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
         QuickSetting("color_mapping.peak_flash.baseline_min_brightness", "Baseline brightness min", 0.0, 1.0,
                      tooltip="How bright the lamps stay in quiet passages."),
     ],
-    "rgb_freq": [
-        QuickSetting("color_mapping.rgb.sensitivity", "Level sensitivity (gain)", 0.1, 4.0,
-                     tooltip=_LEVEL_SENSITIVITY_TIP),
-        _ATTACK,
-        _RELEASE,
-    ],
     "hsv_music": [
         QuickSetting("color_mapping.hsv.sensitivity", "Level sensitivity (gain)", 0.1, 4.0,
                      tooltip=_LEVEL_SENSITIVITY_TIP),
         _ATTACK,
         _RELEASE,
     ],
-    "custom": [
-        QuickSetting("color_mapping.custom.sensitivity", "Level sensitivity (gain)", 0.1, 4.0,
-                     tooltip=_LEVEL_SENSITIVITY_TIP),
-        _ATTACK,
-        _RELEASE,
+    "band_colors": [
+        QuickSetting("color_mapping.band_colors.focus", "Color focus", 0.0, 1.0,
+                     tooltip=BAND_FOCUS_TIP),
+        QuickSetting("color_mapping.band_colors.chord_turn_deg", "Chord turn", 0.0, 360.0, 0, " deg",
+                     tooltip=BAND_CHORD_TURN_TIP),
+        QuickSetting("color_mapping.band_colors.range_memory_s", "Range memory", 0.5, 20.0, 1, " s",
+                     tooltip=BAND_RANGE_MEMORY_TIP),
+        QuickSetting("color_mapping.band_colors.release_ms", "Band release", 10.0, 2000.0, 0, " ms",
+                     tooltip=BAND_RELEASE_TIP),
     ],
 }
 

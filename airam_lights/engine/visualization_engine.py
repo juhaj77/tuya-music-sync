@@ -48,6 +48,7 @@ from ..effects.chase import (
     spread_positions,
 )
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
+from ..effects.band_colors import BandColorsState, BandColorTracker, band_edges
 from ..effects.pulse_sequencer import (
     STEPS_PER_BEAT,
     LoudnessTracker,
@@ -135,9 +136,8 @@ class VisualizationEngine:
         self.color_engine = ColorMappingEngine(config.color_mapping)
 
         sm = config.color_mapping.smoothing
-        self._smoother_r = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
-        self._smoother_g = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
-        self._smoother_b = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._band_colors = BandColorTracker()
+        self.latest_band_colors = BandColorsState()  # for display: the bands' activity, the chord turn
         self._smoother_log_centroid = AttackReleaseSmoother(sm.attack_ms, sm.release_ms, initial=math.log(200))
         self._smoother_value = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
         self._smoother_contrast = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
@@ -359,9 +359,6 @@ class VisualizationEngine:
     def _apply_smoothing_settings(self) -> None:
         sm = self.config.color_mapping.smoothing
         for s in (
-            self._smoother_r,
-            self._smoother_g,
-            self._smoother_b,
             self._smoother_log_centroid,
             self._smoother_value,
             self._smoother_contrast,
@@ -427,7 +424,7 @@ class VisualizationEngine:
     @property
     def sequencer_status(self) -> Optional[dict]:
         """Phrase position and loudness level while the pulse sequencer runs, for display.
-        white_pattern is None in Beat Sync White, which takes only its dark pulses."""
+        white_pattern is None in Beat Sync White, which takes only its dark pulses and dark sweeps."""
         mode = self.config.color_mapping.mode
         if not self._sequencing or not self.running or not sequencer_enabled_for(self.config, mode):
             return None
@@ -520,6 +517,12 @@ class VisualizationEngine:
             # used by the standalone manual app instead.
             self._white_pulse_lamps = None
             white_targets, preview_colors = self._tick_beat_sync_white_mode(frame, dt, wall_now, selected_ids)
+            # The sequencer's dark sweep dims the white (a color sweep has nothing to colour here).
+            for lamp, keep in self._dark_sweep_keep(selected_ids, dt).items():
+                if lamp in white_targets:
+                    target = white_targets[lamp]
+                    white_targets[lamp] = WhiteTarget(target.brightness * keep, target.temp, target.under)
+                    preview_colors[lamp] = white_targets[lamp].to_preview_color()
             self.latest_lamp_white_targets = white_targets
             self.latest_lamp_colors = preview_colors  # UI-swatch approximation only
             if white_targets:
@@ -528,8 +531,8 @@ class VisualizationEngine:
 
         colors: Dict[str, Color] = {}
 
-        if mode in ("rgb_freq", "custom"):
-            colors = self._tick_rgb_modes(frame, dt, wall_now, selected_ids, mode)
+        if mode == "band_colors":
+            colors = self._tick_band_colors_mode(frame, dt, wall_now, selected_ids)
         elif mode == "hsv_music":
             colors = self._tick_hsv_mode(frame, dt, wall_now, selected_ids)
         elif mode == "beat_sync":
@@ -651,18 +654,20 @@ class VisualizationEngine:
 
     # -- per-mode implementations ---------------------------------------------------
 
-    def _tick_rgb_modes(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, mode: str) -> Dict[str, Color]:
-        cfg = self.config.color_mapping.rgb if mode == "rgb_freq" else self.config.color_mapping.custom
-
-        lvl_r = band_energy(frame, cfg.r.low_hz, cfg.r.high_hz)
-        lvl_g = band_energy(frame, cfg.g.low_hz, cfg.g.high_hz)
-        lvl_b = band_energy(frame, cfg.b.low_hz, cfg.b.high_hz)
-
-        sr = self._smoother_r.update(lvl_r, dt)
-        sg = self._smoother_g.update(lvl_g, dt)
-        sb = self._smoother_b.update(lvl_b, dt)
-        self.latest_band3_levels = {"R": sr, "G": sg, "B": sb}
-        color = self.color_engine.compute_rgb(sr, sg, sb, cfg)
+    def _tick_band_colors_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        """Bass, mids and treble each a colour, the lamps showing the band
+        playing out the most - see effects/band_colors.py. With a chord turn
+        the palette also turns with the music's note (the same "pitch"
+        signal as Beat Sync's spectrum hue, see _tick_music_signals)."""
+        cfg = self.config.color_mapping.band_colors
+        levels = [band_energy(frame, low, high) for low, high in band_edges(cfg.bass_mid_hz, cfg.mid_treble_hz)]
+        chord = None
+        if cfg.chord_turn_deg > 0.0 and self._music_signals_active:
+            chord = self._hue_step_signals.value("pitch", pitch_as="note")
+        state = self._band_colors.update(levels, cfg, dt, chord)
+        self.latest_band_colors = state
+        self.latest_band3_levels = dict(state.activities)
+        color = self.color_engine.compute_band_colors(state.hue, state.level, cfg)
         return {device_id: color for device_id in selected_ids}
 
     def _tick_hsv_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
@@ -999,8 +1004,8 @@ class VisualizationEngine:
     def _tick_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, mode: str) -> None:
         """The pulse sequencer, the same in every colour mode (see
         engine.rules): it places the white flashes, dark pulses, strobes and
-        color sweeps on the shared beat clock's grid - Beat Sync White gets
-        only the dark pulses. Decided here, before the mode's own tick; each
+        color / dark sweeps on the shared beat clock's grid - Beat Sync White
+        gets only the dark pulses and dark sweeps. Decided here, before the mode's own tick; each
         mode then shows them - Beat Sync in _tick_beat_sync_mode, Beat Sync
         White in _tick_beat_sync_white_mode, the others in _apply_pulses. It
         places nothing until the clock has locked: until then Beat Sync rolls
@@ -1018,7 +1023,7 @@ class VisualizationEngine:
 
     def _apply_pulses(self, colors: Dict[str, Color], dt: float, wall_now: float) -> None:
         """The sequencer's pulses on a colour mode with no beat flash of its
-        own (Peak Flash, RGB Frequency, HSV Music, Custom), in place: a dark
+        own (Peak Flash, HSV Music, Band Colors), in place: a dark
         pulse dips the mode's colour toward black - by Beat Sync's dark pulse
         depth, on its dark pulse attack/release, washing the colour out along
         the way by its desaturate - and a white flash lights
@@ -1086,10 +1091,10 @@ class VisualizationEngine:
             self._white_pulse_lamps = None
         elif old == "beat_sync_white":
             self._beat_white_dark_until = None
-        if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White
+        if new == "band_colors":
+            self._band_colors.reset()  # its bands' ranges start over from the music playing now
+        if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White (a dark sweep dims its white)
             self._end_sweep("_color_sweep", self._seq_position)
-            self._end_sweep("_dark_sweep", self._seq_position)
-            self._dark_sweep_amounts.clear()
 
     def _run_sequencer(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids, dark_only: bool) -> None:
         position = self._beat_clock.position(wall_now) if self._sequencing else None
@@ -1111,7 +1116,7 @@ class VisualizationEngine:
         )
         cfg = self.config.color_mapping.beat_sync  # the pulses' look, in every mode
         for event in events:
-            if dark_only and event.kind != "dark":
+            if dark_only and event.kind not in ("dark", "dark_sweep"):
                 continue
             self._apply_sequencer_event(event, cfg, wall_now, selected_ids)
 
@@ -1420,15 +1425,33 @@ class VisualizationEngine:
         return swept
 
     def _apply_dark_sweep(self, colors: Dict[str, Color], selected_ids, dt: float) -> Dict[str, float]:
-        """Dims `colors` in place where the sequencer's dark sweep
-        (PulseSequencerConfig.dark_sweep_enabled) is: a lamp it reaches (see
-        _sweep_lamps) dips toward black on dark_sweep_attack_ms - by
-        dark_sweep_depth, washing its colour out by dark_sweep_desaturate on
-        the way - and once the spot has moved on comes back on
-        dark_sweep_release_ms, a tail behind it. Runs on after the sweep is
-        over until every lamp is back. Returns the lamps dimmed this tick and
-        how much of their light each keeps (for their white, see
+        """Dims `colors` in place where the sequencer's dark sweep is (see
+        _dark_sweep_amounts_now), washing their colour out by
+        dark_sweep_desaturate on the way. Returns the lamps dimmed this tick
+        and how much of their light each keeps (for their white, see
         _recolor_under_white)."""
+        sq = self.config.sequencer
+        kept: Dict[str, float] = {}
+        for lamp, amount in self._dark_sweep_amounts_now(selected_ids, dt).items():
+            if lamp in colors:
+                keep = 1.0 - clip(amount * sq.dark_sweep_depth)
+                colors[lamp] = _dip(colors[lamp], keep, amount * sq.dark_sweep_desaturate)
+                kept[lamp] = keep
+        return kept
+
+    def _dark_sweep_keep(self, selected_ids, dt: float) -> Dict[str, float]:
+        """How much of its light each lamp the dark sweep is on keeps this
+        tick - for Beat Sync White's white, which has no colour to wash out."""
+        depth = self.config.sequencer.dark_sweep_depth
+        amounts = self._dark_sweep_amounts_now(selected_ids, dt)
+        return {lamp: 1.0 - clip(amount * depth) for lamp, amount in amounts.items()}
+
+    def _dark_sweep_amounts_now(self, selected_ids, dt: float) -> Dict[str, float]:
+        """Where the sequencer's dark sweep (PulseSequencerConfig.dark_sweep_enabled)
+        is, 0..1 per lamp: a lamp it reaches (see _sweep_lamps) dips on
+        dark_sweep_attack_ms and, once the spot has moved on, comes back on
+        dark_sweep_release_ms - a tail behind it. Runs on after the sweep is
+        over until every lamp is back."""
         lit = self._sweep_lamps("_dark_sweep", selected_ids)
         amounts = self._dark_sweep_amounts
         if not lit and not amounts:
@@ -1436,17 +1459,15 @@ class VisualizationEngine:
         sq = self.config.sequencer
         for lamp in lit:
             amounts.setdefault(lamp, AttackReleaseSmoother(sq.dark_sweep_attack_ms, sq.dark_sweep_release_ms))
-        kept: Dict[str, float] = {}
+        now: Dict[str, float] = {}
         for lamp, smoother in list(amounts.items()):
             smoother.attack_ms, smoother.release_ms = sq.dark_sweep_attack_ms, sq.dark_sweep_release_ms
             amount = smoother.update(1.0 if lamp in lit else 0.0, dt)
             if lamp not in lit and amount < 1e-3:
                 del amounts[lamp]
-            elif lamp in colors:
-                keep = 1.0 - clip(amount * sq.dark_sweep_depth)
-                colors[lamp] = _dip(colors[lamp], keep, amount * sq.dark_sweep_desaturate)
-                kept[lamp] = keep
-        return kept
+            else:
+                now[lamp] = amount
+        return now
 
     def _next_sweep_hue(self) -> float:
         """The next color sweep's hue: its own, or with color_sweep_color
@@ -1476,7 +1497,7 @@ class VisualizationEngine:
         name = "sweep" if attr == "_color_sweep" else "dark sweep"
         if not self.running:
             return f"Not played: start the visualizer first - the {name} plays on top of the show."
-        if self.config.color_mapping.mode == "beat_sync_white":
+        if self.config.color_mapping.mode == "beat_sync_white" and attr == "_color_sweep":
             return f"Not played: Beat Sync White drives the white LEDs only - the {name} needs an RGB mode."
         selected_ids = self.lamp_manager.selected_device_ids()
         positions = get_chase_groups(self.config.per_lamp_effects, selected_ids)
@@ -1722,8 +1743,8 @@ class VisualizationEngine:
         flashes; the temperature changes on every temp_every_n_beats-th one -
         counted from the bar start on the shared clock, like Beat Sync's hue.
 
-        The pulse sequencer gives it only its dark pulses (see
-        _tick_sequencer). While it runs they replace the per-beat dark pulse
+        The pulse sequencer gives it only its dark pulses and dark sweeps
+        (see _tick_sequencer; the sweep is applied in tick_visual). While it runs they replace the per-beat dark pulse
         roll, and as in Beat Sync a beat in the middle of one flashes when it
         ends; the dip itself uses the Dark pulses settings every mode shares
         (Beat Sync's depth and attack/release). Returns (real WhiteTargets to
@@ -1922,15 +1943,17 @@ class VisualizationEngine:
 
     def _tick_music_signals(self, frame: SpectrumFrame, dt: float, mode: str) -> None:
         """Updates the music-driven color signals (dsp.hue_step), once per
-        tick, while Chase's or Group Switch's hue step or Beat Sync's
-        spectrum hue / hue step uses them - the note tracking only while one
-        of them uses "pitch"."""
+        tick, while Chase's or Group Switch's hue step, Beat Sync's spectrum
+        hue / hue step or Band Colors' chord turn uses them - the note
+        tracking only while one of them uses "pitch"."""
         bs = self.config.color_mapping.beat_sync
         sources = {
             cfg.hue_step_source
             for cfg in (self.config.chase, self.config.group_switch)
             if self._overlay_follows_music(cfg, mode)
         }
+        if mode == "band_colors" and self.config.color_mapping.band_colors.chord_turn_deg > 0.0:
+            sources.add("pitch")  # the chord turn
         if mode == "beat_sync" and bs.hue_mode == "spectrum":
             sources.add(bs.spectrum_source)
         elif mode == "beat_sync" and bs.hue_mode == "step" and bs.hue_step_source in HUE_STEP_SOURCES[1:]:

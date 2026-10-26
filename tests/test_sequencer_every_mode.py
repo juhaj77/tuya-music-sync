@@ -1,6 +1,6 @@
-"""The pulse sequencer in every colour mode: Peak Flash, RGB Frequency, HSV
-Music and Custom get its white flashes, dark pulses, strobes and color
-sweeps as Beat Sync does, Beat Sync White only its dark pulses - plus Beat
+"""The pulse sequencer in every colour mode: Peak Flash, HSV Music and Band
+Colors get its white flashes, dark pulses, strobes and color sweeps as Beat
+Sync does, Beat Sync White only its dark pulses and dark sweeps - plus Beat
 Sync White's temperature changing every N beats, on the bar (fake clock and
 a synthetic kick, no audio, no lamps)."""
 import random
@@ -19,7 +19,7 @@ from airam_lights.engine.visualization_engine import VisualizationEngine
 PERIOD = 0.5  # 120 BPM
 TICK = 1.0 / 30.0
 DEVICES = ["a", "b", "c", "d"]
-OTHER_MODES = ("peak_flash", "rgb_freq", "hsv_music", "custom")
+OTHER_MODES = ("peak_flash", "hsv_music", "band_colors")
 
 
 class _FakeClock:
@@ -152,7 +152,7 @@ def test_the_sequencer_runs_in_every_mode_and_the_beat_modes_need_the_shared_clo
     assert rules.sequencer_enabled_for(config, "beat_sync") and rules.sequencer_enabled_for(config, "beat_sync_white")
     config.sequencer.enabled = False
     assert not any(rules.sequencer_enabled_for(config, mode) for mode in OTHER_MODES)
-    assert not rules.clock_in_use(config, "rgb_freq")
+    assert not rules.clock_in_use(config, "band_colors")
     assert rules.sequencer_dark_only("beat_sync_white") and not rules.sequencer_dark_only("peak_flash")
 
 
@@ -196,7 +196,7 @@ def test_strobes_and_color_sweeps_play_in_the_other_modes_too(monkeypatch):
 
 
 def test_the_pulses_switch_off_with_the_sequencer(monkeypatch):
-    engine, clock, lamps = _make_engine(monkeypatch, "rgb_freq")
+    engine, clock, lamps = _make_engine(monkeypatch, "band_colors")
     _run(engine, clock, 8.0)
     assert lamps.white_calls
     engine.config.sequencer.enabled = False
@@ -211,7 +211,7 @@ def test_the_pulses_switch_off_with_the_sequencer(monkeypatch):
 def test_old_pulses_stay_in_the_past_when_the_sequencer_comes_back(monkeypatch):
     # The position from before a pause read as a jump of the grid, which
     # moved the timeline's old pulses forward by the whole pause - up to "now".
-    engine, clock, lamps = _make_engine(monkeypatch, "rgb_freq")
+    engine, clock, lamps = _make_engine(monkeypatch, "band_colors")
     _run(engine, clock, 8.0)
     entry = engine.seq_events[-1]
     age = engine.seq_position - entry["pos"]  # beats ago
@@ -223,10 +223,10 @@ def test_old_pulses_stay_in_the_past_when_the_sequencer_comes_back(monkeypatch):
 
 
 def test_switching_modes_keeps_the_sequencer_going(monkeypatch):
-    engine, clock, lamps = _make_engine(monkeypatch, "rgb_freq", shared_clock=True)
+    engine, clock, lamps = _make_engine(monkeypatch, "band_colors", shared_clock=True)
     _run(engine, clock, 8.0)
     phrase_bar = engine.sequencer_status["phrase_bar"]
-    for mode in ("peak_flash", "beat_sync", "hsv_music", "beat_sync_white", "custom"):
+    for mode in ("peak_flash", "beat_sync", "hsv_music", "beat_sync_white", "band_colors"):
         engine.config.color_mapping.mode = mode
         _run(engine, clock, 2.0)  # one bar
         assert engine.sequencer_status is not None, mode
@@ -467,11 +467,11 @@ def test_every_mode_plays_the_same_pulses_on_real_spectra(monkeypatch):
         ticks = len({t for t, _ in lamps.color_calls} | {t for t, _ in lamps.white_calls})
         assert ticks >= int(16.0 / TICK) - 2, mode  # every lamp sent something every tick
         logs[mode] = [(e["kind"], round(e["pos"], 6)) for e in engine.seq_events]
-    assert {kind for kind, _ in logs["beat_sync_white"]} == {"dark"}
+    assert "dark" in {kind for kind, _ in logs["beat_sync_white"]} <= {"dark", "dark_sweep"}  # (the dark sweep dims its white)
     assert {"white", "dark"} <= {kind for kind, _ in logs["beat_sync"]}
     assert {"white", "dark"} <= {kind for kind, _ in logs["peak_flash"]}
     # One set of settings: the same pulses on the same beats in every mode without beats of its own.
-    assert logs["peak_flash"] == logs["rgb_freq"] == logs["hsv_music"] == logs["custom"]
+    assert logs["peak_flash"] == logs["hsv_music"] == logs["band_colors"]
 
 
 # -- switching modes -------------------------------------------------------------------------------
@@ -485,7 +485,7 @@ def test_coming_back_to_beat_sync_replays_no_old_white_flash(monkeypatch):
     bs.white_pulse_attack_ms, bs.white_pulse_duration_ms, bs.white_pulse_release_ms = 5.0, 300.0, 400.0
     engine.apply_config(engine.config)
     _run_until(engine, clock, lambda: engine._last_white_amount > 0.5)
-    engine.config.color_mapping.mode = "rgb_freq"  # mid flash
+    engine.config.color_mapping.mode = "band_colors"  # mid flash
     _run(engine, clock, TICK)
     bs.white_pulse_probability = 0.0  # no new ones: anything white now would be the old flash
     engine.config.color_mapping.mode = "beat_sync"

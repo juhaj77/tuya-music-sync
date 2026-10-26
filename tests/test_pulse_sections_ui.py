@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from airam_lights.config.schema import AppConfig  # noqa: E402
 from airam_lights.ui.tabs.pulses_panel import MODE_NAMES  # noqa: E402
 
-MODES = ("beat_sync", "beat_sync_white", "peak_flash", "rgb_freq", "hsv_music", "custom")
+MODES = ("beat_sync", "beat_sync_white", "peak_flash", "hsv_music", "band_colors")
 
 
 @pytest.fixture(scope="module")
@@ -61,7 +61,7 @@ def test_the_pulses_follow_the_active_mode_not_the_page_shown(window, qapp):
         assert MODE_NAMES[mode] in effects.pulses_block.description.text()
     effects = _effects(window, qapp, "beat_sync")
     assert not effects.pulses.beat_dark_prob_slider.isHidden()  # Beat Sync's per-beat probability
-    _color_mapping(window, qapp, "rgb_freq")  # looking at another mode's page changes nothing
+    _color_mapping(window, qapp, "band_colors")  # looking at another mode's page changes nothing
     window.tabs.setCurrentIndex(3)
     qapp.processEvents()
     assert not effects.pulses.beat_dark_prob_slider.isHidden()
@@ -70,7 +70,7 @@ def test_the_pulses_follow_the_active_mode_not_the_page_shown(window, qapp):
 
 def test_the_pulse_settings_are_one_set_for_every_mode(window, qapp):
     sq = window.controller.config.sequencer
-    pulses = _effects(window, qapp, "rgb_freq").pulses
+    pulses = _effects(window, qapp, "band_colors").pulses
     pulses.seq_white_density_slider._spin.setValue(0.33)
     pulses.beat_dark_duration_slider._spin.setValue(123.0)
     assert sq.white_density == pytest.approx(0.33)
@@ -140,10 +140,15 @@ def test_beat_sync_white_uses_only_the_dark_pulses(window, qapp):
     assert pulses.beat_dark_depth_slider.isEnabled()
     for widget in (pulses.seq_white_combo, pulses.seq_walk_combo, pulses.seq_dynamics_slider,
                    pulses.seq_strobe_checkbox, pulses.seq_flash_strobe_checkbox, pulses.seq_sweep_checkbox,
-                   pulses.seq_dark_sweep_checkbox, pulses.beat_white_pulse_enabled_checkbox,
-                   pulses.beat_white_pulse_duration_slider, pulses.beat_dark_desaturate_slider):
+                   pulses.beat_white_pulse_enabled_checkbox, pulses.beat_white_pulse_duration_slider,
+                   pulses.beat_dark_desaturate_slider):
         assert not widget.isEnabled()
     assert "no saturation" in pulses.beat_dark_desaturate_slider.toolTip()
+    # The dark sweep dims its white - all but the desaturate, white has no saturation.
+    pulses.seq_dark_sweep_checkbox.setChecked(True)
+    assert pulses.seq_dark_sweep_checkbox.isEnabled() and pulses.seq_dark_sweep_depth_slider.isEnabled()
+    assert not pulses.seq_dark_sweep_desaturate_slider.isEnabled()
+    assert "no saturation" in pulses.seq_dark_sweep_desaturate_slider.toolTip()
     assert "Beat Sync White" in pulses.seq_strobe_checkbox.toolTip()
     # Its own per-beat dark pulses (on its Color Mapping page) step aside while the sequencer places them...
     cmt = _color_mapping(window, qapp, "beat_sync_white")
@@ -157,7 +162,7 @@ def test_beat_sync_white_uses_only_the_dark_pulses(window, qapp):
     # Another mode gets the sequencer's white settings back.
     pulses = _effects(window, qapp, "beat_sync_white").pulses
     pulses.seq_enabled_checkbox.setChecked(True)
-    pulses = _effects(window, qapp, "custom").pulses
+    pulses = _effects(window, qapp, "hsv_music").pulses
     assert pulses.seq_white_combo.isEnabled() and pulses.beat_white_pulse_enabled_checkbox.isEnabled()
     assert pulses.seq_dark_sweep_checkbox.isEnabled() and pulses.beat_dark_desaturate_slider.isEnabled()
 
@@ -206,7 +211,7 @@ def test_the_blocks_survive_a_preset_load(window, qapp):
     qapp.processEvents()
     qapp.sendPostedEvents(None, 0)
     qapp.processEvents()
-    effects = _effects(window, qapp, "rgb_freq")
+    effects = _effects(window, qapp, "band_colors")
     assert window.tabs.tabText(3) == "Global Effects"
     assert effects.pulses.seq_enabled_checkbox.isEnabled() and effects.pulses.isVisible()
     assert effects.rhythm.isVisible() and effects.overlays.isVisible()

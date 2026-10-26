@@ -46,9 +46,9 @@ themselves. On top of that grid:
   spot instead of a colour - each lamp dips toward black in turn. Never at
   the same time as a color sweep.
 - Dark only (tick(dark_only=True), for Beat Sync White, which is all white
-  already): just the dark pulses - no white flashes, strobes or sweeps (dark
-  sweeps neither: they dim the RGB colour), and
-  so nothing white keeps a dark pulse off its step either.
+  already): just the dark pulses and the dark sweeps - no white flashes,
+  strobes or color sweeps, so nothing white keeps a dark pulse off its step
+  either.
 
 Pure logic: returns events, never touches lamps. The engine turns events
 into lamp commands (see VisualizationEngine._apply_sequencer_event).
@@ -441,7 +441,7 @@ class PulseSequencer:
     ) -> List[PulseEvent]:
         """position: BeatClock.position() (None when not locked -> no events).
         energy: broadband loudness level (0..1) for the dynamics. dark_only:
-        only the dark pulses (Beat Sync White) - the phrases, fills, drops
+        only the dark pulses and dark sweeps (Beat Sync White) - the phrases, fills, drops
         and loudness levels go on as usual, so switching it on or off mid-song
         keeps the place in the music. Returns the events for every 16th step
         crossed since the previous tick."""
@@ -514,9 +514,12 @@ class PulseSequencer:
         # more strobe flash that came late, so that step stays without one.
         strobe_just_ended = self._strobe_from_step < self._strobe_until_step == step
 
-        # -- color / dark sweep (on the RGB colour, so the pulses keep going) -------------
+        # -- color / dark sweep (on top of the colour, so the pulses keep going) -------------
+        # (A dark sweep dims Beat Sync White's white too; a color sweep has no colour to show there.)
         for kind in ("sweep", "dark_sweep"):
-            sweep = None if self._dark_only else self._sweep_for_step(kind, step, bar_step, steps_per_bar, phrase_bars)
+            if self._dark_only and kind == "sweep":
+                continue
+            sweep = self._sweep_for_step(kind, step, bar_step, steps_per_bar, phrase_bars)
             if sweep is not None:
                 events.append(sweep)
 

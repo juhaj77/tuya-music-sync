@@ -10,7 +10,7 @@ never scrolls away): what the music sync is hearing and doing right now.
   music plays - white flashes, dark pulses, strobes and color / dark sweeps
   in their own lanes, the bar lines, the phrase starts - and a line of text naming the
   patterns playing and the latest pulses (in Beat Sync White, which takes
-  only the dark pulses, just those).
+  only the dark pulses and dark sweeps, just those).
 
 Reads the engine's state (VisualizationEngine.latest_clock_beat,
 sequencer_status, seq_position, seq_events, ...) on its own timer; it
@@ -34,9 +34,8 @@ _MODE_NAMES = {
     "beat_sync": "Beat Sync",
     "beat_sync_white": "Beat Sync White",
     "peak_flash": "Peak Flash",
-    "rgb_freq": "RGB Frequency",
     "hsv_music": "HSV Music",
-    "custom": "Custom",
+    "band_colors": "Band Colors",
 }
 _BG = QColor(theme.INPUT)
 _BORDER = QColor(theme.BORDER)

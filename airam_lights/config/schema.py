@@ -105,64 +105,6 @@ class SmoothingConfig:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class ChannelMap:
-    """Maps one frequency range onto one output channel (R, G or B).
-
-    Used both for the "RGB Frequency" default mode (bass/mid/treble -> R/G/B)
-    and for "Custom" mode, which is the same mechanism with user-editable
-    ranges - there is deliberately no separate code path for "custom".
-    """
-
-    low_hz: float
-    high_hz: float
-    gain: float = 1.0
-    min_level: float = 0.0  # input level (0..1) mapped to output 0
-    max_level: float = 1.0  # input level (0..1) mapped to output 1
-    gamma: float = 1.0  # output = output ** (1/gamma)
-
-    def to_dict(self) -> dict:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "ChannelMap":
-        return cls(
-            low_hz=float(d["low_hz"]),
-            high_hz=float(d["high_hz"]),
-            gain=float(d.get("gain", 1.0)),
-            min_level=float(d.get("min_level", 0.0)),
-            max_level=float(d.get("max_level", 1.0)),
-            gamma=float(d.get("gamma", 1.0)),
-        )
-
-
-@dataclass
-class RGBModeConfig:
-    """Backs both 'RGB Frequency' and 'Custom' color mapping modes."""
-
-    r: ChannelMap = field(default_factory=lambda: ChannelMap(20, 150))
-    g: ChannelMap = field(default_factory=lambda: ChannelMap(150, 2000))
-    b: ChannelMap = field(default_factory=lambda: ChannelMap(2000, 12000))
-    sensitivity: float = 1.0  # overall input gain applied before per-channel gain
-
-    def to_dict(self) -> dict:
-        return {
-            "r": self.r.to_dict(),
-            "g": self.g.to_dict(),
-            "b": self.b.to_dict(),
-            "sensitivity": self.sensitivity,
-        }
-
-    @classmethod
-    def from_dict(cls, d: dict) -> "RGBModeConfig":
-        return cls(
-            r=ChannelMap.from_dict(d.get("r", {"low_hz": 20, "high_hz": 150})),
-            g=ChannelMap.from_dict(d.get("g", {"low_hz": 150, "high_hz": 2000})),
-            b=ChannelMap.from_dict(d.get("b", {"low_hz": 2000, "high_hz": 12000})),
-            sensitivity=float(d.get("sensitivity", 1.0)),
-        )
-
-
-@dataclass
 class HSVModeConfig:
     """'HSV Music' mode: hue from spectral centroid, value from overall
     energy, saturation from spectral contrast."""
@@ -189,6 +131,42 @@ class HSVModeConfig:
             saturation_contrast_gain=float(d.get("saturation_contrast_gain", 0.5)),
             sensitivity=float(d.get("sensitivity", 1.0)),
         )
+
+
+@dataclass
+class BandColorsModeConfig:
+    """'Band Colors' mode (effects/band_colors.py): bass, mids and treble each
+    have a colour, and the lamps show the band playing out the most right
+    now - each band measured against its own recent range, so the colour
+    moves with the kicks, the chords and the hi-hats instead of settling on
+    one pale mix. Replaced RGB Frequency and Custom (old configs in those
+    modes load into this one)."""
+
+    bass_mid_hz: float = 250.0  # crossover between the bass and mid bands
+    mid_treble_hz: float = 4000.0  # crossover between the mid and treble bands
+    bass_hue_deg: float = 0.0  # red
+    mid_hue_deg: float = 120.0  # green
+    treble_hue_deg: float = 240.0  # blue
+    focus: float = 0.6  # 0 = the bands' colours blend, 1 = the band out the most takes the colour
+    range_memory_s: float = 4.0  # how long each band remembers its recent loudest / quietest
+    chord_turn_deg: float = 90.0  # how far the palette turns with the music's note (0 = off)
+    saturation: float = 1.0
+    brightness_min: float = 0.15
+    brightness_max: float = 1.0
+    attack_ms: float = 30.0  # how fast a band's activity rises
+    release_ms: float = 250.0  # ...and falls back
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BandColorsModeConfig":
+        defaults = cls()
+        kwargs = {}
+        for name, default in asdict(defaults).items():
+            value = d.get(name, default)
+            kwargs[name] = type(default)(value) if value is not None else default
+        return cls(**kwargs)
 
 
 PULSE_TRIGGERS = ("random", "accent", "downbeat")
@@ -572,7 +550,9 @@ class BeatSyncWhiteModeConfig:
         )
 
 
-COLOR_MODES = ("rgb_freq", "hsv_music", "custom", "beat_sync", "peak_flash", "beat_sync_white")
+COLOR_MODES = ("band_colors", "hsv_music", "beat_sync", "peak_flash", "beat_sync_white")
+# Modes that are gone, and the one a config saved in them loads into.
+_OLD_MODES = {"rgb_freq": "band_colors", "custom": "band_colors"}
 
 
 @dataclass
@@ -581,8 +561,7 @@ class ColorMappingConfig:
     # on every beat reads as far more "alive" in practice than the smoothly
     # continuous blending the other modes do - see README.md.
     mode: str = "beat_sync"  # see COLOR_MODES
-    rgb: RGBModeConfig = field(default_factory=RGBModeConfig)
-    custom: RGBModeConfig = field(default_factory=RGBModeConfig)
+    band_colors: BandColorsModeConfig = field(default_factory=BandColorsModeConfig)
     hsv: HSVModeConfig = field(default_factory=HSVModeConfig)
     beat_sync: BeatSyncModeConfig = field(default_factory=BeatSyncModeConfig)
     peak_flash: PeakFlashModeConfig = field(default_factory=PeakFlashModeConfig)
@@ -596,8 +575,7 @@ class ColorMappingConfig:
     def to_dict(self) -> dict:
         return {
             "mode": self.mode,
-            "rgb": self.rgb.to_dict(),
-            "custom": self.custom.to_dict(),
+            "band_colors": self.band_colors.to_dict(),
             "hsv": self.hsv.to_dict(),
             "beat_sync": self.beat_sync.to_dict(),
             "peak_flash": self.peak_flash.to_dict(),
@@ -611,11 +589,12 @@ class ColorMappingConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ColorMappingConfig":
+        mode = d.get("mode", "rgb_freq")  # (configs older than the mode setting played RGB Frequency)
+        mode = _OLD_MODES.get(mode, mode)
         return cls(
-            # A mode that's gone (the old "8band_spectrum") falls back to the default.
-            mode=d.get("mode", "rgb_freq") if d.get("mode", "rgb_freq") in COLOR_MODES else "beat_sync",
-            rgb=RGBModeConfig.from_dict(d.get("rgb", {})),
-            custom=RGBModeConfig.from_dict(d.get("custom", {})),
+            # A mode that's gone without a successor (the old "8band_spectrum") falls back to the default.
+            mode=mode if mode in COLOR_MODES else "beat_sync",
+            band_colors=BandColorsModeConfig.from_dict(d.get("band_colors", {})),
             hsv=HSVModeConfig.from_dict(d.get("hsv", {})),
             beat_sync=BeatSyncModeConfig.from_dict(d.get("beat_sync", {})),
             peak_flash=PeakFlashModeConfig.from_dict(d.get("peak_flash", {})),
@@ -688,8 +667,8 @@ class ChaseEffectConfig:
     """A moving highlight rotates through a chosen, ordered subset of lamps
     (each lamp's position comes from its PerLampEffect.chase_order), creating
     a spinning/chasing light effect - independent of, and layered on top of,
-    whichever color mode is currently active (RGB/HSV/Beat Sync/Peak
-    Flash/Custom all get this overlay the same way).
+    whichever color mode is currently active (Beat Sync, Peak Flash, HSV
+    Music and Band Colors all get this overlay the same way).
 
     Speed is either a constant number of full rotations per second
     (`speed_rotations_per_s` - e.g. 0.5 means one full lap around the chase
@@ -1499,8 +1478,7 @@ class AppConfig:
             "beat_sync_white": cm.beat_sync_white,
             "peak_flash": cm.peak_flash,
             "hsv": cm.hsv,
-            "rgb": cm.rgb,
-            "custom": cm.custom,
+            "band_colors": cm.band_colors,
             "smoothing": cm.smoothing,
             "rhythm": cfg.rhythm,
             "sequencer": cfg.sequencer,
@@ -1515,7 +1493,7 @@ class AppConfig:
                 if not hasattr(target, key):
                     raise KeyError(f"DEFAULT_LOOK: unknown setting {path}.{key}")
                 if isinstance(value, dict):
-                    apply(getattr(target, key), value, f"{path}.{key}")  # e.g. rgb's "r" channel
+                    apply(getattr(target, key), value, f"{path}.{key}")  # a nested settings object
                 else:
                     setattr(target, key, value)
 

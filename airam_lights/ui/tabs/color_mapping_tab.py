@@ -29,52 +29,22 @@ from PySide6.QtWidgets import (
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
-from ...config.schema import LAMP_TRANSITIONS, RGBModeConfig
+from ...config.schema import LAMP_TRANSITIONS
 from ..controller import AppController
-from ..widgets.channel_map_editor import ChannelMapEditor
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import beat_divisions, choice_combo, inactive_note, labeled_combo, set_active, show_note
-from ..quick_settings import QUICK_SETTINGS, get_value, link_slider
+from ..quick_settings import (
+    BAND_CHORD_TURN_TIP,
+    BAND_FOCUS_TIP,
+    BAND_RANGE_MEMORY_TIP,
+    BAND_RELEASE_TIP,
+    QUICK_SETTINGS,
+    get_value,
+    link_slider,
+)
 from ..widgets.param_slider import FloatSlider
 from ..widgets.section import CollapsibleSection
 from .pulses_panel import sequencer_state
-
-
-
-class RGBModeEditor(QWidget):
-    """Three ChannelMapEditors side by side (R/G/B) + overall sensitivity."""
-
-    def __init__(self, cfg: RGBModeConfig, on_change, parent=None):
-        super().__init__(parent)
-        self._on_change = on_change
-        layout = QVBoxLayout(self)
-
-        row = QHBoxLayout()
-        self.r_editor = ChannelMapEditor("R (default: Bass)", cfg.r)
-        self.g_editor = ChannelMapEditor("G (default: Mid)", cfg.g)
-        self.b_editor = ChannelMapEditor("B (default: Treble)", cfg.b)
-        for e in (self.r_editor, self.g_editor, self.b_editor):
-            e.changed.connect(self._emit)
-            row.addWidget(e)
-        layout.addLayout(row)
-
-        self.sensitivity_slider = FloatSlider(
-            "Level sensitivity (gain)", 0.1, 4.0, cfg.sensitivity,
-            tooltip="How strongly the band levels turn into light - a gain: higher = brighter, livelier.",
-        )
-        self.sensitivity_slider.valueChanged.connect(self._emit)
-        layout.addWidget(self.sensitivity_slider)
-
-    def _emit(self, *_args) -> None:
-        self._on_change(self.to_config())
-
-    def to_config(self) -> RGBModeConfig:
-        return RGBModeConfig(
-            r=self.r_editor.to_channel_map(),
-            g=self.g_editor.to_channel_map(),
-            b=self.b_editor.to_channel_map(),
-            sensitivity=self.sensitivity_slider.value(),
-        )
 
 
 class _ModeTabs(QTabWidget):
@@ -136,16 +106,6 @@ class ColorMappingTab(QWidget):
         root.addWidget(sub_tabs)
         self.sub_tabs = sub_tabs
 
-        # -- RGB Frequency mode -----------------------------------------------------
-        self.rgb_editor = RGBModeEditor(cm.rgb, self._on_rgb_changed)
-        self.rgb_attack_slider, self.rgb_release_slider = self._add_smoothing_sliders(self.rgb_editor.layout())
-        sub_tabs.addTab(self.rgb_editor, "RGB Frequency")
-
-        # -- Custom mode --------------------------------------------------------------
-        self.custom_editor = RGBModeEditor(cm.custom, self._on_custom_changed)
-        self.custom_attack_slider, self.custom_release_slider = self._add_smoothing_sliders(self.custom_editor.layout())
-        sub_tabs.addTab(self.custom_editor, "Custom")
-
         # -- HSV mode -------------------------------------------------------------------
         hsv_widget = QWidget()
         hsv_layout = QVBoxLayout(hsv_widget)
@@ -178,7 +138,11 @@ class ColorMappingTab(QWidget):
         )
         hsv_desc_label.setWordWrap(True)
         hsv_layout.addWidget(hsv_desc_label)
-        sub_tabs.insertTab(1, hsv_widget, "HSV Music")  # before Custom, as in the Visualizer tab
+        sub_tabs.addTab(hsv_widget, "HSV Music")
+
+        # -- Band Colors mode -----------------------------------------------------------
+        band_widget = self._build_band_colors_page(cm.band_colors)
+        sub_tabs.addTab(band_widget, "Band Colors")
 
         # -- Beat Sync mode -----------------------------------------------------------
         beat_widget = QWidget()
@@ -296,6 +260,7 @@ class ColorMappingTab(QWidget):
         beat_layout.addWidget(self.beat_spectrum_status_label)
         self._spectrum_timer = QTimer(self)
         self._spectrum_timer.timeout.connect(self._refresh_spectrum_status)
+        self._spectrum_timer.timeout.connect(self._refresh_band_status)
         self._spectrum_timer.start(200)
 
         hue_every_row = QHBoxLayout()
@@ -692,9 +657,8 @@ class ColorMappingTab(QWidget):
             "beat_sync": beat_widget,
             "beat_sync_white": bsw_widget,
             "peak_flash": peak_widget,
-            "rgb_freq": self.rgb_editor,
             "hsv_music": hsv_widget,
-            "custom": self.custom_editor,
+            "band_colors": band_widget,
         }
         self._link_quick_settings()
         # A stretch at the end of each page, so its rows stay together at the
@@ -722,10 +686,9 @@ class ColorMappingTab(QWidget):
         self.curve_combo.addItems(["linear", "log", "exp2"])
         self.curve_combo.setCurrentText(cm.response_curve)
         self.curve_combo.setToolTip(
-            "Reshapes the raw 0..1 audio level BEFORE it becomes brightness/hue, in RGB Frequency, "
-            "Custom and HSV Music modes only (Beat Sync, Peak Flash, and Beat Sync "
-            "White don't use this at all - they react to individual detected hits instead of a "
-            "continuous level). linear: unchanged. log: boosts quiet detail, so quieter passages still "
+            "Reshapes the raw 0..1 audio level BEFORE it becomes brightness, in HSV Music and Band Colors "
+            "only (Beat Sync, Peak Flash, and Beat Sync White don't use this at all - they react to "
+            "individual detected hits instead of a continuous level). linear: unchanged. log: boosts quiet detail, so quieter passages still "
             "show visible variation instead of looking flat/dark. exp2: the opposite - suppresses quiet "
             "background noise and emphasizes strong peaks, for a punchier, more contrasty look."
         )
@@ -912,11 +875,10 @@ class ColorMappingTab(QWidget):
             show_note(self.bsw_temp_every_note, "")
 
     def _add_smoothing_sliders(self, layout) -> "tuple[FloatSlider, FloatSlider]":
-        """Attack/Release of the level smoothing - one setting shared by RGB
-        Frequency, Custom and HSV Music, so each of their pages has a copy
-        (kept in step through _link_quick_settings())."""
+        """HSV Music's Attack/Release (the level smoothing), as on the Quick
+        Controls."""
         sliders = []
-        for setting in (s for s in QUICK_SETTINGS["rgb_freq"] if ".smoothing." in s.path):
+        for setting in (s for s in QUICK_SETTINGS["hsv_music"] if ".smoothing." in s.path):
             slider = FloatSlider(
                 setting.label, setting.minimum, setting.maximum, get_value(self.controller.config, setting.path),
                 decimals=setting.decimals, suffix=setting.suffix, tooltip=setting.tooltip,
@@ -943,11 +905,13 @@ class ColorMappingTab(QWidget):
             "color_mapping.peak_flash.treble_white_amount": [self.peak_white_amount_slider],
             "color_mapping.peak_flash.hue_flow_ms": [self.peak_hue_flow_slider],
             "color_mapping.peak_flash.baseline_min_brightness": [self.peak_baseline_min_slider],
-            "color_mapping.rgb.sensitivity": [self.rgb_editor.sensitivity_slider],
-            "color_mapping.custom.sensitivity": [self.custom_editor.sensitivity_slider],
             "color_mapping.hsv.sensitivity": [self.hsv_sensitivity_slider],
-            "color_mapping.smoothing.attack_ms": [self.rgb_attack_slider, self.custom_attack_slider, self.hsv_attack_slider],
-            "color_mapping.smoothing.release_ms": [self.rgb_release_slider, self.custom_release_slider, self.hsv_release_slider],
+            "color_mapping.smoothing.attack_ms": [self.hsv_attack_slider],
+            "color_mapping.smoothing.release_ms": [self.hsv_release_slider],
+            "color_mapping.band_colors.focus": [self.band_focus_slider],
+            "color_mapping.band_colors.chord_turn_deg": [self.band_chord_turn_slider],
+            "color_mapping.band_colors.range_memory_s": [self.band_range_memory_slider],
+            "color_mapping.band_colors.release_ms": [self.band_release_slider],
         }
         for path, sliders in links.items():
             for slider in sliders:
@@ -978,13 +942,122 @@ class ColorMappingTab(QWidget):
         setattr(self.controller.config.color_mapping.smoothing, name, value)
         self.controller.apply_config_changes()
 
-    def _on_rgb_changed(self, cfg: RGBModeConfig) -> None:
-        self.controller.config.color_mapping.rgb = cfg
+    def _build_band_colors_page(self, bc) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        intro = QLabel(
+            "Bass, mids and treble each have a colour, and the lamps show the band playing out the most right "
+            "now: a kick turns them to the bass colour, a chord or a voice to the mid colour, a hi-hat to the "
+            "treble colour, two bands at once to the colour between theirs. Each band is measured against its "
+            "own recent range, not against the others or an absolute level - so even when everything is loud, "
+            "each band still swings through its whole range and the colour keeps moving."
+        )
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        split_row = QHBoxLayout()
+        split_row.addWidget(QLabel("Bass / mid split:"))
+        self.band_bass_mid_spin = QSpinBox()
+        self.band_bass_mid_spin.setRange(60, 1000)
+        self.band_bass_mid_spin.setSuffix(" Hz")
+        self.band_bass_mid_spin.setValue(int(bc.bass_mid_hz))
+        self.band_bass_mid_spin.setToolTip(
+            "Where the bass band ends and the mids begin (the bass starts at 30 Hz). Around 150-250 Hz keeps the "
+            "kick drum and the bass line in the bass band."
+        )
+        split_row.addWidget(self.band_bass_mid_spin)
+        split_row.addSpacing(16)
+        split_row.addWidget(QLabel("Mid / treble split:"))
+        self.band_mid_treble_spin = QSpinBox()
+        self.band_mid_treble_spin.setRange(500, 10000)
+        self.band_mid_treble_spin.setSingleStep(100)
+        self.band_mid_treble_spin.setSuffix(" Hz")
+        self.band_mid_treble_spin.setValue(int(bc.mid_treble_hz))
+        self.band_mid_treble_spin.setToolTip(
+            "Where the mids end and the treble begins (the treble goes up to 12 kHz). Around 3-5 kHz leaves the "
+            "voices and chords in the mids and the hi-hats and cymbals in the treble."
+        )
+        split_row.addWidget(self.band_mid_treble_spin)
+        split_row.addStretch(1)
+        layout.addLayout(split_row)
+        for spin in (self.band_bass_mid_spin, self.band_mid_treble_spin):
+            spin.valueChanged.connect(self._on_band_colors_changed)
+
+        self.band_bass_hue_slider = HueSlider("Bass colour", bc.bass_hue_deg)
+        self.band_mid_hue_slider = HueSlider("Mid colour", bc.mid_hue_deg)
+        self.band_treble_hue_slider = HueSlider("Treble colour", bc.treble_hue_deg)
+        self.band_focus_slider = FloatSlider("Color focus", 0.0, 1.0, bc.focus, decimals=2, tooltip=BAND_FOCUS_TIP)
+        self.band_chord_turn_slider = FloatSlider(
+            "Chord turn", 0.0, 360.0, bc.chord_turn_deg, decimals=0, suffix=" deg", tooltip=BAND_CHORD_TURN_TIP,
+        )
+        self.band_range_memory_slider = FloatSlider(
+            "Range memory", 0.5, 20.0, bc.range_memory_s, decimals=1, suffix=" s", tooltip=BAND_RANGE_MEMORY_TIP,
+        )
+        self.band_attack_slider = FloatSlider(
+            "Band attack", 1.0, 500.0, bc.attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast a band's activity rises at its hit - low = the colour snaps to the band at once.",
+        )
+        self.band_release_slider = FloatSlider(
+            "Band release", 10.0, 2000.0, bc.release_ms, decimals=0, suffix=" ms", tooltip=BAND_RELEASE_TIP,
+        )
+        self.band_saturation_slider = FloatSlider("Saturation", 0.0, 1.0, bc.saturation, decimals=2)
+        self.band_bright_min_slider = FloatSlider(
+            "Brightness min", 0.0, 1.0, bc.brightness_min, decimals=2,
+            tooltip="How bright the lamps stay between the hits, and in silence.",
+        )
+        self.band_bright_max_slider = FloatSlider(
+            "Brightness max", 0.0, 1.0, bc.brightness_max, decimals=2,
+            tooltip="How bright a band's hit makes them (the brightness follows the most active band; the Global "
+            "box's Response curve shapes it).",
+        )
+        for w in (
+            self.band_bass_hue_slider, self.band_mid_hue_slider, self.band_treble_hue_slider, self.band_focus_slider,
+            self.band_chord_turn_slider, self.band_range_memory_slider, self.band_attack_slider,
+            self.band_release_slider, self.band_saturation_slider, self.band_bright_min_slider,
+            self.band_bright_max_slider,
+        ):
+            w.valueChanged.connect(self._on_band_colors_changed)
+            layout.addWidget(w)
+        self.band_status_label = QLabel()
+        self.band_status_label.setWordWrap(True)
+        layout.addWidget(self.band_status_label)
+        return page
+
+    def _on_band_colors_changed(self, *_args) -> None:
+        bc = self.controller.config.color_mapping.band_colors
+        bc.bass_mid_hz = float(self.band_bass_mid_spin.value())
+        bc.mid_treble_hz = float(self.band_mid_treble_spin.value())
+        bc.bass_hue_deg = self.band_bass_hue_slider.value()
+        bc.mid_hue_deg = self.band_mid_hue_slider.value()
+        bc.treble_hue_deg = self.band_treble_hue_slider.value()
+        bc.focus = self.band_focus_slider.value()
+        bc.chord_turn_deg = self.band_chord_turn_slider.value()
+        bc.range_memory_s = self.band_range_memory_slider.value()
+        bc.attack_ms = self.band_attack_slider.value()
+        bc.release_ms = self.band_release_slider.value()
+        bc.saturation = self.band_saturation_slider.value()
+        bc.brightness_min = self.band_bright_min_slider.value()
+        bc.brightness_max = self.band_bright_max_slider.value()
         self.controller.apply_config_changes()
 
-    def _on_custom_changed(self, cfg: RGBModeConfig) -> None:
-        self.controller.config.color_mapping.custom = cfg
-        self.controller.apply_config_changes()
+    def _refresh_band_status(self) -> None:
+        """The line at the bottom of the Band Colors page: how active each band is, and the chord turn."""
+        engine = self.controller.engine
+        if self.controller.config.color_mapping.mode != "band_colors":
+            self.band_status_label.setText("")
+            return
+        if not engine.running:
+            self.band_status_label.setText("Now: - (runs while the visualizer is on)")
+            return
+        state = engine.latest_band_colors
+        bands = "  ".join(f"{band} {value:.0%}" for band, value in state.activities.items())
+        text = f"Now: {bands}"
+        if self.controller.config.color_mapping.band_colors.chord_turn_deg > 0.0:
+            text += f"  |  chord turn {state.turn:.0f} deg"
+            pitch = engine.latest_pitch
+            if pitch is not None:
+                text += f" (note {pitch.note_name} in {pitch.key_name}, pitch share {engine.pitch_weight:.0%})"
+        self.band_status_label.setText(text)
 
     def _on_hsv_changed(self, *_args) -> None:
         hsv = self.controller.config.color_mapping.hsv

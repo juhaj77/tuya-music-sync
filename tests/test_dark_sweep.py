@@ -76,13 +76,16 @@ def test_dark_sweep_is_placed_by_its_own_settings():
     gap = PulseSequencer(_dark_cfg(dark_sweep_min_gap_bars=3), random.Random(1))
     starts = [e.step for e in _kind(_run_sequencer(gap, 13), "dark_sweep")]
     assert all(b - a >= 3 * 16 for a, b in zip(starts, starts[1:]))
-    # Not in Beat Sync White's dark-only sequencing: it dims the RGB colour.
-    seq = PulseSequencer(_dark_cfg(), random.Random(1))
+    # In Beat Sync White's dark-only sequencing too (it dims the white there) - but no color sweep.
+    seq = PulseSequencer(_dark_cfg(
+        color_sweep_enabled=True, color_sweep_placement="beats", color_sweep_chance=1.0, color_sweep_min_gap_bars=1,
+        color_sweep_min_level="calm",
+    ), random.Random(1))
     events, pos = [], 0.1
     while pos < 36.0:
         events += seq.tick(pos, 0.5, pos, 0.03, 3, 4, dark_only=True)
         pos += 0.125
-    assert not _kind(events, "dark_sweep")
+    assert len(_kind(events, "dark_sweep")) >= 7 and not _kind(events, "sweep")
 
 
 def test_color_and_dark_sweeps_never_run_at_once():
@@ -238,6 +241,43 @@ def test_test_button_plays_four_dark_sweeps_even_without_the_sequencer(monkeypat
     assert engine._dark_sweep is None
     engine.running = False
     assert engine.trigger_dark_sweep_test().startswith("Not played: start the visualizer")
+
+
+def test_dark_sweep_dims_beat_sync_whites_white(monkeypatch):
+    engine, clock = _make_dark_engine(monkeypatch)
+    engine.config.color_mapping.mode = "beat_sync_white"
+    bsw = engine.config.color_mapping.beat_sync_white
+    bsw.flash_brightness = bsw.sustain_brightness = 0.8  # steady white: a dim lamp is the sweep
+    order, checked = [], 0
+    for _ in range(int(20.0 / TICK)):
+        engine.tick_visual()
+        targets = engine.latest_lamp_white_targets
+        assert set(targets) == {"a", "b", "c", "d"} and not engine.latest_lamp_white_targets["a"].under
+        dark = sorted(lamp for lamp, target in targets.items() if target.brightness < 0.4)
+        for lamp in dark:
+            if not order or order[-1] != lamp:
+                order.append(lamp)
+            checked += 1
+            assert engine.latest_lamp_colors[lamp].to_hsv()[2] < 0.4  # the preview swatch too
+        clock.now += TICK
+    assert checked and order[:8] == ["a", "b", "c", "d"] * 2
+
+
+def test_test_buttons_in_beat_sync_white(monkeypatch):
+    engine, clock = _make_dark_engine(monkeypatch, dark_sweep_enabled=False)
+    engine.config.color_mapping.mode = "beat_sync_white"
+    engine.config.color_mapping.beat_sync_white.sustain_brightness = 0.8
+    for _ in range(int(1.0 / TICK)):
+        engine.tick_visual()
+        clock.now += TICK
+    assert engine.trigger_color_sweep_test().startswith("Not played: Beat Sync White")
+    assert engine.trigger_dark_sweep_test().startswith("Playing the dark sweep 4 times")
+    dimmed = set()
+    for _ in range(int(3.0 / TICK)):
+        engine.tick_visual()
+        dimmed |= {lamp for lamp, t in engine.latest_lamp_white_targets.items() if t.brightness < 0.4}
+        clock.now += TICK
+    assert dimmed == {"a", "b", "c", "d"}
 
 
 # -- the dip's saturation ------------------------------------------------------------------------

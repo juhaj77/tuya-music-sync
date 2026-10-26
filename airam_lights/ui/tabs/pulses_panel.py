@@ -55,9 +55,8 @@ MODE_NAMES = {
     "beat_sync": "Beat Sync",
     "beat_sync_white": "Beat Sync White",
     "peak_flash": "Peak Flash",
-    "rgb_freq": "RGB Frequency",
     "hsv_music": "HSV Music",
-    "custom": "Custom",
+    "band_colors": "Band Colors",
 }
 
 
@@ -156,7 +155,7 @@ class PulsesPanel(QWidget):
             "White pulses", "white", checkable=True, checked=bs.white_pulse_enabled,
             tooltip="A brief flash of the lamp's own white LEDs - e.g. a hi-hat/cymbal accent. In Beat Sync on "
             "a subset of beats (probability and trigger below), or wherever the Pulse sequencer puts them; "
-            "in Peak Flash, RGB Frequency, HSV Music and Custom only from the Pulse sequencer; never in "
+            "in Peak Flash, HSV Music and Band Colors only from the Pulse sequencer; never in "
             "Beat Sync White, which is white already. Always the real white LEDs, never white mixed from "
             "RGB, so the colored LEDs keep all their output for color. The look below is the same in every "
             "mode. Independent of dark pulses - both, either, or neither can happen on a hit.",
@@ -309,7 +308,7 @@ class PulsesPanel(QWidget):
         dark, white = bs.dark_pulse_enabled, bs.white_pulse_enabled
         temp_mode = bs.white_pulse_temp_mode
         legacy = cfg.network.lamp_transitions == "legacy"
-        dark_only_reason = f"{name} takes only the dark pulses from the sequencer."
+        dark_only_reason = f"{name} takes only the dark pulses and dark sweeps from the sequencer."
 
         for widget in (self.beat_dark_trigger_row, self.beat_dark_prob_slider, self.beat_white_target_box,
                        self.beat_white_trigger_row, self.beat_white_pulse_prob_slider):
@@ -378,7 +377,8 @@ class PulsesPanel(QWidget):
                 set_active([self.beat_dark_desaturate_slider], False, "Not used in Beat Sync White - white has no saturation.")
             show_note(self.beat_dark_note, dark_note)
             if dark_only:
-                white_off = "Not used in Beat Sync White - it's white already, and takes only the sequencer's dark pulses."
+                white_off = ("Not used in Beat Sync White - it's white already, and takes only the sequencer's dark "
+                             "pulses and dark sweeps.")
                 set_active([self.beat_white_pulse_enabled_checkbox] + white_look, False, white_off)
                 show_note(self.beat_white_note, "Not used in Beat Sync White (it's white already).")
                 white_used = False
@@ -418,7 +418,7 @@ class PulsesPanel(QWidget):
         if not can_run:
             show_note(self.seq_note, seq_off)
         elif dark_only and sq.enabled:
-            show_note(self.seq_note, "Beat Sync White takes only its dark pulses.")
+            show_note(self.seq_note, "Beat Sync White takes only its dark pulses and dark sweeps.")
         else:
             show_note(self.seq_note, "")
         white_controls = [
@@ -484,17 +484,22 @@ class PulsesPanel(QWidget):
             [self.seq_sweep_hue_slider], extras and sq.color_sweep_enabled and sq.color_sweep_color == "custom",
             extras_off or ("Color sweep is off." if not sq.color_sweep_enabled else "Sweep colour is 'dynamic'."),
         )
-        # Dark sweep: dims the RGB colour, so any lamp transitions do too.
-        set_active([self.seq_dark_sweep_checkbox], extras, extras_off)
+        # Dark sweep: dims the light, so any lamp transitions do too - Beat Sync White's white as well.
+        set_active([self.seq_dark_sweep_checkbox], sequencing, seq_off)
         set_active(
-            [self.seq_dark_sweep_depth_slider, self.seq_dark_sweep_desaturate_slider,
+            [self.seq_dark_sweep_depth_slider,
              self.seq_dark_sweep_attack_slider, self.seq_dark_sweep_release_slider,
              self.seq_dark_sweep_length_combo, self.seq_dark_sweep_rotators_spin, self.seq_dark_sweep_width_spin,
              self.seq_dark_sweep_direction_combo, self.seq_dark_sweep_placement_combo,
              self.seq_dark_sweep_level_combo, self.seq_dark_sweep_chance_slider, self.seq_dark_sweep_gap_slider,
              self.seq_dark_sweep_test_button],
-            extras and sq.dark_sweep_enabled,
-            extras_off or "Dark sweep is off.",
+            sequencing and sq.dark_sweep_enabled,
+            seq_off or "Dark sweep is off.",
+        )
+        set_active(
+            [self.seq_dark_sweep_desaturate_slider], sequencing and sq.dark_sweep_enabled and not dark_only,
+            seq_off or ("Dark sweep is off." if not sq.dark_sweep_enabled else
+                        "Not used in Beat Sync White - white has no saturation."),
         )
         if extras and not direct:
             show_note(self.seq_strobe_note, "The strobe needs Lamp transitions 'direct' or 'smooth' (Color Mapping "
@@ -550,9 +555,9 @@ class PulsesPanel(QWidget):
             "Pulse sequencer", key="beat/sequencer", checkable=True, checked=sq.enabled,
             tooltip="White and dark pulses placed on musical positions - rhythm patterns, a white walk "
             "round the lamp groups, phrase fills and breaths, strobes and colour and dark sweeps - in every colour "
-            "mode, with the same settings (Beat Sync White takes only the dark pulses). Follows the shared "
-            "beat clock: needs Lock to tempo, and in Beat Sync / Beat Sync White 'follow the shared clock' "
-            "(Rhythm box).",
+            "mode, with the same settings (Beat Sync White takes only the dark pulses and dark sweeps). Follows "
+            "the shared beat clock: needs Lock to tempo, and in Beat Sync / Beat Sync White 'follow the shared "
+            "clock' (Rhythm box).",
         )
         layout = box.content_layout()
         intro = QLabel(
@@ -561,8 +566,9 @@ class PulsesPanel(QWidget):
             "(the Group Switch groups, 'Effect group' on the Devices & Setup tab), phrase fills and a dark "
             "breath before each new phrase, and busier patterns when the music gets louder. The same in every "
             "colour mode: these settings and the pulses' look (Dark pulses and White pulses above) are "
-            "shared, so trying another mode keeps them - Beat Sync White takes only the dark pulses. Follows "
-            "the shared beat clock (Rhythm box): needs Lock to tempo, and in Beat Sync and Beat Sync White "
+            "shared, so trying another mode keeps them - Beat Sync White takes only the dark pulses and dark "
+            "sweeps. Follows the shared beat clock (Rhythm box): needs Lock to tempo, and in Beat Sync and "
+            "Beat Sync White "
             "'follow the shared clock'. Until the clock has locked, Beat Sync rolls its per-beat pulses "
             "(probability above) and the other modes have none."
         )
@@ -945,7 +951,8 @@ class PulsesPanel(QWidget):
             "toward black in turn, like a dark pulse passing by - easier to see than a colour. On top of the "
             "show: a white flash on a lamp it darkens dims with it. Placed on the beat grid like the color "
             "sweep, with its own settings below; the two never run at the same time (they share the info "
-            "panel's Sweep lane, where a dark sweep is a black bar), and neither runs during the strobe.",
+            "panel's Sweep lane, where a dark sweep is a black bar), and neither runs during the strobe. "
+            "Also in Beat Sync White, where it dims the white.",
         )
         parent_layout.addWidget(section)
         layout = section.content_layout()

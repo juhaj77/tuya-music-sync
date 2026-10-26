@@ -64,29 +64,23 @@ def test_quick_slider_and_color_mapping_slider_follow_each_other(window):
     assert bs.hue_attack_ms == pytest.approx(222.0)
 
 
-def test_smoothing_is_on_each_level_mode_page_and_shared(window):
+def test_hsv_smoothing_and_band_colors_settings_follow_each_other(window):
     vis, cmt = window.tabs.widget(0), window.tabs.widget(2)
-    sm = window.controller.config.color_mapping.smoothing
+    cm = window.controller.config.color_mapping
 
-    cmt.rgb_attack_slider._spin.setValue(150.0)
-    assert sm.attack_ms == pytest.approx(150.0)
-    for slider in (cmt.custom_attack_slider, cmt.hsv_attack_slider,
-                   vis.quick_sliders[("rgb_freq", "color_mapping.smoothing.attack_ms")],
-                   vis.quick_sliders[("hsv_music", "color_mapping.smoothing.attack_ms")]):
-        assert slider.value() == pytest.approx(150.0)
-
-    vis.quick_sliders[("custom", "color_mapping.smoothing.release_ms")]._spin.setValue(700.0)
-    assert sm.release_ms == pytest.approx(700.0)
+    cmt.hsv_attack_slider._spin.setValue(150.0)
+    assert cm.smoothing.attack_ms == pytest.approx(150.0)
+    assert vis.quick_sliders[("hsv_music", "color_mapping.smoothing.attack_ms")].value() == pytest.approx(150.0)
+    vis.quick_sliders[("hsv_music", "color_mapping.smoothing.release_ms")]._spin.setValue(700.0)
+    assert cm.smoothing.release_ms == pytest.approx(700.0)
     assert cmt.hsv_release_slider.value() == pytest.approx(700.0)
 
-
-def test_sensitivity_is_per_mode_now(window):
-    vis = window.tabs.widget(0)
-    cm = window.controller.config.color_mapping
-    before = cm.hsv.sensitivity
-    vis.quick_sliders[("rgb_freq", "color_mapping.rgb.sensitivity")]._spin.setValue(2.5)
-    assert cm.rgb.sensitivity == pytest.approx(2.5)
-    assert cm.hsv.sensitivity == before
+    vis.quick_sliders[("band_colors", "color_mapping.band_colors.focus")]._spin.setValue(0.9)
+    assert cm.band_colors.focus == pytest.approx(0.9) and cmt.band_focus_slider.value() == pytest.approx(0.9)
+    cmt.band_chord_turn_slider._spin.setValue(200.0)
+    assert cm.band_colors.chord_turn_deg == pytest.approx(200.0)
+    assert vis.quick_sliders[("band_colors", "color_mapping.band_colors.chord_turn_deg")].value() == pytest.approx(200.0)
+    assert cm.band_colors.release_ms != cm.smoothing.release_ms  # Band Colors has its own smoothing
 
 
 def test_more_settings_link_opens_the_mode_page(window):
@@ -136,7 +130,7 @@ def test_the_unused_sensitivity_is_greyed_out(window):
     assert own.isEnabled()
 
     config.chase.enabled = config.group_switch.enabled = config.sequencer.enabled = False
-    vis._mode_buttons["rgb_freq"].setChecked(True)  # nothing follows the clock now
+    vis._mode_buttons["band_colors"].setChecked(True)  # nothing follows the clock now
     assert not vis.clock_sensitivity_slider.isEnabled()
     config.chase.enabled, config.chase.sync_mode = True, "clock"
     vis.hide(); vis.show()  # (coming back to the tab after changing it elsewhere)
