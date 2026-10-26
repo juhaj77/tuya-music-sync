@@ -277,7 +277,7 @@ Five tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Global Eff
 
 ## Visualizer tab
 
-![Visualizer tab: the spectrum, the mode, Stop Music Visualization and Beat Sync's Quick Controls, with the info panel at the bottom](Visualizer2.png)
+![Visualizer tab: the spectrum, the mode, Stop Music Visualization and Beat Sync's Quick Controls, with the info panel at the bottom](Visualizer.png)
 
 From top to bottom:
 
