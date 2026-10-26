@@ -1,6 +1,7 @@
 """The app's look: one dark theme for both apps, applied once to the
 QApplication (apply_theme) - a palette for what Qt draws itself and a style
-sheet for the controls. Settings sit in rounded cards on a near-black page,
+sheet for the controls. Settings sit in rounded cards on a near-black page
+(grouped into tinted blocks where a page has a lot on it, widgets/block.py),
 blue accents mark what's active, explanatory notes are muted, and section
 titles are small, spaced capitals (see widgets/section.py).
 
@@ -32,6 +33,16 @@ TITLE = "#57b5ff"  # section and card titles
 OK = "#3ecf5e"
 WARN = "#e0a84a"
 ERR = "#e05a4f"
+
+# The tinted blocks a page groups its sections in (widgets/block.py) - the
+# Global Effects tab's three: name -> (background, border, title, the cards
+# in it, the cards nested in those).
+BLOCK_TINTS = {
+    "clock": ("#0f1d1e", "#24484a", "#4fd1c0", "#132527", "#182d2f"),  # teal: the beat clock
+    "overlays": ("#0e1729", "#263d68", "#6aa6ff", "#131e33", "#18253c"),  # blue: Chase and Group Switch
+    # violet, as the dark pulses on the info panel's timeline
+    "pulses": ("#17132a", "#3d3268", "#a390ff", "#1c1731", "#221c3a"),
+}
 
 FONT_FAMILY = "Segoe UI"
 FONT_SIZE_PT = 10
@@ -82,6 +93,18 @@ def _palette() -> QPalette:
     return p
 
 
+def _block_styles() -> str:
+    """Each block tint: its background and border, its title, and its section cards."""
+    rules = []
+    for tint, (background, border, title, card, nested) in BLOCK_TINTS.items():
+        block = f'QFrame[role="block"][tint="{tint}"]'
+        rules.append(f"{block} {{ background-color: {background}; border: 1px solid {border}; }}")
+        rules.append(f'{block} QFrame[role="section"] {{ background-color: {card}; border-color: {border}; }}')
+        rules.append(f'{block} QFrame[role="section"][nested="true"] {{ background-color: {nested}; }}')
+        rules.append(f'QLabel[role="blockTitle"][tint="{tint}"] {{ color: {title}; }}')
+    return "\n".join(rules)
+
+
 def stylesheet() -> str:
     check, down, up = asset_url("check.svg"), asset_url("arrow-down.svg"), asset_url("arrow-up.svg")
     return f"""
@@ -122,6 +145,8 @@ QLabel[role="sectionTitle"] {{ color: {TITLE}; }}
 QLabel[role="sectionTitle"][off="true"] {{ color: {MUTED}; }}
 QLabel[role="sectionTitle"]:disabled {{ color: {DIM}; }}
 QLabel[role="note"] {{ color: {WARN}; font-style: italic; }}
+QFrame[role="block"] {{ border-radius: 10px; }}
+{_block_styles()}
 QFrame[role="panel"], QFrame[frameShape="6"] {{
     background-color: {CARD}; border: 1px solid {BORDER_SOFT}; border-radius: 6px;
 }}

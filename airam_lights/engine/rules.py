@@ -3,7 +3,7 @@ follows and the UI greys settings out by, so a setting is shown as unused
 exactly when the engine ignores it.
 
 Pure functions of the config, no Qt and no audio: the Visualizer tab's Quick
-Controls and the Color Mapping tab import them as well as the engine.
+Controls and the settings tabs import them as well as the engine.
 """
 from __future__ import annotations
 

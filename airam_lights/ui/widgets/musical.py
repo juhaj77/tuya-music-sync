@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Iterable, List, Sequence, Tuple
 
-from PySide6.QtWidgets import QComboBox, QLabel, QWidget
+from PySide6.QtWidgets import QBoxLayout, QComboBox, QHBoxLayout, QLabel, QWidget
 
 Choice = Tuple[int, str]
 
@@ -59,6 +59,20 @@ def choice_combo(choices: Sequence[Choice], value: int, tooltip: str = "") -> QC
     combo.setCurrentIndex([v for v, _ in choices].index(nearest_choice(choices, value)))
     if tooltip:
         combo.setToolTip(tooltip)
+    return combo
+
+
+def labeled_combo(layout: QBoxLayout, label: str, items: Iterable[str], value: str, tooltip: str) -> QComboBox:
+    """A row of `label` and a combo of `items` showing `value`, added to `layout`."""
+    row = QHBoxLayout()
+    row.addWidget(QLabel(label))
+    combo = QComboBox()
+    combo.addItems(list(items))
+    combo.setCurrentText(value)
+    combo.setToolTip(tooltip)
+    row.addWidget(combo)
+    row.addStretch(1)
+    layout.addLayout(row)
     return combo
 
 

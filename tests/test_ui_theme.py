@@ -116,22 +116,39 @@ def test_main_window_builds_on_the_sections(qapp, settings_dir):
     try:
         window.show()
         qapp.processEvents()
-        tab = window.tabs.widget(2)  # Color Mapping
-        sections = tab.findChildren(CollapsibleSection)
-        titles = {s._title.text() for s in sections}
-        assert {"Beat detection", "Colour on the beat", "Between beats", "Dark pulses", "White pulses",
-                "Pulse sequencer", "Strobe", "Flash strobe", "Color sweep", "Dark sweep", "Global", "Presets"} <= titles
+        assert window.tabs.tabText(3) == "Global Effects"
+        color = window.tabs.widget(2)  # Color Mapping: each mode's own settings
+        titles = {s._title.text() for s in color.findChildren(CollapsibleSection)}
+        assert {"Beat detection", "Colour on the beat", "Between beats", "Global", "Presets"} <= titles
+        assert not {"Rhythm · shared beat clock", "Dark pulses", "Pulse sequencer"} & titles
+        effects = window.tabs.widget(3)  # Global Effects: what every mode shares, in three blocks
+        blocks = [effects.clock_block, effects.overlays_block, effects.pulses_block]
+        for block, expected in zip(blocks, (
+            {"Rhythm · shared beat clock"},
+            {"Chase · rotating light", "Group Switch · one group at a time"},
+            {"Dark pulses", "White pulses", "Pulse sequencer", "Strobe", "Flash strobe", "Color sweep", "Dark sweep"},
+        )):
+            assert {s._title.text() for s in block.findChildren(CollapsibleSection)} == expected
+        layout = effects.clock_block.parentWidget().layout()
+        assert [layout.indexOf(b) for b in blocks] == [0, 1, 2]  # the beat clock first
+        # Each block has a tint of its own.
+        backgrounds = {theme.BLOCK_TINTS[b.property("tint")][0] for b in blocks}
+        assert len(backgrounds) == 3
+        for block in blocks:
+            assert block.grab().toImage().pixelColor(block.width() // 2, 3).name() == theme.BLOCK_TINTS[
+                block.property("tint")][0]
         # The feature switches are the sections' toggles, and still drive the config.
+        pulses = effects.pulses
         sq = window.controller.config.sequencer
-        tab.seq_sweep_checkbox.setChecked(not sq.color_sweep_enabled)
-        assert sq.color_sweep_enabled == tab.seq_sweep_checkbox.isChecked()
-        tab.seq_dark_sweep_checkbox.setChecked(not sq.dark_sweep_enabled)
-        assert sq.dark_sweep_enabled == tab.seq_dark_sweep_checkbox.isChecked()
-        tab.seq_dark_sweep_desaturate_slider._spin.setValue(0.8)
+        pulses.seq_sweep_checkbox.setChecked(not sq.color_sweep_enabled)
+        assert sq.color_sweep_enabled == pulses.seq_sweep_checkbox.isChecked()
+        pulses.seq_dark_sweep_checkbox.setChecked(not sq.dark_sweep_enabled)
+        assert sq.dark_sweep_enabled == pulses.seq_dark_sweep_checkbox.isChecked()
+        pulses.seq_dark_sweep_desaturate_slider._spin.setValue(0.8)
         assert sq.dark_sweep_desaturate == pytest.approx(0.8)
-        tab.beat_dark_desaturate_slider._spin.setValue(0.4)
+        pulses.beat_dark_desaturate_slider._spin.setValue(0.4)
         assert window.controller.config.color_mapping.beat_sync.dark_pulse_desaturate == pytest.approx(0.4)
-        overlays = window.tabs.widget(3)
+        overlays = effects.overlays
         assert overlays.chase_enabled_checkbox is overlays.chase_box.toggle
         overlays.chase_enabled_checkbox.setChecked(False)
         assert window.controller.config.chase.enabled is False

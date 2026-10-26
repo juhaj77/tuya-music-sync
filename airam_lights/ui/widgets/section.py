@@ -130,7 +130,9 @@ class CollapsibleSection(QFrame):
         self._content_layout.setContentsMargins(14, 2, 12, 12)
         self._content_layout.setSpacing(6)
         root.addWidget(self._content)
-        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        # Not Fixed: the height has to follow the word-wrapped notes' height for
+        # the width - a fixed one clipped their last lines in a narrow window.
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
 
         if tooltip:
             if self.toggle is not None:

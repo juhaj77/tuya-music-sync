@@ -21,15 +21,16 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
   - [The window](#the-window) - tabs, collapsible sections, greyed-out settings
   - [Visualizer tab](#visualizer-tab) - audio, mode, Quick Controls
   - [Devices & Setup tab](#devices--setup-tab) - lamps and their place in the effects
-  - [Color Mapping tab](#color-mapping-tab)
-    - [Rhythm - the shared beat clock](#rhythm---the-shared-beat-clock)
+  - [Color Mapping tab](#color-mapping-tab) - each colour mode's own settings
     - [Beat Sync](#beat-sync) - beat detection, colour, between beats, per-beat pulses
-    - [Dark and white pulses](#dark-and-white-pulses) - the same in every mode
-    - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep), [dark sweep](#dark-sweep)
     - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [RGB Frequency, Custom and HSV Music](#rgb-frequency-custom-and-hsv-music)
     - [Global settings](#global-settings) - lamp transitions, command rate
     - [Presets and built-in looks](#presets-and-built-in-looks)
-  - [Chase & Group Switch tab](#chase--group-switch-tab) - [Chase](#chase) · [Group Switch](#group-switch)
+  - [Global Effects tab](#global-effects-tab) - what every colour mode shares
+    - [Rhythm - the shared beat clock](#rhythm---the-shared-beat-clock)
+    - [Chase & Group Switch](#chase--group-switch) - [Chase](#chase) · [Group Switch](#group-switch)
+    - [Dark and white pulses](#dark-and-white-pulses) - the same in every mode
+    - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep), [dark sweep](#dark-sweep)
   - [Info panel](#info-panel) · [Diagnostics tab](#diagnostics-tab)
   - [Manual control app](#manual-control-app) - colours, white, chase and ambient scenes without music
   - [Settings and log files](#settings-and-log-files)
@@ -56,14 +57,15 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
    for several lamps: Chase walks the Chase order, Group Switch and the white flashes walk
    the Effect groups.
    > **Small setup** (one lamp, or all lamps in one spot)? Switch **Group Switch** off,
-   > give the lamps at least a Chase order or switch **Chase** off too (Chase & Group
-   > Switch tab), and set the pulse sequencer's *Walk through* to `chase_order` - without
-   > an order every white flash lands on every lamp at once.
+   > give the lamps at least a Chase order or switch **Chase** off too (Global Effects
+   > tab), and set the pulse sequencer's *Walk through* to `chase_order` - without an
+   > order every white flash lands on every lamp at once.
 5. **Play.** On the **Visualizer** tab keep the source on *Loopback*, play some music,
    check the level meter moves, and press **Start Music Visualization**.
 6. **Tune.** The **Quick Controls** on the Visualizer tab hold the most useful settings of the
-   selected mode. Everything else is on the Color Mapping and Chase & Group Switch tabs,
-   in sections that start closed - open only the feature you want to change.
+   selected mode. Everything else is on the Color Mapping (each mode's own settings) and
+   Global Effects (what every mode shares) tabs, in sections that start closed - open only
+   the feature you want to change.
    **Presets -> Built-in look** offers ready-made looks.
 
 **What a fresh install plays:** *Beat Sync* on the shared beat clock, the colour stepping
@@ -259,9 +261,8 @@ red -> green -> blue -> white.
 
 ## The window
 
-Five tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Chase & Group
-Switch**, **Diagnostics** - and the [info panel](#info-panel) under them, which stays put on
-every tab.
+Five tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Global Effects**,
+**Diagnostics** - and the [info panel](#info-panel) under them, which stays put on every tab.
 
 - **Sections.** Features are collapsible sections: a header with the feature's name and,
   if it can be switched on or off, its switch. Click the name (or the chevron) to open it.
@@ -300,14 +301,15 @@ plus a few of the selected mode's own settings, which change with the mode:
 | Peak Flash | Peak sensitivity, Flash decay, Whiteness amount, Color richness (hue flow), Baseline brightness min |
 | RGB Frequency / HSV Music / Custom | Level sensitivity (gain), Attack, Release |
 
-Each is the same setting as in the Color Mapping tab - change it in either place and the
-other follows. **More ... settings in Color Mapping** opens the mode's page there.
+Each is the same setting as in the Color Mapping tab (*Beat clock sensitivity*: the Global
+Effects tab) - change it in either place and the other follows. **More ... settings in
+Color Mapping** opens the mode's page there.
 
 **Four sensitivities** - they are different things:
 
 | Setting | What it sets | Used when |
 |---|---|---|
-| **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Color Mapping -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
+| **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Global Effects -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
 | **Beat detector sensitivity** | Beat Sync's / Beat Sync White's own beat detector | only when that mode does *not* follow the clock (greyed out otherwise) |
 | **Peak sensitivity** | Peak Flash's peak detector | Peak Flash (it never uses the clock) |
 | **Level sensitivity (gain)** | how strongly the sound level turns into light | RGB Frequency, Custom, HSV Music - each its own |
@@ -350,46 +352,15 @@ A lamp that stops answering is handled automatically - see
 
 ## Color Mapping tab
 
-![Color Mapping tab: the RGB Frequency page with its three channels, the level smoothing and the Dark pulses, White pulses and Pulse sequencer sections](ColorMapping.png)
+![Color Mapping tab: the RGB Frequency page with its three channels and the level smoothing](ColorMapping.png)
 
-From top to bottom: the **Rhythm** section (the shared beat clock), a page per colour mode -
-each ending with the shared [Dark pulses, White pulses](#dark-and-white-pulses) and
-[Pulse sequencer](#pulse-sequencer) sections - the **Global** section and **Presets**.
+Each colour mode's own settings: a page per mode, then the **Global** section and
+**Presets**. What every mode shares - the shared beat clock, Chase and Group Switch, the
+pulses and the pulse sequencer - is on the [Global Effects tab](#global-effects-tab).
 
-In the picture: the [RGB Frequency](#rgb-frequency-custom-and-hsv-music) page, with the
-Rhythm section closed above the mode pages. The page ends with the three pulse sections,
-all switched on and closed. The page shown doesn't have to be the running mode (the info
-panel at the bottom says *mode HSV Music*): the pulse settings are the same on every page.
-
-### Rhythm - the shared beat clock
-
-One beat detector that every layer can follow, so the flash, the colour changes, the pulse
-sequencer, Chase and Group Switch move on the same beats instead of each reacting to
-different hits (`dsp/beat_clock.py`).
-
-- **Beat Sync (and Beat Sync White) follow the shared clock** - on in a fresh install. Their
-  own beat detection settings are then unused (greyed out), their pulses can be triggered
-  on accents or bar starts, and *Change hue* / *Change temperature* count from the bar
-  start. The pulse sequencer needs it in these two modes (the other modes don't).
-- **Beat detection band** - keep it on the kick drum (40-150 Hz): the cleanest beat.
-- **Beat clock sensitivity** - how far above the recent average a kick must rise to count.
-  Around 1.08-1.15 suits most music; once the tempo is locked, missed kicks are filled in
-  anyway. *Min interval* and *Min energy floor* fine-tune it.
-- **Lock to tempo** - once a steady tempo is found, only kicks near the expected beat count
-  (off-beat hi-hats, snares and vocals are ignored) and a too-quiet kick is filled in.
-- **Lead time** - once locked, each beat is sent this much early to cancel the Wi-Fi and
-  bulb delay (~100-150 ms). Raise it if flashes look late, lower it if early.
-- **Beats per bar** (4; 3 for waltz time) - the bar start lands on the beat that usually hits
-  hardest. **Accent share** - what share of beats count as accents (0.25 = the hardest
-  quarter).
-- **Keep going (bars)** - when the beat gets lost while the music plays on (a breakdown),
-  the lights keep moving on the last tempo for up to this many bars.
-- **No beat? Follow the notes** - for music without a steady kick (classical, acoustic,
-  ambient): the clock follows the tempo of the notes, or failing that a free pace that
-  speeds up as the music swells. A clear beat takes over again by itself.
-
-Rhythm choices elsewhere (*every 2 beats*, *every bar*, phrases of 1/2/4/8/16 bars) only
-offer values that line up with the bar, so nothing drifts against the music.
+In the picture: the [RGB Frequency](#rgb-frequency-custom-and-hsv-music) page. The page
+shown doesn't have to be the running mode (the info panel at the bottom says *mode HSV
+Music*).
 
 ### Beat Sync
 
@@ -437,7 +408,8 @@ decay* (how slowly the flash fades back to Sustain brightness).
   capped by *Lamp command rate*.
 
 **Per-beat pulses** - Beat Sync can also roll [dark and white pulses](#dark-and-white-pulses)
-on its own beats, without the sequencer. In those two sections, on Beat Sync's page only:
+on its own beats, without the sequencer. In those two sections (Global Effects tab), shown
+only while Beat Sync is the mode:
 
 - *Dark / White pulse probability* - the chance per beat.
 - **Dark / White pulse on** - `random` (any beat), `accent` (the hardest hits) or `downbeat`
@@ -450,11 +422,216 @@ A dark pulse rolled on a beat starts on it - the app can't see a beat coming - a
 comes when the dip ends. With the [pulse sequencer](#pulse-sequencer) running, the sequencer
 places the pulses instead and these settings are greyed out.
 
+### Beat Sync White
+
+Beat Sync's flash-and-decay, but on the bulb's **white** LEDs: brightness and colour
+temperature instead of colour - the lamps stay white and move warm <-> cool on the beat.
+
+- **Temperature mode** - `random` picks a new temperature at least *Min temp jump* away;
+  `alternate` ping-pongs between *Temp range min (warm)* and *max (cool)*.
+- **Change temperature** (every beat, every 2 beats, every bar...) - every beat still
+  flashes, but the temperature changes only on these beats, so it doesn't flicker warm-cool
+  on every hit. With the shared clock and *Lock to tempo* it's counted from the bar start,
+  so the change lands on the strong beats: every 2 beats = beats 1 and 3, every bar = the
+  downbeat. *Temp snap speed* - how fast it moves to the new temperature, toward warm as
+  fast as toward cool.
+- **Dark pulses** - with the [pulse sequencer](#pulse-sequencer) running it takes the
+  sequencer's dark pulses (only those), shaped by the shared
+  [Dark pulses](#dark-and-white-pulses) section; otherwise its own per-beat ones (*Dark
+  pulse probability*, *duration*, *depth*).
+
+Chase and Group Switch don't run in this mode (a hue overlay has nothing to work on in
+white). The white control path is the least verified part against real hardware - see
+[what's confirmed](#local-control-whats-confirmed).
+
+### Peak Flash
+
+A softer, continuous cousin of Beat Sync:
+
+- Reacts to peaks across the **whole spectrum** (kicks, snares, vocal hits), with *Peak
+  sensitivity*.
+- Blends toward **white** with the treble (cymbals, hi-hats, sibilance; *Whiteness amount*,
+  *White attack/release*), back to full colour when it drops.
+- Brightness **tracks the overall loudness** between *Baseline brightness min/max*, with a
+  *Flash brightness* boost on each peak that decays (*Flash attack*, *Flash decay*).
+- The hue never snaps: it **flows** - a slow rotation (`drift`, *Drift speed*) or following
+  the spectral centroid (`centroid`). **Color richness (hue flow)** (up to ~15 s) sets how
+  slowly: high values unfold a slow, rich colour story over a song section.
+
+With the [pulse sequencer](#pulse-sequencer) on, its pulses play on top - as in the
+continuous modes below.
+
+### RGB Frequency, Custom and HSV Music
+
+The continuous modes - the light follows the sound level rather than beats:
+
+- **RGB Frequency** - bass drives red, mids green, treble blue. Each channel has its
+  frequency range, *Gain*, *Min/Max level* and *Gamma*.
+- **Custom** - the same mechanism with your own frequency ranges.
+- **HSV Music** - hue from the spectral centroid (*Hue @ low freq* .. *Hue @ high freq*),
+  brightness from the overall energy (*Brightness min/max*), saturation from spectral
+  contrast.
+
+Each has its own *Level sensitivity (gain)*. **Attack** / **Release** - the level
+smoothing, one setting shared by the three modes: how fast the light follows rising /
+falling sound. The Global *Response curve* applies to these modes only. With the
+[pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and colour
+sweeps play on top of the colour (the [Color Mapping picture](#color-mapping-tab) shows
+the RGB Frequency page).
+
+### Global settings
+
+- **Lamp transitions** - how the bulbs take a change:
+  - `direct` (default) - the real-time control datapoint (DP 28), no fade: crisp flashes,
+    beats and white pulses; colour and white can show at once.
+  - `smooth` (experimental) - DP 28, chosen per command: big changes (a beat's flash, a white
+    flash, the strobe) land instantly, small fade and glide steps use the bulb's own short
+    fade - smoother, a little slower.
+  - `gradient` - DP 28 with the bulb's short fade (~0.25 s) on every change.
+  - `legacy` - the persistent colour datapoint (DP 24): the bulb fades every change over
+    ~0.7 s, so at dance tempo the light never arrives before the next beat. Only for bulbs
+    that don't change colour with the others; bulbs without the v2 datapoint layout always
+    use it.
+- **Lamp command rate** - commands per second per lamp (up to 60; 50 in a fresh install).
+  With `direct` every command shows as a step, so smooth fades and glides want a high rate.
+- **Min change threshold** - skips sends that would barely change the colour.
+- **Response curve** (`linear` / `log` / `exp2`) - reshapes the level before it becomes light,
+  in RGB Frequency, Custom and HSV Music only: `log` brings out quiet detail, `exp2` the
+  opposite.
+- **Invert brightness** - quiet parts bright, loud parts dark, in every mode.
+
+Colours go out at the datapoint's own resolution (hue in degrees, saturation and
+brightness in 0.1 % steps), not rounded through 8-bit RGB.
+
+### Presets and built-in looks
+
+- **Built-in look** + **Apply** - sets the shared clock, Beat Sync, the pulse sequencer, Chase and Group
+  Switch together: *Groove - one color per bar*, *Calm - slow color flow*, *Club - punchy*,
+  *Dance - white across groups*, *Chase focus*, *Group focus*. Your lamp setup, Chase width
+  and intensity, Group Switch intensity, beat detection band and sensitivity, lead time and
+  true-white brightness and cool ratio are left as they are.
+- **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
+  Group Switch and the lamps' Chase order. Loading one updates every setting at once.
+
+## Global Effects tab
+
+What every colour mode shares - one set of settings, so trying another mode keeps all of it -
+in three tinted blocks:
+
+1. **Beat clock** (teal) - the [Rhythm](#rhythm---the-shared-beat-clock) section, the shared
+   beat clock. First, since everything else on the tab can follow it.
+2. **Chase & Group Switch** (blue) - the two [overlays](#chase--group-switch) on top of the
+   colour mode.
+3. **Pulses & sequencer** (violet) - the [Dark and White pulses](#dark-and-white-pulses) and
+   the [Pulse sequencer](#pulse-sequencer) with its strobes and sweeps.
+
+The settings follow the **active colour mode** (picked on the Visualizer tab - the pulses
+block names it): what it doesn't use is greyed out with the reason, and Beat Sync's own
+per-beat pulse settings show only while Beat Sync is the mode.
+
+![Global Effects tab: the Beat clock block with the Rhythm section open, the Chase & Group Switch block and the Pulses & sequencer block, every feature on](GlobalEffects.png)
+
+In the picture: the Rhythm section is open; Chase, Group Switch, the pulses and the
+sequencer are all on, with their sections closed. The mode is Beat Sync, so the Dark and
+White pulses' headers say the sequencer places them (their probability and trigger are
+greyed out).
+
+### Rhythm - the shared beat clock
+
+One beat detector that every layer can follow, so the flash, the colour changes, the pulse
+sequencer, Chase and Group Switch move on the same beats instead of each reacting to
+different hits (`dsp/beat_clock.py`).
+
+- **Beat Sync (and Beat Sync White) follow the shared clock** - on in a fresh install. Their
+  own beat detection settings are then unused (greyed out), their pulses can be triggered
+  on accents or bar starts, and *Change hue* / *Change temperature* count from the bar
+  start. The pulse sequencer needs it in these two modes (the other modes don't).
+- **Beat detection band** - keep it on the kick drum (40-150 Hz): the cleanest beat.
+- **Beat clock sensitivity** - how far above the recent average a kick must rise to count.
+  Around 1.08-1.15 suits most music; once the tempo is locked, missed kicks are filled in
+  anyway. *Min interval* and *Min energy floor* fine-tune it.
+- **Lock to tempo** - once a steady tempo is found, only kicks near the expected beat count
+  (off-beat hi-hats, snares and vocals are ignored) and a too-quiet kick is filled in.
+- **Lead time** - once locked, each beat is sent this much early to cancel the Wi-Fi and
+  bulb delay (~100-150 ms). Raise it if flashes look late, lower it if early.
+- **Beats per bar** (4; 3 for waltz time) - the bar start lands on the beat that usually hits
+  hardest. **Accent share** - what share of beats count as accents (0.25 = the hardest
+  quarter).
+- **Keep going (bars)** - when the beat gets lost while the music plays on (a breakdown),
+  the lights keep moving on the last tempo for up to this many bars.
+- **No beat? Follow the notes** - for music without a steady kick (classical, acoustic,
+  ambient): the clock follows the tempo of the notes, or failing that a free pace that
+  speeds up as the music swells. A clear beat takes over again by itself.
+
+Rhythm choices elsewhere (*every 2 beats*, *every bar*, phrases of 1/2/4/8/16 bars) only
+offer values that line up with the bar, so nothing drifts against the music.
+
+### Chase & Group Switch
+
+The two overlays on top of whichever colour mode runs (not Beat Sync White), each a section
+with its on/off switch. Both are on in a fresh install, and both need the lamps' place set
+on the [Devices & Setup tab](#devices--setup-tab). They can run together: Chase applies
+first, then Group Switch.
+
+#### Chase
+
+A highlight travelling round the lamps in **Chase order**. Lamps sharing a number move
+together as one position - e.g. give the two lamps on each of four walls the same number
+(0, 0, 1, 1, 2, 2, 3, 3) and the chase steps wall by wall round the room.
+
+- **Speed source** - `off`: a constant number of full rotations per second (0.5 = one lap
+  every 2 s, however many lamps); `beat` / `intensity_peak`: still until a beat (its own
+  bass detector) or a loudness peak, then steps on *beat multiplier* positions; `clock`:
+  steps every N beats of the shared clock (the fresh-install choice).
+- **Number of rotators** - highlights travelling at once, evenly spaced (2 = opposite
+  sides). **Reverse direction** flips the way round.
+- **Highlight width** - how many positions the glow spans: low = a crisp travelling spot.
+  Scale it with the lamp count: about a third of the lamps in the chase is a good start.
+- **Falloff curve** - `linear`, or `bezier`, which lingers near the peak colour (try it if
+  the colour feels too brief).
+- **Intensity** - a brightness **boost multiplier** on the lamp's own brightness, never a
+  fixed brightness: a lamp the mode has dimmed to black (a dark pulse) stays black.
+- **Soft steps** + **Switch fade** - with only a few lamps the highlight can't really glide;
+  this fades every lamp to its new colour over the Switch fade time instead of jumping
+  (on in a fresh install, 100 ms).
+- **Color**:
+  - `complementary` - the opposite (+180°) of the lamp's own colour;
+  - `hue_shift` - each position a progressively different fixed hue (a rainbow trail, from
+    *custom hue* by *Hue shift step*);
+  - `hue_shift_relative` (fresh install) - turns the lamp's own hue by the *Hue shift step*,
+    keeping its saturation - a nudge that follows the Beat Sync colours;
+  - `custom` - one fixed hue; for the clearest effect pick one far from your usual palette.
+- **Hue shift step from** (both hue_shift modes) - `fixed`, or the music sets the step
+  between *Step min* and *Step max*: `intensity` (loudness), `brightness` (bass-heavy vs
+  bright), `intensity_brightness`, or `pitch` (the standing-out note's tension in the key;
+  drums are filtered out first). The line under the sliders shows the current step.
+- **Chase dwell x** - per lamp, in the Devices & Setup list.
+
+#### Group Switch
+
+Lamps take turns by **Effect group**: one group is fully "active" at a time with a hard,
+instant switch - a clean alternation instead of Chase's travelling gradient. Same speed
+sources as Chase (`off`, `beat`, `intensity_peak`, `clock` - every N beats) and the same
+colour modes, without width or falloff. Needs at least two groups - with one lamp or one
+group, switch it off.
+
+- **Active groups at once** - that many groups active together, evenly spaced (four groups,
+  2 active: groups 1+3, then 2+4). White pulses that follow the group land on all of them.
+- **Fade across groups** (off) - spreads the group colour over *all* groups in equal hue
+  steps back to the lamps' own colour (with `complementary` and three groups: own colour ->
+  halfway -> opposite), the ramp moving with the active group. Needs at least three groups
+  per active group.
+- **Switch fade** (0 = the hard step) - every group's colour glides to its new place over
+  about that long.
+- **hue_shift_relative** - the active group turns its lamps' hue by the step, the groups
+  behind it part of the way. The shifts never build up: with both overlays relative, a lamp
+  is at most Chase's step plus Group Switch's step from the base colour.
+
 ### Dark and white pulses
 
-The **Dark pulses**, **White pulses** and **Pulse sequencer** sections sit at the bottom of
-**every mode's page** - one set of settings for all the modes, so trying another mode keeps
-the pulses as they were. Which pulses a mode gets:
+The **Dark pulses**, **White pulses** and **Pulse sequencer** sections are **one set of
+settings for every mode**, so trying another mode keeps the pulses as they were. Which
+pulses a mode gets:
 
 | Mode | Pulses |
 |---|---|
@@ -462,7 +639,7 @@ the pulses as they were. Which pulses a mode gets:
 | Peak Flash, RGB Frequency, HSV Music, Custom | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
 | Beat Sync White | the sequencer's dark pulses only (it's white already); without the sequencer its own per-beat dark pulses |
 
-What a mode doesn't use is greyed out on its page, with the reason in the tooltip.
+What the active mode doesn't use is greyed out, with the reason in the tooltip.
 
 **Dark pulses** (on) - a brief dip toward black (*depth*, *duration*, *attack*, *release*):
 a rhythm-synced breath before the next hit. In Beat Sync and Beat Sync White a beat that
@@ -613,165 +790,6 @@ darkens dims with it (with `direct`, `smooth` or `gradient` lamp transitions).
   *Sweep* lane), and neither runs during the strobe. Not in Beat Sync White.
 - **Test dark sweep now** plays it 4 times in a row on the selected lamps.
 
-### Beat Sync White
-
-Beat Sync's flash-and-decay, but on the bulb's **white** LEDs: brightness and colour
-temperature instead of colour - the lamps stay white and move warm <-> cool on the beat.
-
-- **Temperature mode** - `random` picks a new temperature at least *Min temp jump* away;
-  `alternate` ping-pongs between *Temp range min (warm)* and *max (cool)*.
-- **Change temperature** (every beat, every 2 beats, every bar...) - every beat still
-  flashes, but the temperature changes only on these beats, so it doesn't flicker warm-cool
-  on every hit. With the shared clock and *Lock to tempo* it's counted from the bar start,
-  so the change lands on the strong beats: every 2 beats = beats 1 and 3, every bar = the
-  downbeat. *Temp snap speed* - how fast it moves to the new temperature, toward warm as
-  fast as toward cool.
-- **Dark pulses** - with the [pulse sequencer](#pulse-sequencer) running it takes the
-  sequencer's dark pulses (only those), shaped by the shared
-  [Dark pulses](#dark-and-white-pulses) section; otherwise its own per-beat ones (*Dark
-  pulse probability*, *duration*, *depth*).
-
-Chase and Group Switch don't run in this mode (a hue overlay has nothing to work on in
-white). The white control path is the least verified part against real hardware - see
-[what's confirmed](#local-control-whats-confirmed).
-
-### Peak Flash
-
-A softer, continuous cousin of Beat Sync:
-
-- Reacts to peaks across the **whole spectrum** (kicks, snares, vocal hits), with *Peak
-  sensitivity*.
-- Blends toward **white** with the treble (cymbals, hi-hats, sibilance; *Whiteness amount*,
-  *White attack/release*), back to full colour when it drops.
-- Brightness **tracks the overall loudness** between *Baseline brightness min/max*, with a
-  *Flash brightness* boost on each peak that decays (*Flash attack*, *Flash decay*).
-- The hue never snaps: it **flows** - a slow rotation (`drift`, *Drift speed*) or following
-  the spectral centroid (`centroid`). **Color richness (hue flow)** (up to ~15 s) sets how
-  slowly: high values unfold a slow, rich colour story over a song section.
-
-With the [pulse sequencer](#pulse-sequencer) on, its pulses play on top - as in the
-continuous modes below.
-
-### RGB Frequency, Custom and HSV Music
-
-The continuous modes - the light follows the sound level rather than beats:
-
-- **RGB Frequency** - bass drives red, mids green, treble blue. Each channel has its
-  frequency range, *Gain*, *Min/Max level* and *Gamma*.
-- **Custom** - the same mechanism with your own frequency ranges.
-- **HSV Music** - hue from the spectral centroid (*Hue @ low freq* .. *Hue @ high freq*),
-  brightness from the overall energy (*Brightness min/max*), saturation from spectral
-  contrast.
-
-Each has its own *Level sensitivity (gain)*. **Attack** / **Release** - the level
-smoothing, one setting shared by the three modes: how fast the light follows rising /
-falling sound. The Global *Response curve* applies to these modes only. With the
-[pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and colour
-sweeps play on top of the colour (the [Color Mapping picture](#color-mapping-tab) shows
-the RGB Frequency page).
-
-### Global settings
-
-- **Lamp transitions** - how the bulbs take a change:
-  - `direct` (default) - the real-time control datapoint (DP 28), no fade: crisp flashes,
-    beats and white pulses; colour and white can show at once.
-  - `smooth` (experimental) - DP 28, chosen per command: big changes (a beat's flash, a white
-    flash, the strobe) land instantly, small fade and glide steps use the bulb's own short
-    fade - smoother, a little slower.
-  - `gradient` - DP 28 with the bulb's short fade (~0.25 s) on every change.
-  - `legacy` - the persistent colour datapoint (DP 24): the bulb fades every change over
-    ~0.7 s, so at dance tempo the light never arrives before the next beat. Only for bulbs
-    that don't change colour with the others; bulbs without the v2 datapoint layout always
-    use it.
-- **Lamp command rate** - commands per second per lamp (up to 60; 50 in a fresh install).
-  With `direct` every command shows as a step, so smooth fades and glides want a high rate.
-- **Min change threshold** - skips sends that would barely change the colour.
-- **Response curve** (`linear` / `log` / `exp2`) - reshapes the level before it becomes light,
-  in RGB Frequency, Custom and HSV Music only: `log` brings out quiet detail, `exp2` the
-  opposite.
-- **Invert brightness** - quiet parts bright, loud parts dark, in every mode.
-
-Colours go out at the datapoint's own resolution (hue in degrees, saturation and
-brightness in 0.1 % steps), not rounded through 8-bit RGB.
-
-### Presets and built-in looks
-
-- **Built-in look** + **Apply** - sets the shared clock, Beat Sync, the pulse sequencer, Chase and Group
-  Switch together: *Groove - one color per bar*, *Calm - slow color flow*, *Club - punchy*,
-  *Dance - white across groups*, *Chase focus*, *Group focus*. Your lamp setup, Chase width
-  and intensity, Group Switch intensity, beat detection band and sensitivity, lead time and
-  true-white brightness and cool ratio are left as they are.
-- **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
-  Group Switch and the lamps' Chase order. Loading one updates every setting at once.
-
-## Chase & Group Switch tab
-
-Two overlays on top of whichever colour mode runs (not Beat Sync White), each a section
-with its on/off switch. Both are on in a fresh install, and both need the lamps' place set
-on the [Devices & Setup tab](#devices--setup-tab). They can run together: Chase applies
-first, then Group Switch.
-
-![Chase & Group Switch tab: Chase closed and on, Group Switch open with speed source clock and group color hue_shift_relative](ChaseAndGroup.png)
-
-In the picture: Chase is on but its section is closed. Group Switch is open: it moves one
-group every 2 beats on the shared clock (*Speed source* `clock`), so the overlay's own
-detector settings are greyed out. *Group color* is `hue_shift_relative`, with the hue
-step taken from the brightness (2.2-90 deg, 60 deg right now).
-
-### Chase
-
-A highlight travelling round the lamps in **Chase order**. Lamps sharing a number move
-together as one position - e.g. give the two lamps on each of four walls the same number
-(0, 0, 1, 1, 2, 2, 3, 3) and the chase steps wall by wall round the room.
-
-- **Speed source** - `off`: a constant number of full rotations per second (0.5 = one lap
-  every 2 s, however many lamps); `beat` / `intensity_peak`: still until a beat (its own
-  bass detector) or a loudness peak, then steps on *beat multiplier* positions; `clock`:
-  steps every N beats of the shared clock (the fresh-install choice).
-- **Number of rotators** - highlights travelling at once, evenly spaced (2 = opposite
-  sides). **Reverse direction** flips the way round.
-- **Highlight width** - how many positions the glow spans: low = a crisp travelling spot.
-  Scale it with the lamp count: about a third of the lamps in the chase is a good start.
-- **Falloff curve** - `linear`, or `bezier`, which lingers near the peak colour (try it if
-  the colour feels too brief).
-- **Intensity** - a brightness **boost multiplier** on the lamp's own brightness, never a
-  fixed brightness: a lamp the mode has dimmed to black (a dark pulse) stays black.
-- **Soft steps** + **Switch fade** - with only a few lamps the highlight can't really glide;
-  this fades every lamp to its new colour over the Switch fade time instead of jumping
-  (on in a fresh install, 100 ms).
-- **Color**:
-  - `complementary` - the opposite (+180°) of the lamp's own colour;
-  - `hue_shift` - each position a progressively different fixed hue (a rainbow trail, from
-    *custom hue* by *Hue shift step*);
-  - `hue_shift_relative` (fresh install) - turns the lamp's own hue by the *Hue shift step*,
-    keeping its saturation - a nudge that follows the Beat Sync colours;
-  - `custom` - one fixed hue; for the clearest effect pick one far from your usual palette.
-- **Hue shift step from** (both hue_shift modes) - `fixed`, or the music sets the step
-  between *Step min* and *Step max*: `intensity` (loudness), `brightness` (bass-heavy vs
-  bright), `intensity_brightness`, or `pitch` (the standing-out note's tension in the key;
-  drums are filtered out first). The line under the sliders shows the current step.
-- **Chase dwell x** - per lamp, in the Devices & Setup list.
-
-### Group Switch
-
-Lamps take turns by **Effect group**: one group is fully "active" at a time with a hard,
-instant switch - a clean alternation instead of Chase's travelling gradient. Same speed
-sources as Chase (`off`, `beat`, `intensity_peak`, `clock` - every N beats) and the same
-colour modes, without width or falloff. Needs at least two groups - with one lamp or one
-group, switch it off.
-
-- **Active groups at once** - that many groups active together, evenly spaced (four groups,
-  2 active: groups 1+3, then 2+4). White pulses that follow the group land on all of them.
-- **Fade across groups** (off) - spreads the group colour over *all* groups in equal hue
-  steps back to the lamps' own colour (with `complementary` and three groups: own colour ->
-  halfway -> opposite), the ramp moving with the active group. Needs at least three groups
-  per active group.
-- **Switch fade** (0 = the hard step) - every group's colour glides to its new place over
-  about that long.
-- **hue_shift_relative** - the active group turns its lamps' hue by the step, the groups
-  behind it part of the way. The shifts never build up: with both overlays relative, a lamp
-  is at most Chase's step plus Group Switch's step from the base colour.
-
 ## Info panel
 
 Along the bottom of the window, on every tab (see the bottom of each picture above, e.g.
@@ -862,8 +880,8 @@ Hover it: a greyed-out setting says in its tooltip why it's unused (e.g. Beat Sy
 detection while it follows the shared clock). For the sensitivities, see
 [Four sensitivities](#visualizer-tab). Some settings only show in certain modes: the
 continuous modes' Attack/Release, for instance, don't affect Beat Sync at all. The pulse
-sections are on every mode's page but greyed out where the mode doesn't use them - white
-pulses in Beat Sync White, say, or every pulse while the sequencer can't run (it needs
+sections on the Global Effects tab are greyed out where the active mode doesn't use them -
+white pulses in Beat Sync White, say, or every pulse while the sequencer can't run (it needs
 *Lock to tempo*, and in Beat Sync / Beat Sync White *follow the shared clock*).
 
 ## Flashes look late or early

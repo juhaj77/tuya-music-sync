@@ -11,7 +11,7 @@ from .controller import AppController
 from .tabs.color_mapping_tab import ColorMappingTab
 from .tabs.devices_tab import DevicesTab
 from .tabs.diagnostics_tab import DiagnosticsTab
-from .tabs.overlays_tab import OverlaysTab
+from .tabs.global_effects_tab import GlobalEffectsTab
 from .tabs.visualizer_tab import VisualizerTab
 from .widgets.info_panel import InfoPanel
 
@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(VisualizerTab(self.controller), "Visualizer")
         self.tabs.addTab(DevicesTab(self.controller), "Devices && Setup")
         self.tabs.addTab(ColorMappingTab(self.controller), "Color Mapping")
-        self.tabs.addTab(OverlaysTab(self.controller), "Chase && Group Switch")
+        self.tabs.addTab(GlobalEffectsTab(self.controller), "Global Effects")
         self.tabs.addTab(DiagnosticsTab(self.controller), "Diagnostics")
 
         self.controller.audioError.connect(self._on_audio_error)
@@ -80,7 +80,7 @@ class MainWindow(QMainWindow):
         current = self.tabs.currentIndex()
         for index, tab_class, title in (
             (2, ColorMappingTab, "Color Mapping"),
-            (3, OverlaysTab, "Chase && Group Switch"),
+            (3, GlobalEffectsTab, "Global Effects"),
         ):
             old = self.tabs.widget(index)
             self.tabs.removeTab(index)

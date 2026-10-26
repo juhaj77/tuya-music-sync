@@ -2,8 +2,8 @@
 and Quick Controls: brightness, saturation and the beat clock's sensitivity
 (every mode) plus a few of the selected mode's own settings, which change with
 the mode (ui/quick_settings.py).
-Detailed per-mode configuration lives in the Color Mapping and Chase & Group
-Switch tabs."""
+Detailed configuration lives in the Color Mapping (per mode) and Global
+Effects (shared by every mode) tabs."""
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
@@ -305,13 +305,13 @@ class VisualizerTab(QWidget):
         set_active(
             [self.clock_sensitivity_slider], clock_in_use(config),
             "Nothing follows the shared beat clock right now: Beat Sync and Beat Sync White do when "
-            "'follow the shared clock' is on (Color Mapping -> Rhythm), the Pulse sequencer when it's on, "
+            "'follow the shared clock' is on (Global Effects -> Rhythm), the Pulse sequencer when it's on, "
             "Chase and Group Switch with speed source 'clock'.",
         )
         own = [self.quick_sliders[(mode, f"color_mapping.{mode}.sensitivity")] for mode in ("beat_sync", "beat_sync_white")]
         set_active(
             own, not config.rhythm.shared_clock,
-            "This mode follows the shared beat clock (Color Mapping -> Rhythm) - Beat clock sensitivity "
+            "This mode follows the shared beat clock (Global Effects -> Rhythm) - Beat clock sensitivity "
             "above is the one in use.",
         )
 

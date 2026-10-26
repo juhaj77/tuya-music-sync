@@ -2,13 +2,14 @@
 clock's sensitivity (every mode) plus a few of each colour mode's own - the
 ones whose effect is easiest to see and hear.
 
-Each is a slider that also sits in the Color Mapping tab; both edit the same
-config value and follow each other through AppController.linkedSettingChanged
-(see link_slider()). A path is relative to AppConfig ("rhythm.sensitivity",
+Each is a slider that also sits in a settings tab (the beat clock's in Global
+Effects, the rest in Color Mapping); both edit the same config value and
+follow each other through AppController.linkedSettingChanged (see
+link_slider()). A path is relative to AppConfig ("rhythm.sensitivity",
 "color_mapping.smoothing.attack_ms").
 
 The sensitivities are four different things, so they're named apart:
-- Beat clock sensitivity: the shared beat clock (Rhythm box) - what Beat Sync
+- Beat clock sensitivity: the shared beat clock (Global Effects tab) - what Beat Sync
   and Beat Sync White react to when they follow it, the pulse sequencer, and
   Chase / Group Switch on speed source 'clock'.
 - Beat detector sensitivity: Beat Sync's / Beat Sync White's own detector,
@@ -38,7 +39,7 @@ class QuickSetting:
 
 CLOCK_SENSITIVITY = QuickSetting(
     "rhythm.sensitivity", "Beat clock sensitivity", 1.01, 2.0,
-    tooltip="The shared beat clock (Color Mapping -> Rhythm): how far above the recent average a kick "
+    tooltip="The shared beat clock (Global Effects -> Rhythm): how far above the recent average a kick "
     "must rise to count - higher = only the clearest kicks. Beat Sync and Beat Sync White follow it "
     "when they use the shared clock, the Pulse sequencer always, Chase and Group Switch with speed "
     "source 'clock'.",
@@ -46,7 +47,7 @@ CLOCK_SENSITIVITY = QuickSetting(
 
 _DETECTOR_SENSITIVITY_TIP = (
     "This mode's own beat detector - used only when it doesn't follow the shared beat clock "
-    "(Color Mapping -> Rhythm). Higher = only sharp, obvious hits count as a beat."
+    "(Global Effects -> Rhythm). Higher = only sharp, obvious hits count as a beat."
 )
 _LEVEL_SENSITIVITY_TIP = "How strongly the sound level turns into light - a gain: higher = brighter, livelier."
 _SMOOTHING_NOTE = " Shared by RGB Frequency, Custom and HSV Music."
@@ -138,8 +139,8 @@ def set_value(config, path: str, value: float) -> None:
 
 def link_slider(controller, path: str, slider) -> None:
     """Keeps `slider` showing `path`'s value when another copy of it (Quick
-    Controls <-> Color Mapping) changes, and tells the other copies when this
-    one does. Connect the slider's own handler (the one writing the config)
+    Controls <-> the settings tabs) changes, and tells the other copies when
+    this one does. Connect the slider's own handler (the one writing the config)
     first: Qt calls slots in connection order, so the config is already
     updated when the others read it."""
     slider.valueChanged.connect(lambda _v: controller.linkedSettingChanged.emit(path, slider))

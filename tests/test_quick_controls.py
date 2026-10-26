@@ -1,7 +1,7 @@
 """The Visualizer tab's Quick Controls: the selected mode's own settings,
 switched with the mode, each kept in step with its copy on the Color Mapping
-tab (offscreen Qt, a scratch settings folder - nothing of the user's is
-touched)."""
+tab (the beat clock's on the Global Effects tab) (offscreen Qt, a scratch
+settings folder - nothing of the user's is touched)."""
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -112,11 +112,11 @@ def test_links_survive_the_color_mapping_tab_being_rebuilt(window, qapp):
 
 
 def test_beat_clock_sensitivity_is_in_every_mode_and_linked_to_the_rhythm_box(window):
-    vis, cmt = window.tabs.widget(0), window.tabs.widget(2)
+    vis, rhythm = window.tabs.widget(0), window.tabs.widget(3).rhythm  # (the Global Effects tab)
     vis.clock_sensitivity_slider._spin.setValue(1.3)
     assert window.controller.config.rhythm.sensitivity == pytest.approx(1.3)
-    assert cmt.rhythm_sensitivity_slider.value() == pytest.approx(1.3)
-    cmt.rhythm_sensitivity_slider._spin.setValue(1.2)
+    assert rhythm.rhythm_sensitivity_slider.value() == pytest.approx(1.3)
+    rhythm.rhythm_sensitivity_slider._spin.setValue(1.2)
     assert vis.clock_sensitivity_slider.value() == pytest.approx(1.2)
     assert vis.clock_sensitivity_slider.parent() is not vis.mode_settings_stack.currentWidget()
 

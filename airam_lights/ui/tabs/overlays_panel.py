@@ -1,9 +1,8 @@
-"""Chase & Group Switch tab: the two overlays that run on top of the colour
+"""Chase and Group Switch: the two overlays that run on top of the colour
 mode - Chase (a highlight travelling round the lamps in their Chase order)
-and Group Switch (one lamp group active at a time) - each on its own inner
-sub-tab, since either one alone has ~20 controls. Which lamps take part, and
-where, is set per lamp on the Devices & Setup tab (Chase order, Effect
-group)."""
+and Group Switch (one lamp group active at a time) - each a collapsible
+section, on the Global Effects tab. Which lamps take part, and where, is set
+per lamp on the Devices & Setup tab (Chase order, Effect group)."""
 from __future__ import annotations
 
 from PySide6.QtCore import QTimer
@@ -12,7 +11,6 @@ from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
     QLabel,
-    QScrollArea,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -25,31 +23,14 @@ from ..widgets.musical import beat_divisions, choice_combo, inactive_note, set_a
 from ..widgets.param_slider import FloatSlider
 from ..widgets.section import CollapsibleSection
 
-def _scroll_page() -> "tuple[QWidget, QVBoxLayout]":
-    """A tab page that's just a QScrollArea wrapping a QVBoxLayout - the
-    common shell for pages whose content can outgrow the window height.
-    Returns (page_widget_to_add_to_the_tab, layout_to_fill_with_content)."""
-    page = QWidget()
-    page_layout = QVBoxLayout(page)
-    page_layout.setContentsMargins(0, 0, 0, 0)
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    page_layout.addWidget(scroll)
-    inner = QWidget()
-    scroll.setWidget(inner)
-    return page, QVBoxLayout(inner)
 
-
-class OverlaysTab(QWidget):
+class OverlaysPanel(QWidget):
     def __init__(self, controller: AppController, parent=None):
         super().__init__(parent)
         self.controller = controller
 
-        outer = QVBoxLayout(self)
-        outer.setContentsMargins(0, 0, 0, 0)
-        page, root = _scroll_page()
-        outer.addWidget(page)
-        chase_root = group_switch_root = root
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
 
         # -- chase / rotating light overlay ----------------------------------------------
         self.chase_box = chase_box = CollapsibleSection(
@@ -148,7 +129,7 @@ class OverlaysTab(QWidget):
             "detected bass-drum-style hit. intensity_peak: sits still and only advances on ANY sudden "
             "loudness spike (better for tracks without a strong, steady beat). Both hit-based modes "
             "never drift on their own between hits - they move only with the actual rhythm. clock: "
-            "steps on the shared beat clock (Color Mapping tab, Rhythm box) every N beats below - the "
+            "steps on the shared beat clock (the Rhythm box above) every N beats below - the "
             "same beats every other clock-driven layer uses."
         )
         sync_mode_label.setWordWrap(True)
@@ -371,7 +352,7 @@ class OverlaysTab(QWidget):
         self.chase_peak_low_spin.valueChanged.connect(self._on_chase_changed)
         self.chase_peak_high_spin.valueChanged.connect(self._on_chase_changed)
 
-        chase_root.addWidget(chase_box)
+        root.addWidget(chase_box)
 
         # -- group switch: discrete alternative to the chase overlay above --------------------
         self.gs_box = gs_box = CollapsibleSection(
@@ -464,7 +445,7 @@ class OverlaysTab(QWidget):
             "detected bass-drum-style hit. intensity_peak: sits still and only switches on ANY sudden "
             "loudness spike (better for tracks without a strong, steady beat). Both hit-based modes "
             "never switch on their own between hits - they move only with the actual rhythm. clock: "
-            "switches on the shared beat clock (Color Mapping tab, Rhythm box) every N beats below - "
+            "switches on the shared beat clock (the Rhythm box above) every N beats below - "
             "e.g. 4 = once per bar."
         )
         gs_sync_mode_label.setWordWrap(True)
@@ -667,10 +648,9 @@ class OverlaysTab(QWidget):
         self.gs_peak_low_spin.valueChanged.connect(self._on_group_switch_changed)
         self.gs_peak_high_spin.valueChanged.connect(self._on_group_switch_changed)
 
-        group_switch_root.addWidget(gs_box)
-        root.addStretch(1)
+        root.addWidget(gs_box)
 
-        self._update_overlay_states()
+        self.update_states()
 
         self._hue_step_timer = QTimer(self)
         self._hue_step_timer.timeout.connect(self._refresh_hue_step_status)
@@ -727,7 +707,7 @@ class OverlaysTab(QWidget):
             beat_divisions(self.controller.config.rhythm.beats_per_bar), every,
             "Only used when Speed source is 'clock' - moves on the shared beat clock, counted from the "
             "bar start, so every move lands on the same place in the bar. The choices follow Beats per "
-            "bar (Color Mapping tab, Rhythm box).",
+            "bar (the Rhythm box above).",
         )
         combo.currentIndexChanged.connect(on_change)
         row.addWidget(combo)
@@ -746,7 +726,7 @@ class OverlaysTab(QWidget):
         layout.addLayout(row)
         return combo, spin
 
-    def _update_overlay_states(self) -> None:
+    def update_states(self) -> None:
         """Grey out whatever the chosen Speed source / color mode doesn't use."""
         for prefix, name in (("chase", "Chase"), ("gs", "Group Switch")):
             w = lambda n: getattr(self, f"{prefix}_{n}")  # noqa: E731
@@ -770,8 +750,8 @@ class OverlaysTab(QWidget):
                 "settings). Constant speed, peak and clock settings are greyed out.",
                 "intensity_peak": "Speed source 'intensity_peak': moves on loudness peaks (the Peak detection "
                 "settings). Constant speed, beat and clock settings are greyed out.",
-                "clock": "Speed source 'clock': moves on the shared beat clock, set up in the Color Mapping "
-                "tab's Rhythm box - this overlay's own detector settings are greyed out.",
+                "clock": "Speed source 'clock': moves on the shared beat clock, set up in the Rhythm box "
+                "above - this overlay's own detector settings are greyed out.",
             }
             show_note(w("mode_note"), notes.get(mode, ""))
 
@@ -839,7 +819,7 @@ class OverlaysTab(QWidget):
         ch.hue_step_source = self.chase_hue_step_source_combo.currentText()
         ch.hue_step_min_deg = self.chase_hue_step_min_slider.value()
         ch.hue_step_max_deg = self.chase_hue_step_max_slider.value()
-        self._update_overlay_states()
+        self.update_states()
         self.controller.apply_config_changes()
 
     def _refresh_hue_step_status(self) -> None:
@@ -866,11 +846,6 @@ class OverlaysTab(QWidget):
                     "(the rest from intensity+brightness)"
                 )
             label.setText(text)
-
-    def showEvent(self, event) -> None:
-        # The color mode is picked in another tab - catch up with it here.
-        super().showEvent(event)
-        self._update_overlay_states()
 
     # -- group switch overlay --------------------------------------------------------------
 
@@ -904,5 +879,5 @@ class OverlaysTab(QWidget):
         gs.hue_step_max_deg = self.gs_hue_step_max_slider.value()
         gs.fade_across_groups = self.gs_fade_checkbox.isChecked()
         gs.switch_fade_ms = self.gs_switch_fade_slider.value()
-        self._update_overlay_states()
+        self.update_states()
         self.controller.apply_config_changes()
