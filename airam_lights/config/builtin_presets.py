@@ -1,16 +1,25 @@
-"""Built-in "looks": ready-made combinations of the shared beat clock, Beat
-Sync, Chase and Group Switch settings, applied together in one click.
+"""Built-in "looks": ready-made combinations of the shared beat clock, the
+colour mode, Beat Sync, the pulses and the pulse sequencer (with its strobes
+and sweeps), Chase and Group Switch, applied together in one click.
 
-Each preset only lists the settings that define its rhythm and color
-behavior. Everything else is left as the user has it - in particular the
-installation-specific values (Chase width/intensity, Group Switch intensity,
-beat detection band/sensitivity, lead time) and the personal true-white
-taste (white pulse depth, brightness, cool ratio), which a preset should
-never silently overwrite.
+Each preset lists the settings that define its rhythm and color behavior:
+every layer it uses with its look, and an on/off for every layer, so a look
+comes out the same whatever was on before. Everything else is left as the
+user has it - in particular the installation-specific values (Chase
+width/intensity/rotators, Group Switch intensity and active groups, what the
+white walk steps through, beat detection band/sensitivity, lead time), the
+personal true-white taste (white pulse brightness, cool ratio), the strobe's
+brightness and rate ceiling (a comfort and safety limit a preset must never
+raise), what Beat Sync does between beats (fade / hue glide - on RGB+CCT
+bulbs a matter of the hardware) and the Band Colors palette - which a preset
+should never silently overwrite.
 
 All of them use the shared beat clock, so every layer moves on the same
 beats: the Beat Sync flash on every beat, and slower layers (hue, Chase,
-Group Switch, pulses) on fixed divisions of the bar.
+Group Switch, pulses, sweeps) on fixed divisions of the bar. The colours
+follow the music where they can: the hue step from the notes or the
+loudness, Chase and Group Switch turning each lamp's own hue
+(hue_shift_relative) by a step the music sets (dsp.hue_step).
 """
 from __future__ import annotations
 
@@ -19,21 +28,28 @@ from typing import Dict
 from .schema import AppConfig
 
 _CLOCK = {"shared_clock": True, "tempo_lock": True}
+# Also for music without a steady beat (acoustic, ambient, classical): the
+# clock then follows the notes' tempo instead of stopping.
+_CLOCK_FOLLOWS_NOTES = {"shared_clock": True, "tempo_lock": True, "fallback": True}
 _NO_SEQUENCER = {"enabled": False}
 
 BUILTIN_PRESETS: Dict[str, dict] = {
     "Groove - one color per bar": {
         "description": (
-            "Flash on every beat, a new color at each bar start, Chase stepping every beat and "
-            "Group Switch changing group every bar. True white on the active group at bar starts."
+            "Flash on every beat and a new color at each bar start - a small step on a note that "
+            "fits the key, a big one on a tense note. True white walks from group to group on the "
+            "beats, the heavy ones most, with a dark breath before each bar and a color sweep into "
+            "some phrases. Chase turns each lamp's hue every beat, Group Switch changes group every "
+            "bar in the complementary color."
         ),
         "rhythm": _CLOCK,
-        "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
+            "hue_step_source": "pitch",
             "hue_step_deg": 120.0,
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 150.0,
             "hue_every_n_beats": 4,
             "saturation": 1.0,
             "flash_brightness": 1.0,
@@ -41,19 +57,73 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_attack_ms": 30.0,
             "brightness_attack_ms": 10.0,
             "brightness_release_ms": 280.0,
-            "dark_pulse_enabled": False,
+            "dark_pulse_enabled": True,
+            "dark_pulse_trigger": "downbeat",
+            "dark_pulse_probability": 0.0,
+            "dark_pulse_duration_ms": 80.0,
+            "dark_pulse_depth": 1.0,
+            "dark_pulse_attack_ms": 20.0,
+            "dark_pulse_release_ms": 150.0,
+            "dark_pulse_desaturate": 0.5,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "downbeat",
             "white_pulse_probability": 1.0,
             "white_pulse_target": "group",
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 70.0,
+            "white_pulse_attack_ms": 20.0,
+            "white_pulse_release_ms": 250.0,
+            "white_pulse_release_curve": "dynamic",
+            "white_pulse_temp_mode": "bar",
+            "white_pulse_hybrid_chance": 0.2,
+        },
+        "sequencer": {
+            "enabled": True,
+            "white_pattern": "beats",
+            "white_density": 0.9,
+            "group_walk": "forward",
+            "double_chance": 0.15,
+            "white_accent_focus": 0.6,
+            "white_build": 0.3,
+            "white_repeat": True,
+            "min_group_gap_ms": 300.0,
+            "dark_pattern": "before_downbeat",
+            "dark_density": 0.6,
+            "dark_length": 1.0,
+            "phrase_bars": 8,
+            "fills": True,
+            "phrase_accent": True,
+            "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.6,
+            "strobe_enabled": False,
+            "flash_strobe_enabled": False,
+            "color_sweep_enabled": True,
+            "color_sweep_color": "dynamic",
+            "color_sweep_saturation": 1.0,
+            "color_sweep_brightness": 1.0,
+            "color_sweep_beats": 1.0,
+            "color_sweep_rotators": 1,
+            "color_sweep_width": 2,
+            "color_sweep_direction": "forward",
+            "color_sweep_placement": "phrase",
+            "color_sweep_chance": 0.6,
+            "color_sweep_min_gap_bars": 8,
+            "color_sweep_min_level": "groove",
+            "dark_sweep_enabled": False,
         },
         "chase": {
             "enabled": True,
             "sync_mode": "clock",
             "clock_every_n_beats": 1,
             "beat_multiplier": 1.0,
-            "color_mode": "hue_shift",
-            "hue_shift_step_deg": 90.0,
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity_brightness",
+            "hue_step_min_deg": 30.0,
+            "hue_step_max_deg": 90.0,
+            "falloff_curve": "bezier",
+            "switch_fade": True,
+            "switch_fade_ms": 100.0,
         },
         "group_switch": {
             "enabled": True,
@@ -61,20 +131,26 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "clock_every_n_beats": 4,
             "beat_multiplier": 1.0,
             "color_mode": "complementary",
+            "fade_across_groups": False,
+            "switch_fade_ms": 0.0,
         },
     },
     "Calm - slow color flow": {
         "description": (
-            "Gentle: colors fade to a neighboring hue every two bars, Chase steps every other beat, "
-            "Group Switch every two bars. Occasional true white on bar starts."
+            "Gentle, also for music without a steady beat (the clock then follows the notes): the "
+            "color fades to a neighboring hue every two bars, a soft white flash on bar starts swings "
+            "from group to group, its warm/cool now and then gliding, with a breath before each new "
+            "phrase and a slow color sweep now and then. Chase and Group Switch turn the hues a "
+            "little, fading slowly."
         ),
-        "rhythm": _CLOCK,
-        "sequencer": _NO_SEQUENCER,
+        "rhythm": _CLOCK_FOLLOWS_NOTES,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
-            "hue_step_deg": 60.0,
+            "hue_step_source": "pitch",
+            "hue_step_deg": 45.0,
+            "hue_step_min_deg": 20.0,
+            "hue_step_max_deg": 70.0,
             "hue_every_n_beats": 8,
             "saturation": 1.0,
             "flash_brightness": 0.9,
@@ -82,39 +158,105 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_attack_ms": 250.0,
             "brightness_attack_ms": 20.0,
             "brightness_release_ms": 600.0,
-            "dark_pulse_enabled": False,
+            "dark_pulse_enabled": True,
+            "dark_pulse_trigger": "downbeat",
+            "dark_pulse_probability": 0.0,
+            "dark_pulse_duration_ms": 150.0,
+            "dark_pulse_depth": 0.7,
+            "dark_pulse_attack_ms": 80.0,
+            "dark_pulse_release_ms": 300.0,
+            "dark_pulse_desaturate": 0.6,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "downbeat",
             "white_pulse_probability": 0.5,
             "white_pulse_target": "group",
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 120.0,
+            "white_pulse_attack_ms": 120.0,
+            "white_pulse_release_ms": 600.0,
+            "white_pulse_release_curve": "ease_in_out",
+            "white_pulse_temp_mode": "phrase",
+            "white_pulse_hybrid_chance": 0.5,
+        },
+        "sequencer": {
+            "enabled": True,
+            "white_pattern": "downbeats",
+            # Every bar start: with white_repeat a lower density would leave whole phrases without one.
+            "white_density": 1.0,
+            "group_walk": "pingpong",
+            "double_chance": 0.0,
+            "white_accent_focus": 0.0,
+            "white_build": 0.0,
+            "white_repeat": True,
+            "min_group_gap_ms": 900.0,
+            "dark_pattern": "before_phrase",
+            "dark_density": 0.8,
+            "dark_length": 1.0,
+            "phrase_bars": 8,
+            "fills": False,
+            "phrase_accent": False,
+            "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.5,
+            "strobe_enabled": False,
+            "flash_strobe_enabled": False,
+            "color_sweep_enabled": True,
+            "color_sweep_color": "dynamic",
+            "color_sweep_saturation": 1.0,
+            "color_sweep_brightness": 1.0,
+            "color_sweep_beats": 4.0,
+            "color_sweep_rotators": 1,
+            "color_sweep_width": 3,
+            "color_sweep_direction": "forward",
+            "color_sweep_placement": "phrase",
+            "color_sweep_chance": 0.5,
+            "color_sweep_min_gap_bars": 8,
+            "color_sweep_min_level": "calm",
+            "dark_sweep_enabled": False,
         },
         "chase": {
             "enabled": True,
             "sync_mode": "clock",
             "clock_every_n_beats": 2,
             "beat_multiplier": 1.0,
-            "color_mode": "hue_shift",
-            "hue_shift_step_deg": 45.0,
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "brightness",
+            "hue_step_min_deg": 15.0,
+            "hue_step_max_deg": 45.0,
+            "falloff_curve": "bezier",
+            "switch_fade": True,
+            "switch_fade_ms": 400.0,
         },
         "group_switch": {
             "enabled": True,
             "sync_mode": "clock",
             "clock_every_n_beats": 8,
             "beat_multiplier": 1.0,
-            "color_mode": "complementary",
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity",
+            "hue_step_min_deg": 30.0,
+            "hue_step_max_deg": 90.0,
+            "fade_across_groups": True,
+            "switch_fade_ms": 800.0,
         },
     },
     "Club - punchy": {
         "description": (
-            "High energy: a new color every two beats, true white galloping between random groups "
-            "with doubles, dark breaths and stutters, Chase every beat and Group Switch every two beats."
+            "High energy: a new color every two beats, the jump growing with the loudness up to the "
+            "opposite color. True white jumps between random groups, from bar starts when it's quiet "
+            "to a gallop at the peaks, with doubles, dark breaths and stutters; a hard strobe into "
+            "some phrases, flash strobes into some bars and fast dark sweeps. Chase every beat, "
+            "Group Switch every two beats. "
+            "The strobes need Lamp transitions 'direct' or 'smooth' (Global box)."
         ),
         "rhythm": _CLOCK,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "loudness",
             "hue_mode": "step",
+            "hue_step_source": "intensity",
             "hue_step_deg": 137.5,
+            "hue_step_min_deg": 90.0,
+            "hue_step_max_deg": 180.0,
             "hue_every_n_beats": 2,
             "saturation": 1.0,
             "flash_brightness": 1.0,
@@ -127,17 +269,31 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "dark_pulse_probability": 0.5,
             "dark_pulse_duration_ms": 60.0,
             "dark_pulse_depth": 1.0,
+            "dark_pulse_attack_ms": 10.0,
+            "dark_pulse_release_ms": 120.0,
+            "dark_pulse_desaturate": 0.0,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "accent",
             "white_pulse_probability": 1.0,
             "white_pulse_target": "group",
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 50.0,
+            "white_pulse_attack_ms": 10.0,
+            "white_pulse_release_ms": 150.0,
+            "white_pulse_release_curve": "ease_out",
+            "white_pulse_temp_mode": "loudness",
+            "white_pulse_hybrid_chance": 0.0,
         },
         "sequencer": {
             "enabled": True,
-            "white_pattern": "gallop",
-            "white_density": 0.8,
+            "white_pattern": "auto",
+            "white_density": 0.85,
             "group_walk": "random",
             "double_chance": 0.3,
+            "white_accent_focus": 0.3,
+            "white_build": 0.5,
+            "white_repeat": True,
+            "min_group_gap_ms": 180.0,
             "dark_pattern": "auto",
             "dark_density": 0.8,
             "dark_length": 1.0,
@@ -145,6 +301,36 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "fills": True,
             "phrase_accent": True,
             "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.8,
+            "strobe_enabled": True,
+            "strobe_placement": "phrase",
+            "strobe_chance": 0.5,
+            "strobe_min_gap_bars": 8,
+            "strobe_min_level": "groove",
+            "strobe_beats": 1.0,
+            "strobe_duty": 0.5,
+            "strobe_wave": "off",
+            "flash_strobe_enabled": True,
+            "flash_strobe_placement": "bar_end",
+            "flash_strobe_chance": 0.3,
+            "flash_strobe_min_gap_bars": 2,
+            "flash_strobe_min_level": "groove",
+            "flash_strobe_brightness": 1.0,
+            "color_sweep_enabled": False,
+            "dark_sweep_enabled": True,
+            "dark_sweep_depth": 1.0,
+            "dark_sweep_desaturate": 0.0,
+            "dark_sweep_attack_ms": 10.0,
+            "dark_sweep_release_ms": 150.0,
+            "dark_sweep_beats": 0.5,
+            "dark_sweep_rotators": 1,
+            "dark_sweep_width": 2,
+            "dark_sweep_direction": "forward",
+            "dark_sweep_placement": "bars",
+            "dark_sweep_chance": 0.3,
+            "dark_sweep_min_gap_bars": 4,
+            "dark_sweep_min_level": "high",
         },
         "chase": {
             "enabled": True,
@@ -152,27 +338,39 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "clock_every_n_beats": 1,
             "beat_multiplier": 1.0,
             "color_mode": "complementary",
+            "falloff_curve": "linear",
+            "switch_fade": False,
         },
         "group_switch": {
             "enabled": True,
             "sync_mode": "clock",
             "clock_every_n_beats": 2,
             "beat_multiplier": 1.0,
-            "color_mode": "complementary",
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity",
+            "hue_step_min_deg": 90.0,
+            "hue_step_max_deg": 180.0,
+            "fade_across_groups": False,
+            "switch_fade_ms": 0.0,
         },
     },
     "Dance - white across groups": {
         "description": (
-            "Storytelling true white: flashes walk from group to group on musical patterns that get "
-            "busier as the song gets louder, sometimes twice in one group; a fill and a dark breath end "
-            "each 8-bar phrase and every lamp flashes on the next one. A new color every bar."
+            "Storytelling true white: the flashes walk from group to group on patterns that get "
+            "busier as the song gets louder, sometimes twice in one group or as a short strobe, each "
+            "fading the way its beat calls for and cooling toward the phrase end. A fill and a "
+            "washed-out dark breath end each 8-bar phrase, a dark sweep runs into the next and every "
+            "lamp flashes on it. A new color every bar, the step following the notes. The flash "
+            "strobes need Lamp transitions 'direct' or 'smooth'."
         ),
         "rhythm": _CLOCK,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "phrase",
             "hue_mode": "step",
+            "hue_step_source": "pitch",
             "hue_step_deg": 120.0,
+            "hue_step_min_deg": 40.0,
+            "hue_step_max_deg": 150.0,
             "hue_every_n_beats": 4,
             "saturation": 1.0,
             "flash_brightness": 1.0,
@@ -181,9 +379,24 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "brightness_attack_ms": 8.0,
             "brightness_release_ms": 260.0,
             "dark_pulse_enabled": True,
+            "dark_pulse_trigger": "downbeat",
+            "dark_pulse_probability": 0.0,
             "dark_pulse_duration_ms": 70.0,
             "dark_pulse_depth": 1.0,
+            "dark_pulse_attack_ms": 30.0,
+            "dark_pulse_release_ms": 150.0,
+            "dark_pulse_desaturate": 1.0,
             "white_pulse_enabled": True,
+            "white_pulse_trigger": "accent",
+            "white_pulse_probability": 0.5,
+            "white_pulse_target": "rotate",
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 80.0,
+            "white_pulse_attack_ms": 30.0,
+            "white_pulse_release_ms": 260.0,
+            "white_pulse_release_curve": "dynamic",
+            "white_pulse_temp_mode": "phrase",
+            "white_pulse_hybrid_chance": 0.3,
         },
         "sequencer": {
             "enabled": True,
@@ -191,6 +404,10 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "white_density": 0.9,
             "group_walk": "forward",
             "double_chance": 0.3,
+            "white_accent_focus": 0.5,
+            "white_build": 0.6,
+            "white_repeat": True,
+            "min_group_gap_ms": 180.0,
             "dark_pattern": "auto",
             "dark_density": 0.75,
             "dark_length": 1.0,
@@ -198,6 +415,29 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "fills": True,
             "phrase_accent": True,
             "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.7,
+            "strobe_enabled": False,
+            "flash_strobe_enabled": True,
+            "flash_strobe_placement": "beats",
+            "flash_strobe_chance": 0.25,
+            "flash_strobe_min_gap_bars": 2,
+            "flash_strobe_min_level": "groove",
+            "flash_strobe_brightness": 1.0,
+            "color_sweep_enabled": False,
+            "dark_sweep_enabled": True,
+            "dark_sweep_depth": 1.0,
+            "dark_sweep_desaturate": 1.0,
+            "dark_sweep_attack_ms": 20.0,
+            "dark_sweep_release_ms": 275.0,
+            "dark_sweep_beats": 1.0,
+            "dark_sweep_rotators": 1,
+            "dark_sweep_width": 2,
+            "dark_sweep_direction": "backward",
+            "dark_sweep_placement": "phrase",
+            "dark_sweep_chance": 0.8,
+            "dark_sweep_min_gap_bars": 4,
+            "dark_sweep_min_level": "groove",
         },
         "chase": {"enabled": False},
         "group_switch": {
@@ -205,59 +445,92 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "sync_mode": "clock",
             "clock_every_n_beats": 4,
             "beat_multiplier": 1.0,
-            "color_mode": "complementary",
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity",
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 180.0,
+            "fade_across_groups": False,
+            "switch_fade_ms": 100.0,
         },
     },
     "Chase focus": {
         "description": (
-            "Only the Chase overlay moves (Group Switch off): one step per beat, a new base color "
-            "per bar, true white following the Chase highlight on the hardest hits."
+            "Only the Chase overlay moves (Group Switch and the pulse sequencer off): one softly faded "
+            "step per beat, turning each lamp's hue the more the louder the music, up to the opposite "
+            "color. A new base color per bar, a bigger step the brighter the sound; true white "
+            "following the Chase highlight on the hardest hits."
         ),
         "rhythm": _CLOCK,
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
+            "hue_step_source": "brightness",
             "hue_step_deg": 120.0,
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 150.0,
             "hue_every_n_beats": 4,
+            "saturation": 1.0,
+            "flash_brightness": 1.0,
             "sustain_brightness": 0.3,
+            "hue_attack_ms": 40.0,
+            "brightness_attack_ms": 10.0,
             "brightness_release_ms": 300.0,
             "dark_pulse_enabled": False,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "accent",
             "white_pulse_probability": 1.0,
             "white_pulse_target": "chase",
+            "white_pulse_duration_ms": 60.0,
+            "white_pulse_attack_ms": 15.0,
+            "white_pulse_release_ms": 200.0,
         },
         "chase": {
             "enabled": True,
             "sync_mode": "clock",
             "clock_every_n_beats": 1,
             "beat_multiplier": 1.0,
-            "color_mode": "complementary",
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity",
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 180.0,
+            "falloff_curve": "bezier",
+            "switch_fade": True,
+            "switch_fade_ms": 150.0,
         },
         "group_switch": {"enabled": False},
     },
     "Group focus": {
         "description": (
-            "Only Group Switch moves (Chase off): the active group changes every two beats in the "
-            "complementary color, a new base color per bar, true white on the active group's accents."
+            "Only Group Switch moves (Chase and the pulse sequencer off): the active group changes "
+            "every two beats with a short fade, its hue turned by how loud and bright the music is, "
+            "the color ramping across the groups behind it (with three or more groups). A new base "
+            "color per bar, true white on the active group's accents."
         ),
         "rhythm": _CLOCK,
         "sequencer": _NO_SEQUENCER,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
+            "hue_step_source": "intensity_brightness",
             "hue_step_deg": 120.0,
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 150.0,
             "hue_every_n_beats": 4,
+            "saturation": 1.0,
+            "flash_brightness": 1.0,
             "sustain_brightness": 0.35,
+            "hue_attack_ms": 40.0,
+            "brightness_attack_ms": 10.0,
             "brightness_release_ms": 300.0,
             "dark_pulse_enabled": False,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "accent",
             "white_pulse_probability": 1.0,
             "white_pulse_target": "group",
+            "white_pulse_duration_ms": 60.0,
+            "white_pulse_attack_ms": 15.0,
+            "white_pulse_release_ms": 200.0,
         },
         "chase": {"enabled": False},
         "group_switch": {
@@ -265,24 +538,32 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "sync_mode": "clock",
             "clock_every_n_beats": 2,
             "beat_multiplier": 1.0,
-            "color_mode": "complementary",
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity_brightness",
+            "hue_step_min_deg": 90.0,
+            "hue_step_max_deg": 180.0,
+            "fade_across_groups": True,
+            "switch_fade_ms": 120.0,
         },
     },
     "Strobe - rolls into the phrase": {
         "description": (
-            "True white walking from group to group on 16ths with stutter dark breaths, a new color "
-            "every two beats and Group Switch in the complementary color every bar. Into "
-            "a phrase or its second half, now and then a 2-beat strobe roll that swells and fades. "
-            "The strobe needs Lamp transitions 'direct' (Global box)."
+            "True white walking from group to group on 16ths, thinned toward the heavy steps and "
+            "building up through each phrase, with stutter dark breaths. Into a phrase or its second "
+            "half, now and then a 2-beat strobe roll that swells and fades, and flash strobes into "
+            "some bars. A new color every two beats, the jump growing with the loudness; Group "
+            "Switch in the complementary color every bar. The strobes need Lamp transitions "
+            "'direct' or 'smooth' (Global box)."
         ),
         "rhythm": _CLOCK,
         "color_mapping": {"mode": "beat_sync"},
         "beat_sync": {
-            "white_pulse_temp_mode": "bar",
             "hue_mode": "step",
+            "hue_step_source": "intensity",
             "hue_step_deg": 87.6,
+            "hue_step_min_deg": 60.0,
+            "hue_step_max_deg": 150.0,
             "hue_every_n_beats": 2,
-            "min_hue_jump_deg": 122.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.48,
@@ -296,22 +577,28 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "dark_pulse_depth": 1.0,
             "dark_pulse_attack_ms": 70.0,
             "dark_pulse_release_ms": 135.0,
+            "dark_pulse_desaturate": 0.5,
             "white_pulse_enabled": True,
             "white_pulse_trigger": "downbeat",
             "white_pulse_probability": 1.0,
+            "white_pulse_target": "rotate",
+            "white_pulse_rotators": 1,
             "white_pulse_duration_ms": 76.0,
             "white_pulse_attack_ms": 191.0,
             "white_pulse_release_ms": 410.0,
-            "white_pulse_target": "rotate",
-            "white_pulse_rotators": 1,
+            "white_pulse_release_curve": "dynamic",
+            "white_pulse_temp_mode": "bar",
+            "white_pulse_hybrid_chance": 0.3,
         },
         "sequencer": {
             "enabled": True,
             "white_pattern": "sixteenths",
             "white_density": 0.67,
             "group_walk": "forward",
-            "walk_positions": "groups",
             "double_chance": 0.3,
+            "white_accent_focus": 0.4,
+            "white_build": 0.7,
+            "white_repeat": True,
             "min_group_gap_ms": 333.0,
             "dark_pattern": "stutter",
             "dark_density": 0.47,
@@ -328,10 +615,16 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "strobe_min_gap_bars": 4,
             "strobe_min_level": "groove",
             "strobe_beats": 2.0,
-            "strobe_max_hz": 13.0,
             "strobe_duty": 0.67,
-            "strobe_brightness": 0.39,
             "strobe_wave": "bezier",
+            "flash_strobe_enabled": True,
+            "flash_strobe_placement": "bar_end",
+            "flash_strobe_chance": 0.3,
+            "flash_strobe_min_gap_bars": 2,
+            "flash_strobe_min_level": "groove",
+            "flash_strobe_brightness": 1.0,
+            "color_sweep_enabled": False,
+            "dark_sweep_enabled": False,
         },
         "chase": {"enabled": False},
         "group_switch": {
@@ -340,7 +633,192 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "clock_every_n_beats": 4,
             "beat_multiplier": 1.0,
             "color_mode": "complementary",
+            "fade_across_groups": False,
+            "switch_fade_ms": 0.0,
         },
+    },
+    "Melody - the notes pick the colors": {
+        "description": (
+            "The color comes from the music's note, by its place on the circle of fifths, so related "
+            "notes and chords get neighboring colors (drums and noise glide over to the loudness and "
+            "brightness). Unhurried white on the beats, a washed-out breath before each bar and a "
+            "slow dark sweep into some phrases; Chase and Group Switch turn the hues a little with "
+            "the music. Also for music without a steady beat. Sets HSV Music's hue range to the full "
+            "circle."
+        ),
+        "rhythm": _CLOCK_FOLLOWS_NOTES,
+        "color_mapping": {"mode": "beat_sync"},
+        "hsv": {"hue_min_deg": 0.0, "hue_max_deg": 360.0},
+        "beat_sync": {
+            "hue_mode": "spectrum",
+            "spectrum_source": "pitch",
+            "hue_every_n_beats": 2,
+            "saturation": 1.0,
+            "flash_brightness": 1.0,
+            "sustain_brightness": 0.45,
+            "hue_attack_ms": 150.0,
+            "brightness_attack_ms": 20.0,
+            "brightness_release_ms": 400.0,
+            "dark_pulse_enabled": True,
+            "dark_pulse_trigger": "downbeat",
+            "dark_pulse_probability": 0.0,
+            "dark_pulse_duration_ms": 110.0,
+            "dark_pulse_depth": 0.8,
+            "dark_pulse_attack_ms": 60.0,
+            "dark_pulse_release_ms": 250.0,
+            "dark_pulse_desaturate": 1.0,
+            "white_pulse_enabled": True,
+            "white_pulse_trigger": "downbeat",
+            "white_pulse_probability": 0.5,
+            "white_pulse_target": "rotate",
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 90.0,
+            "white_pulse_attack_ms": 60.0,
+            "white_pulse_release_ms": 400.0,
+            "white_pulse_release_curve": "dynamic",
+            "white_pulse_temp_mode": "phrase",
+            "white_pulse_hybrid_chance": 0.5,
+        },
+        "sequencer": {
+            "enabled": True,
+            "white_pattern": "beats",
+            "white_density": 0.8,
+            "group_walk": "pingpong",
+            "double_chance": 0.1,
+            "white_accent_focus": 0.6,
+            "white_build": 0.5,
+            "white_repeat": True,
+            "min_group_gap_ms": 600.0,
+            "dark_pattern": "before_downbeat",
+            "dark_density": 0.5,
+            "dark_length": 1.0,
+            "phrase_bars": 8,
+            "fills": False,
+            "phrase_accent": True,
+            "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.6,
+            "strobe_enabled": False,
+            "flash_strobe_enabled": False,
+            "color_sweep_enabled": False,
+            "dark_sweep_enabled": True,
+            "dark_sweep_depth": 0.8,
+            "dark_sweep_desaturate": 1.0,
+            "dark_sweep_attack_ms": 40.0,
+            "dark_sweep_release_ms": 500.0,
+            "dark_sweep_beats": 2.0,
+            "dark_sweep_rotators": 1,
+            "dark_sweep_width": 2,
+            "dark_sweep_direction": "forward",
+            "dark_sweep_placement": "phrase",
+            "dark_sweep_chance": 0.6,
+            "dark_sweep_min_gap_bars": 8,
+            "dark_sweep_min_level": "calm",
+        },
+        "chase": {
+            "enabled": True,
+            "sync_mode": "clock",
+            "clock_every_n_beats": 2,
+            "beat_multiplier": 1.0,
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "pitch",
+            "hue_step_min_deg": 15.0,
+            "hue_step_max_deg": 60.0,
+            "falloff_curve": "bezier",
+            "switch_fade": True,
+            "switch_fade_ms": 250.0,
+        },
+        "group_switch": {
+            "enabled": True,
+            "sync_mode": "clock",
+            "clock_every_n_beats": 4,
+            "beat_multiplier": 1.0,
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "brightness",
+            "hue_step_min_deg": 20.0,
+            "hue_step_max_deg": 60.0,
+            "fade_across_groups": True,
+            "switch_fade_ms": 400.0,
+        },
+    },
+    "Band Colors - instruments in color": {
+        "description": (
+            "The Band Colors mode: the kick turns the lamps to the bass color, chords and voices to "
+            "the mid color, hi-hats to the treble color, the palette turning with the chords. True "
+            "white walks the groups on the off-beats between the kicks, with a dark breath before "
+            "each bar and a dark sweep now and then; Chase turns each lamp's hue every beat, more "
+            "the louder it gets. Your Band Colors bands and colors stay as they are."
+        ),
+        "rhythm": _CLOCK,
+        "color_mapping": {"mode": "band_colors"},
+        # Only the pulses' look - Beat Sync's colour settings don't apply in Band Colors.
+        "beat_sync": {
+            "dark_pulse_enabled": True,
+            "dark_pulse_duration_ms": 80.0,
+            "dark_pulse_depth": 1.0,
+            "dark_pulse_attack_ms": 20.0,
+            "dark_pulse_release_ms": 150.0,
+            "dark_pulse_desaturate": 0.0,
+            "white_pulse_enabled": True,
+            "white_pulse_rotators": 1,
+            "white_pulse_duration_ms": 60.0,
+            "white_pulse_attack_ms": 15.0,
+            "white_pulse_release_ms": 220.0,
+            "white_pulse_release_curve": "dynamic",
+            "white_pulse_temp_mode": "loudness",
+            "white_pulse_hybrid_chance": 0.2,
+        },
+        "sequencer": {
+            "enabled": True,
+            "white_pattern": "offbeats",
+            "white_density": 0.8,
+            "group_walk": "forward",
+            "double_chance": 0.2,
+            "white_accent_focus": 0.3,
+            "white_build": 0.5,
+            "white_repeat": True,
+            "min_group_gap_ms": 250.0,
+            "dark_pattern": "before_downbeat",
+            "dark_density": 0.6,
+            "dark_length": 1.0,
+            "phrase_bars": 8,
+            "fills": True,
+            "phrase_accent": True,
+            "drop_detection": True,
+            "pulse_dynamics": True,
+            "pulse_dynamics_amount": 0.7,
+            "strobe_enabled": False,
+            # (The off-beat flashes never land on a beat, where a flash strobe would go.)
+            "flash_strobe_enabled": False,
+            "color_sweep_enabled": False,
+            "dark_sweep_enabled": True,
+            "dark_sweep_depth": 1.0,
+            "dark_sweep_desaturate": 0.0,
+            "dark_sweep_attack_ms": 15.0,
+            "dark_sweep_release_ms": 250.0,
+            "dark_sweep_beats": 1.0,
+            "dark_sweep_rotators": 1,
+            "dark_sweep_width": 2,
+            "dark_sweep_direction": "backward",
+            "dark_sweep_placement": "bars",
+            "dark_sweep_chance": 0.4,
+            "dark_sweep_min_gap_bars": 4,
+            "dark_sweep_min_level": "groove",
+        },
+        "chase": {
+            "enabled": True,
+            "sync_mode": "clock",
+            "clock_every_n_beats": 1,
+            "beat_multiplier": 1.0,
+            "color_mode": "hue_shift_relative",
+            "hue_step_source": "intensity",
+            "hue_step_min_deg": 20.0,
+            "hue_step_max_deg": 90.0,
+            "falloff_curve": "bezier",
+            "switch_fade": True,
+            "switch_fade_ms": 100.0,
+        },
+        "group_switch": {"enabled": False},
     },
 }
 
@@ -351,6 +829,7 @@ def _targets(config: AppConfig) -> dict:
         "sequencer": config.sequencer,
         "color_mapping": config.color_mapping,
         "beat_sync": config.color_mapping.beat_sync,
+        "hsv": config.color_mapping.hsv,
         "chase": config.chase,
         "group_switch": config.group_switch,
     }

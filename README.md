@@ -537,11 +537,30 @@ brightness in 0.1 % steps), not rounded through 8-bit RGB.
 
 ### Presets and built-in looks
 
-- **Built-in look** + **Apply** - sets the shared clock, Beat Sync, the pulse sequencer, Chase and Group
-  Switch together: *Groove - one color per bar*, *Calm - slow color flow*, *Club - punchy*,
-  *Dance - white across groups*, *Chase focus*, *Group focus*. Your lamp setup, Chase width
-  and intensity, Group Switch intensity, beat detection band and sensitivity, lead time and
-  true-white brightness and cool ratio are left as they are.
+- **Built-in look** + **Apply** - sets the colour mode, Beat Sync, the shared clock, the pulses and
+  the pulse sequencer (with its strobes and sweeps), Chase and Group Switch together; the
+  line under the list says what each look does. The colours follow the music: the hue step
+  from the notes or the loudness, Chase and Group Switch turning each lamp's own hue
+  (`hue_shift_relative`) by a step the music sets.
+
+  | Look | In short |
+  |---|---|
+  | *Groove - one color per bar* | a new colour each bar by the notes, white walking the groups on the beats, colour sweeps into phrases |
+  | *Calm - slow color flow* | slow neighbouring hues, one soft white per bar, slow colour sweeps; also for music without a steady beat |
+  | *Club - punchy* | big jumps when loud, white jumping between random groups, strobes, flash strobes, fast dark sweeps |
+  | *Dance - white across groups* | white telling the 8-bar phrase, flash strobes along the walk, washed-out breaths, a dark sweep into each phrase |
+  | *Chase focus* | only Chase moves (the sequencer off), its hue turn growing with the loudness |
+  | *Group focus* | only Group Switch moves, with a short fade and the colour ramping across the groups |
+  | *Strobe - rolls into the phrase* | white on 16ths building up through the phrase, strobe rolls that swell and fade |
+  | *Melody - the notes pick the colors* | Beat Sync's `spectrum` hue from the notes on the circle of fifths; also for music without a steady beat |
+  | *Band Colors - instruments in color* | the [Band Colors](#band-colors) mode with white on the off-beats and dark sweeps |
+
+  Your lamp setup, Chase width, intensity and rotators, Group Switch intensity and active
+  groups, what the white walk steps through, beat detection band and sensitivity, lead time,
+  true-white brightness and cool ratio, the strobe's brightness and max rate, Beat Sync's
+  *Between beats* (fade, hue glide) and the Band Colors palette are left as they are. *Melody*
+  sets HSV Music's hue range to the full circle (its `spectrum` hue spreads over it). The
+  strobes and flash strobes need *Lamp transitions* `direct` or `smooth`.
 - **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
   Group Switch and the lamps' Chase order. Loading one updates every setting at once.
 

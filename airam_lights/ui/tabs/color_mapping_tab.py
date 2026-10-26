@@ -764,10 +764,12 @@ class ColorMappingTab(QWidget):
         builtin_row.addWidget(self.builtin_combo, stretch=1)
         apply_builtin_btn = QPushButton("Apply")
         apply_builtin_btn.setToolTip(
-            "Sets the shared beat clock, Beat Sync, Chase and Group Switch together (the clock, Chase and "
-            "Group Switch are on the Global Effects tab). Leaves your lamp groups, Chase width/intensity, "
-            "Group Switch intensity, beat detection band/sensitivity, lead time and true-white "
-            "depth/brightness/cool ratio as they are."
+            "Sets the colour mode, Beat Sync, the shared beat clock, the pulses and the pulse sequencer "
+            "(strobes and sweeps too), Chase and Group Switch together (all but the first two on the "
+            "Global Effects tab). Leaves your lamp groups, Chase width/intensity/rotators, Group Switch "
+            "intensity and active groups, what the white walk steps through, beat detection, lead time, "
+            "true-white brightness/cool ratio, strobe brightness and max rate, Beat Sync's fade and "
+            "hue glide, and your Band Colors palette as they are."
         )
         apply_builtin_btn.clicked.connect(self._apply_builtin_preset)
         builtin_row.addWidget(apply_builtin_btn)
