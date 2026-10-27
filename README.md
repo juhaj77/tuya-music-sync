@@ -355,7 +355,7 @@ A lamp that stops answering is handled automatically - see
 
 ## Color Mapping tab
 
-![Color Mapping tab: a colour mode's page](ColorMapping.png)
+![Color Mapping tab: a colour mode's page](ColorMapping2.png)
 
 Each colour mode's own settings: a page per mode, then the **Global** section and
 **Presets**. What every mode shares - the shared beat clock, Chase and Group Switch, the
