@@ -37,7 +37,7 @@ from ..color.models import Color, StrobeBurst, WhiteTarget, clip, lerp
 from ..config.schema import INSTANT_TRANSITIONS, AppConfig
 from ..diagnostics.metrics import RateCounter
 from ..dsp.bands import band_energy, spectral_centroid_hz, spectral_contrast
-from ..dsp.beat_clock import BeatClock, ClockBeat, beat_divides
+from ..dsp.beat_clock import BeatClock, ClockBeat
 from ..dsp.beat_detector import BeatDetector
 from ..effects.chase import (
     ChaseAnimator,
@@ -63,7 +63,7 @@ from ..effects.pulse_sequencer import (
     strobe_steps,
 )
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother
-from ..dsp.hue_drive import HueDrive
+from ..dsp.hits import FLASH_MIN as HIT_FLASH_MIN, HitTracker, flash_level
 from ..dsp.hue_step import SOURCES as HUE_STEP_SOURCES, HueStepSignals
 from ..dsp.pitch import PitchTracker
 from ..dsp.spectral_features import FeatureFrame, SpectralFeatures
@@ -221,10 +221,11 @@ class VisualizationEngine:
         self._smoother_beat_white_value = AttackReleaseSmoother(bsw.brightness_attack_ms, bsw.brightness_release_ms)
         self._beat_white_dark_until: Optional[float] = None
         self.last_beat_time_white: Optional[float] = None
-        # "Change temperature every N beats" (temp_every_n_beats), like Beat
-        # Sync's hue: decided on the beat, used on the flash that follows it.
+        # A temperature change the hits have earned (temp_change_hits), like
+        # Beat Sync's hue: decided on the hit, used on the flash that follows
+        # it; and how hard that flash is (see dsp.hits).
         self._bsw_temp_due = True
-        self._bsw_beat_count = 0
+        self._bsw_flash_strength = 1.0
 
         self._chase_animator = ChaseAnimator(config.chase)
         self._group_switch_animator = GroupSwitchAnimator(config.group_switch)
@@ -260,18 +261,22 @@ class VisualizationEngine:
         self._pitch_tracker = PitchTracker()
         self.hue_step_status: Optional[dict] = None  # for display, while Chase's music-driven step runs
         self.group_hue_step_status: Optional[dict] = None  # the same for Group Switch
-        # Beat Sync's "change hue every N beats" bookkeeping: the decision is
-        # made on the beat itself, then used on the (possibly dark-pulse-
-        # delayed) flash that follows it.
-        self._beat_sync_beat_count = 0
+        # Beat Sync and Beat Sync White flash on the hits, not on every beat,
+        # and change colour once the hits add up (see dsp.hits) - public for
+        # display. The hue change is decided on the hit, then used on the
+        # (possibly dark-pulse-delayed) flash that follows it.
+        self.hits = HitTracker()
         self._beat_hue_due = True
-        # Flashes since the hue last changed: with hue_every_n_beats above 1
-        # the hue glide spreads over all N beats instead of starting over on
-        # each one (see _hue_glide_progress).
+        self._beat_flash_strength = 1.0
+        # A hit held back by a dark pulse: it flashes when the pulse ends (a
+        # dark pulse with no hit under it - the sequencer's on a quiet beat,
+        # say - just dips and comes back, no flash).
+        self._flash_pending = False
+        # Flashes since the hue last changed, and when it did: the hue glide
+        # spreads over the gap between changes instead of starting over on
+        # each flash (see _hue_glide_progress).
         self._glide_beats_done = 0
-        # Follow the hits (BeatSyncModeConfig.hue_change_dynamic): how hard
-        # each beat hit, adding up to a hue change - public for display.
-        self.hue_drive = HueDrive()
+        self._hue_changed_at: Optional[float] = None
 
         # Pulse sequencer (see effects/pulse_sequencer.py and _tick_sequencer):
         # per-lamp white flash state, since its flashes walk between groups
@@ -690,13 +695,15 @@ class VisualizationEngine:
         return {device_id: color for device_id in selected_ids}
 
     def _tick_beat_sync_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
-        """On every detected beat: snap to a fresh, fully-saturated hue at
-        full brightness. Between beats: hold the hue and let brightness decay
-        toward a dim baseline (a classic percussive attack/decay envelope) -
-        this is what makes the rhythm visually obvious, unlike the smoothly
-        continuous blending the other modes use.
+        """On every hit: flash a fully-saturated hue, as bright as the hit is
+        hard - a fresh hue once the hits add up to hue_change_hits. Between
+        hits: hold the hue and let brightness decay toward a dim baseline (a
+        classic percussive attack/decay envelope) - this is what makes the
+        rhythm visually obvious, unlike the smoothly continuous blending the
+        other modes use. The beats time the flashes, but a beat without a hit
+        doesn't flash (see dsp.hits), so a quiet passage doesn't pulse.
 
-        Optionally, a random subset of beats first get a brief "dark pulse"
+        Optionally, a random subset of hits first get a brief "dark pulse"
         (a rhythm-synced pause toward black) before the flash actually
         happens - a real-time system can only react to a beat as it occurs,
         not anticipate one, so the pause always starts right on the trigger
@@ -745,25 +752,23 @@ class VisualizationEngine:
         # pulse; the per-beat probability rolls below step aside.
         roll_pulses = not self._sequencing
 
-        self.hue_drive.update(raw_energy, dt)
+        # The beats keep the timing; the music decides which of them flash,
+        # how brightly, and when the hue changes (see dsp.hits).
+        self.hits.update(raw_energy, dt)
+        strength = self.hits.flash_strength(is_beat)
+        hit = strength >= HIT_FLASH_MIN
+
         flash_now = False
-        if is_beat:
-            every_n = max(1, int(cfg.hue_every_n_beats))
-            if clock is not None:
-                change = beat_divides(clock, every_n)
-            else:
-                change = self._beat_sync_beat_count % every_n == 0
-                self._beat_sync_beat_count += 1
-            if cfg.hue_change_dynamic:
-                # Only once the music has hit hard enough (see dsp.hue_drive).
-                change = self.hue_drive.beat(cfg.hue_change_hits, change)
+        if hit:
+            self._beat_flash_strength = strength
             # A change still waiting for its flash (held back by a dark pulse
-            # this beat came in the middle of) isn't dropped by this beat.
+            # this hit came in the middle of) isn't dropped by this hit.
+            change = self.hits.count_flash(strength, cfg.hue_change_hits)
             self._beat_hue_due = self._beat_hue_due or change
 
             # Also gated on "not currently active" for dark, so a fixed-
             # duration pulse can never be extended/re-rolled mid-flight by a
-            # later beat (see the class's docstring) - only whether/when the
+            # later hit (see the class's docstring) - only whether/when the
             # NEXT one can start differs between dark and white, per above.
             if roll_pulses and dark_ready and (
                 cfg.dark_pulse_enabled
@@ -773,8 +778,11 @@ class VisualizationEngine:
                 and random.random() < cfg.dark_pulse_probability
             ):
                 self._beat_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
+                self._flash_pending = True
             elif self._beat_dark_until is None:
                 flash_now = True
+            else:
+                self._flash_pending = True
 
             if roll_pulses and white_ready and (
                 cfg.white_pulse_enabled
@@ -794,7 +802,7 @@ class VisualizationEngine:
 
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
-            flash_now = True
+            flash_now, self._flash_pending = flash_now or self._flash_pending, False
 
         if self._beat_white_pulse_until is not None and wall_now >= self._beat_white_pulse_until:
             self._beat_white_pulse_until = None
@@ -804,13 +812,16 @@ class VisualizationEngine:
                 self._beat_target_hue = self._pick_next_beat_hue(cfg, frame)
                 self._beat_hue_due = False
                 self._glide_beats_done = 0
+                self._hue_changed_at = wall_now
             else:
                 self._glide_beats_done += 1
             self.last_beat_time = wall_now
 
         in_dark_pulse = self._beat_dark_until is not None
         in_white_pulse = self._beat_white_pulse_until is not None
-        target_value = cfg.flash_brightness if flash_now else cfg.sustain_brightness
+        target_value = cfg.sustain_brightness
+        if flash_now:  # as bright as the hit is hard
+            target_value += (cfg.flash_brightness - cfg.sustain_brightness) * flash_level(self._beat_flash_strength)
         value_s = self._smoother_beat_value.update(target_value, dt)
         if not cfg.fade_brightness:
             value_s = cfg.flash_brightness  # full strength all the time (dark pulses still dip it below)
@@ -862,6 +873,7 @@ class VisualizationEngine:
             "value": value_s,
             "saturation": saturation_s,
             "beat": 1.0 if is_beat else 0.0,
+            "hit": strength if hit else 0.0,
             "dark_pulse": 1.0 if in_dark_pulse else 0.0,
             "white_pulse": 1.0 if in_white_pulse else 0.0,
         }
@@ -1102,8 +1114,8 @@ class VisualizationEngine:
             self._beat_white_dark_until = None
         if new == "band_colors":
             self._band_colors.reset()  # its bands' ranges start over from the music playing now
-        elif new == "beat_sync":
-            self.hue_drive.reset()  # likewise the hits' ranges
+        elif new in ("beat_sync", "beat_sync_white"):
+            self.hits.reset()  # likewise the hits' ranges and pattern
         if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White (a dark sweep dims its white)
             self._end_sweep("_color_sweep", self._seq_position)
 
@@ -1711,30 +1723,29 @@ class VisualizationEngine:
         return candidate
 
     def _hue_glide_progress(self, cfg, decay_glide: float, wall_now: float) -> float:
-        """0 right on a hue change .. 1 by the next one. Within a beat: timing
-        "beat" spreads it evenly over the beat interval (the shared clock's
-        tempo, or Beat Sync's own detector's average interval) so the color
-        keeps moving until the next hit; timing "decay", or no tempo known
-        yet, follows the flash's decay. With hue_every_n_beats above 1 each
-        beat carries on from where the one before left off, so the glide
-        spans all N beats instead of starting over (and jumping back) on
-        every beat that doesn't change the hue. Following the hits, the
-        glide spans as many beats as the recent changes came apart (at least
-        N) and then waits at the end for the next change."""
-        within = 1.0 - decay_glide
-        if cfg.hue_glide_timing == "beat" and self.last_beat_time is not None:
-            if self.config.rhythm.shared_clock:
-                period = self._clock_beat.period_s
-            else:
-                period = self._beat_detector.average_interval_s()
-            if period:
-                within = clip((wall_now - self.last_beat_time) / period)
-        span = max(1, int(cfg.hue_every_n_beats))
-        if cfg.hue_change_dynamic:
-            span = max(span, self.hue_drive.typical_gap or span)
+        """0 right on a hue change .. 1 by the next one, then it waits there
+        until the hue changes. Timing "beat" spreads it evenly over the time
+        the recent hue changes came apart (dsp.hits - before there are two,
+        one beat: the shared clock's tempo, or Beat Sync's own detector's
+        average interval), so the color keeps moving and arrives as the next
+        change is due. Timing "decay", or no tempo known yet, moves on with
+        each flash's decay, an equal share per flash of as many flashes as
+        the recent changes came apart - carrying on from where the flash
+        before left off, not starting over (and jumping back) on every flash
+        that doesn't change the hue."""
+        if cfg.hue_glide_timing == "beat" and self._hue_changed_at is not None:
+            interval = self.hits.typical_interval_s
+            if interval is None:
+                if self.config.rhythm.shared_clock:
+                    interval = self._clock_beat.period_s
+                else:
+                    interval = self._beat_detector.average_interval_s()
+            if interval:
+                return clip((wall_now - self._hue_changed_at) / interval)
+        span = self.hits.typical_flashes or 1
         if self._glide_beats_done >= span:
             return 1.0
-        return clip((self._glide_beats_done + within) / span)
+        return clip((self._glide_beats_done + 1.0 - decay_glide) / span)
 
     def _upcoming_beat_hue(self, cfg) -> float:
         """The color the next hue change will land on - the hue glide moves
@@ -1756,13 +1767,13 @@ class VisualizationEngine:
         """Same rhythm-reactive envelope as Beat Sync (including dark
         pulses), but the "hue" being jumped between beats is a color
         TEMPERATURE (warm<->cool) instead - drives the bulb's WHITE
-        work_mode (brightness + temp_value_v2) rather than RGB. Every beat
-        flashes; the temperature changes on every temp_every_n_beats-th one -
-        counted from the bar start on the shared clock, like Beat Sync's hue.
+        work_mode (brightness + temp_value_v2) rather than RGB. As in Beat
+        Sync the hits flash, not every beat, and the temperature changes
+        once they add up to temp_change_hits (see dsp.hits).
 
         The pulse sequencer gives it only its dark pulses and dark sweeps
         (see _tick_sequencer; the sweep is applied in tick_visual). While it runs they replace the per-beat dark pulse
-        roll, and as in Beat Sync a beat in the middle of one flashes when it
+        roll, and as in Beat Sync a hit in the middle of one flashes when it
         ends; the dip itself uses the Dark pulses settings every mode shares
         (Beat Sync's depth and attack/release). Returns (real WhiteTargets to
         send, approximate RGB preview Colors for the UI only)."""
@@ -1777,15 +1788,16 @@ class VisualizationEngine:
             raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
             is_beat = self._beat_detector_white.update(raw_energy, wall_now)
 
+        self.hits.update(raw_energy, dt)
+        strength = self.hits.flash_strength(is_beat)
+        hit = strength >= HIT_FLASH_MIN
+
         flash_now = False
-        if is_beat:
-            every_n = max(1, int(cfg.temp_every_n_beats))
-            # (A change still waiting for its flash isn't dropped by this beat.)
-            if clock is not None:
-                self._bsw_temp_due = self._bsw_temp_due or beat_divides(clock, every_n)
-            else:
-                self._bsw_temp_due = self._bsw_temp_due or self._bsw_beat_count % every_n == 0
-                self._bsw_beat_count += 1
+        if hit:
+            self._bsw_flash_strength = strength
+            # (A change still waiting for its flash isn't dropped by this hit.)
+            change = self.hits.count_flash(strength, cfg.temp_change_hits)
+            self._bsw_temp_due = self._bsw_temp_due or change
             if (
                 not self._sequencing
                 and cfg.dark_pulse_probability > 0.0
@@ -1793,16 +1805,18 @@ class VisualizationEngine:
                 and random.random() < cfg.dark_pulse_probability
             ):
                 self._beat_white_dark_until = wall_now + cfg.dark_pulse_duration_ms / 1000.0
+                self._flash_pending = True
             else:
                 self._beat_white_dark_until = None
-                flash_now = self._beat_dark_until is None  # a sequencer dark pulse holds it until it ends
+                flash_now = self._beat_dark_until is None
+                self._flash_pending = not flash_now  # a sequencer dark pulse holds it until it ends
 
         if self._beat_white_dark_until is not None and wall_now >= self._beat_white_dark_until:
             self._beat_white_dark_until = None
-            flash_now = True
+            flash_now, self._flash_pending = flash_now or self._flash_pending, False
         if self._beat_dark_until is not None and wall_now >= self._beat_dark_until:
             self._beat_dark_until = None
-            flash_now = True
+            flash_now, self._flash_pending = flash_now or self._flash_pending, False
 
         if flash_now:
             if self._bsw_temp_due:
@@ -1815,8 +1829,10 @@ class VisualizationEngine:
 
         if in_dark_pulse:
             target_value = cfg.sustain_brightness * (1.0 - cfg.dark_pulse_depth)
-        elif flash_now:
-            target_value = cfg.flash_brightness
+        elif flash_now:  # as bright as the hit is hard
+            target_value = cfg.sustain_brightness + (
+                cfg.flash_brightness - cfg.sustain_brightness
+            ) * flash_level(self._bsw_flash_strength)
         else:
             target_value = cfg.sustain_brightness
         value_s = self._smoother_beat_white_value.update(target_value, dt)
@@ -1832,6 +1848,7 @@ class VisualizationEngine:
             "temp": temp_s,
             "value": value_s,
             "beat": 1.0 if is_beat else 0.0,
+            "hit": strength if hit else 0.0,
             "dark_pulse": 1.0 if in_dark_pulse or in_seq_dark else 0.0,
         }
         target = WhiteTarget(brightness=value_s, temp=temp_s).clamped()

@@ -75,9 +75,9 @@ def _run(engine, clock, seconds, on_tick):
         clock.now += TICK
 
 
-def test_hue_changes_once_per_bar(monkeypatch):
+def test_hue_changes_every_four_hits(monkeypatch):
     def configure(c):
-        c.color_mapping.beat_sync.hue_every_n_beats = 4
+        c.color_mapping.beat_sync.hue_change_hits = 4.0
 
     engine, clock, _ = _make_engine(monkeypatch, configure)
     _run(engine, clock, 6.0, lambda: None)  # let the clock lock first
@@ -219,7 +219,6 @@ def _glide_config(fade, timing="beat", deg=120.0):
         bs.hue_glide_timing = timing
         bs.hue_mode = "step"
         bs.hue_step_deg = 120.0
-        bs.hue_every_n_beats = 1
         bs.flash_brightness = 0.9
         bs.sustain_brightness = 0.1
         bs.hue_attack_ms = 5.0
@@ -255,10 +254,10 @@ def test_glide_without_fade_keeps_full_brightness_and_moves_all_beat(monkeypatch
         assert abs((samples[b][3] - base) % 360.0 - 120.0) < 1e-6  # the beat lands on the next color
 
 
-def test_glide_spans_every_n_beats_without_jumping_back(monkeypatch):
+def test_glide_spans_two_hits_without_jumping_back(monkeypatch):
     def configure(c):
         _glide_config(fade=False, deg=90.0)(c)
-        c.color_mapping.beat_sync.hue_every_n_beats = 2
+        c.color_mapping.beat_sync.hue_change_hits = 2.0
 
     engine, clock, _ = _make_engine(monkeypatch, configure)
     _run(engine, clock, 6.0, lambda: None)

@@ -305,14 +305,14 @@ def test_dark_only_drops_a_double_decided_before():
     assert seq.tick(4.6, 0.5, 0.06, 0.03, 2, 4, dark_only=True) == []
 
 
-# -- Beat Sync White: change the temperature every N beats -----------------------------------------
+# -- Beat Sync White: the temperature changes once the hits add up (dsp.hits) -----------------------
 
 
-@pytest.mark.parametrize("every_n", [1, 2, 4])
-def test_beat_sync_white_changes_temperature_every_n_beats_on_the_bar(monkeypatch, every_n):
+@pytest.mark.parametrize("hits", [1, 2, 4])
+def test_beat_sync_white_changes_temperature_every_n_hits(monkeypatch, hits):
     engine, clock, lamps = _make_engine(monkeypatch, "beat_sync_white", shared_clock=True)
     engine.config.sequencer.enabled = False
-    engine.config.color_mapping.beat_sync_white.temp_every_n_beats = every_n
+    engine.config.color_mapping.beat_sync_white.temp_change_hits = float(hits)
     _run(engine, clock, 6.0)  # let the clock lock
     beats, changes = [], []
     last = engine._beat_white_target_temp
@@ -328,17 +328,15 @@ def test_beat_sync_white_changes_temperature_every_n_beats_on_the_bar(monkeypatc
 
     _run(engine, clock, 12.0, on_tick)
     assert len(beats) >= 20
-    assert abs(len(changes) - len(beats) / every_n) <= 1
-    for beat in changes:
-        # On the beat itself, and counted from the bar start: every 2 = beats 1 and 3, every 4 = the downbeat.
-        assert beat.is_beat and beat.aligned_index % every_n == 0
+    assert abs(len(changes) - len(beats) / hits) <= 1
+    assert all(beat.is_beat for beat in changes)  # on a beat's flash (a kick on every beat here)
 
 
-def test_beat_sync_white_without_the_clock_counts_its_own_beats(monkeypatch):
+def test_beat_sync_white_without_the_clock_follows_its_own_beats(monkeypatch):
     engine, clock, lamps = _make_engine(monkeypatch, "beat_sync_white", shared_clock=False)
     engine.config.sequencer.enabled = False
     bsw = engine.config.color_mapping.beat_sync_white
-    bsw.temp_every_n_beats = 2
+    bsw.temp_change_hits = 2.0
     bsw.sensitivity, bsw.min_interval_ms, bsw.min_energy = 1.3, 200.0, 0.1
     engine._apply_smoothing_settings()
     beats = changes = 0
@@ -357,20 +355,20 @@ def test_beat_sync_white_without_the_clock_counts_its_own_beats(monkeypatch):
 
 @pytest.mark.parametrize("mode", ["beat_sync", "beat_sync_white"])
 def test_a_change_held_back_by_a_dark_pulse_survives_the_next_beat(monkeypatch, mode):
-    # The change is decided on the beat and made on the flash after it - a
-    # long dark pulse can hold that flash past the next beat, which must not
+    # The change is decided on the hit and made on the flash after it - a
+    # long dark pulse can hold that flash past the next hit, which must not
     # cancel the change.
     engine, clock, lamps = _make_engine(monkeypatch, mode, shared_clock=True)
     engine.config.sequencer.enabled = False
-    engine.config.color_mapping.beat_sync.hue_every_n_beats = 2
-    engine.config.color_mapping.beat_sync_white.temp_every_n_beats = 2
+    engine.config.color_mapping.beat_sync.hue_change_hits = 2.0
+    engine.config.color_mapping.beat_sync_white.temp_change_hits = 2.0
 
     def value():
         return engine._beat_target_hue if mode == "beat_sync" else engine._beat_white_target_temp
 
     _run(engine, clock, 6.0)
-    # Right after an off beat (2 or 4): hold every flash from here on.
-    _run_until(engine, clock, lambda: engine.latest_clock_beat.is_beat and engine.latest_clock_beat.aligned_index % 2)
+    # Right on a change (the hits count from zero again): hold every flash from here on.
+    _run_until(engine, clock, lambda: engine.latest_clock_beat.is_beat and engine.hits.drive == 0.0)
     engine._beat_dark_until = clock.now + 60.0
     before = value()
     seen = []
@@ -381,8 +379,8 @@ def test_a_change_held_back_by_a_dark_pulse_survives_the_next_beat(monkeypatch, 
         return len(seen) == 2
 
     _run_until(engine, clock, two_more_beats)
-    assert [b.aligned_index % 2 for b in seen] == [0, 1]  # a due beat, then an off beat - no flash on either
-    assert value() == before
+    assert engine._beat_hue_due if mode == "beat_sync" else engine._bsw_temp_due  # the second hit made it due...
+    assert value() == before  # ...but held, no flash on either
     engine._beat_dark_until = clock.now  # the dark pulse ends: the flash that was held back
     _run(engine, clock, TICK)
     assert value() != before
@@ -404,13 +402,13 @@ def test_beat_sync_white_temperature_snaps_both_ways_and_follows_its_slider(monk
     assert warm == pytest.approx(cool)
 
 
-def test_temp_every_n_beats_is_saved_and_kept_sane():
+def test_temp_change_hits_is_saved_and_kept_sane():
     config = AppConfig()
-    config.color_mapping.beat_sync_white.temp_every_n_beats = 4
+    config.color_mapping.beat_sync_white.temp_change_hits = 4.0
     again = AppConfig.from_dict(config.to_dict())
-    assert again.color_mapping.beat_sync_white.temp_every_n_beats == 4
-    assert BeatSyncWhiteModeConfig.from_dict({}).temp_every_n_beats == 1  # older settings files
-    assert BeatSyncWhiteModeConfig.from_dict({"temp_every_n_beats": 0}).temp_every_n_beats == 1
+    assert again.color_mapping.beat_sync_white.temp_change_hits == 4.0
+    assert BeatSyncWhiteModeConfig.from_dict({"temp_every_n_beats": 4}).temp_change_hits == 1.0  # older files
+    assert BeatSyncWhiteModeConfig.from_dict({"temp_change_hits": 0}).temp_change_hits == 0.1
 
 
 # -- the whole show on real spectra -----------------------------------------------------------------

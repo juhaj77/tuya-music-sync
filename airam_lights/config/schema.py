@@ -183,10 +183,13 @@ def _pulse_trigger(value) -> str:
 
 @dataclass
 class BeatSyncModeConfig:
-    """'Beat Sync' mode: on every detected beat/onset, jump to a fresh,
-    fully-saturated hue at full brightness, then decay toward a dimmer
-    baseline until the next hit - a much more dramatic, obviously
-    rhythm-locked look than smoothly blending continuous band levels."""
+    """'Beat Sync' mode: on every hit, flash a fully-saturated hue, then
+    decay toward a dimmer baseline until the next hit - a much more dramatic,
+    obviously rhythm-locked look than smoothly blending continuous band
+    levels. The beats (the shared clock's or the own detector's) time the
+    flashes, but only the beats with a hit flash, as brightly as they hit,
+    and the hue changes once the hits add up to hue_change_hits - see
+    dsp.hits."""
 
     detect_low_hz: float = 40.0
     detect_high_hz: float = 200.0  # kick-drum range by default
@@ -211,19 +214,13 @@ class BeatSyncModeConfig:
     hue_step_source: str = "fixed"
     hue_step_min_deg: float = 20.0
     hue_step_max_deg: float = 150.0
-    # Every beat still flashes, but the hue only changes on every Nth beat -
-    # e.g. 4 with the shared beat clock (RhythmConfig) = one color per bar,
-    # which reads as a pattern instead of a new random color on every hit.
-    hue_every_n_beats: int = 1
-    # Follow the hits: the hue changes when the music hits, not on a fixed
-    # count - every beat scores how hard the beat band hit (its rise from the
-    # dip before the hit and its loudness, both against the music's own recent
-    # range, see dsp.hue_drive), and the hue changes on a beat
-    # hue_every_n_beats allows once the scores add up to hue_change_hits (1 =
-    # one full-strength hit). A pounding bass changes it as often as
-    # hue_every_n_beats allows, softer hits less often, a quiet passage not
-    # at all.
-    hue_change_dynamic: bool = True
+    # How many hits change the hue: the flashes' strengths squared add up
+    # (dsp.hits), so 1 = every full-strength hit gets a new hue, a
+    # half-strength one counts a quarter. There's no fixed count of beats:
+    # a pounding four-on-the-floor changes it on every beat, a half-time
+    # kick on every second, a quiet passage not at all. (Replaces
+    # hue_every_n_beats and hue_change_dynamic - older settings files'
+    # values are ignored.)
     hue_change_hits: float = 1.0
     min_hue_jump_deg: float = 60.0  # used when hue_mode == "random": force a visibly different color each hit
 
@@ -372,8 +369,6 @@ class BeatSyncModeConfig:
             hue_step_min_deg=float(d.get("hue_step_min_deg", 20.0)),
             hue_step_max_deg=float(d.get("hue_step_max_deg", 150.0)),
             hue_step_deg=float(d.get("hue_step_deg", 137.5)),
-            hue_every_n_beats=max(1, int(d.get("hue_every_n_beats", 1))),
-            hue_change_dynamic=bool(d.get("hue_change_dynamic", True)),
             hue_change_hits=max(0.1, float(d.get("hue_change_hits", 1.0))),
             min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
             saturation=float(d.get("saturation", 1.0)),
@@ -503,7 +498,7 @@ class BeatSyncWhiteModeConfig:
     """'Beat Sync White' mode: the same rhythm-reactive envelope as Beat
     Sync, but drives the bulb's WHITE work_mode (brightness + color
     temperature, DPs 22/23) instead of RGB color (DP 24) - warm/cool flashes
-    on the beat instead of hue jumps. Uses its own independent beat detector
+    on the hits instead of hue jumps. Uses its own independent beat detector
     (unless it follows the shared clock) and per-beat dark pulses, identical
     in spirit to Beat Sync's; with the pulse sequencer on, the sequencer
     places its dark pulses instead (it takes nothing else from it)."""
@@ -518,11 +513,9 @@ class BeatSyncWhiteModeConfig:
     temp_min: float = 0.0  # 0..1, 0 = warmest
     temp_max: float = 1.0  # 0..1, 1 = coolest
     min_temp_jump: float = 0.35  # used when temp_mode == "random": force a visibly different temp each hit
-    # Every beat still flashes, but the temperature only changes on every Nth
-    # beat - with the shared beat clock counted from the bar start like Beat
-    # Sync's hue_every_n_beats (2 = beats 1 and 3, 4 = once per bar), so it
-    # lands on the strong beats instead of changing on every hit.
-    temp_every_n_beats: int = 1
+    # How many hits change the temperature, like Beat Sync's hue_change_hits
+    # (replaces temp_every_n_beats).
+    temp_change_hits: float = 1.0
 
     flash_brightness: float = 1.0
     sustain_brightness: float = 0.25
@@ -550,7 +543,7 @@ class BeatSyncWhiteModeConfig:
             temp_min=float(d.get("temp_min", 0.0)),
             temp_max=float(d.get("temp_max", 1.0)),
             min_temp_jump=float(d.get("min_temp_jump", 0.35)),
-            temp_every_n_beats=max(1, int(d.get("temp_every_n_beats", 1))),
+            temp_change_hits=max(0.1, float(d.get("temp_change_hits", 1.0))),
             flash_brightness=float(d.get("flash_brightness", 1.0)),
             sustain_brightness=float(d.get("sustain_brightness", 0.25)),
             temp_attack_ms=float(d.get("temp_attack_ms", 40.0)),

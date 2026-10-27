@@ -205,6 +205,8 @@ def test_every_field_is_actually_different_from_default():
 def test_fresh_install_starts_with_the_default_look():
     cfg = AppConfig.with_defaults()
     assert cfg.color_mapping.beat_sync.hue_step_source == "pitch"
+    assert cfg.color_mapping.beat_sync.hue_mode == "spectrum"
+    assert cfg.color_mapping.beat_sync.spectrum_source == "pitch"
     assert cfg.chase.enabled is True and cfg.chase.color_mode == "hue_shift_relative"
     assert cfg.group_switch.enabled is True
     assert cfg.rhythm.shared_clock is True and cfg.sequencer.enabled is True

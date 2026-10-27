@@ -119,7 +119,7 @@ def test_main_window_builds_on_the_sections(qapp, settings_dir):
         assert window.tabs.tabText(3) == "Global Effects"
         color = window.tabs.widget(2)  # Color Mapping: each mode's own settings
         titles = {s._title.text() for s in color.findChildren(CollapsibleSection)}
-        assert {"Beat detection", "Colour on the beat", "Between beats", "Global", "Presets"} <= titles
+        assert {"Beat detection", "Colour on the hit", "Between hits", "Global", "Presets"} <= titles
         assert not {"Rhythm · shared beat clock", "Dark pulses", "Pulse sequencer"} & titles
         effects = window.tabs.widget(3)  # Global Effects: what every mode shares, in three blocks
         blocks = [effects.clock_block, effects.overlays_block, effects.pulses_block]

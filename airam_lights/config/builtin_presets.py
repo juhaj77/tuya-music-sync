@@ -15,8 +15,10 @@ bulbs a matter of the hardware) and the Band Colors palette - which a preset
 should never silently overwrite.
 
 All of them use the shared beat clock, so every layer moves on the same
-beats: the Beat Sync flash on every beat, and slower layers (hue, Chase,
-Group Switch, pulses, sweeps) on fixed divisions of the bar. The colours
+beats: the Beat Sync flash on the beats that have a hit, its hue every few
+hits (hue_change_hits - about once a bar is 4 on a four-on-the-floor), and
+slower layers (Chase, Group Switch, pulses, sweeps) on fixed divisions of
+the bar. The colours
 follow the music where they can: the hue step from the notes or the
 loudness, Chase and Group Switch turning each lamp's own hue
 (hue_shift_relative) by a step the music sets (dsp.hue_step).
@@ -36,7 +38,8 @@ _NO_SEQUENCER = {"enabled": False}
 BUILTIN_PRESETS: Dict[str, dict] = {
     "Groove - one color per bar": {
         "description": (
-            "Flash on every beat and a new color at each bar start - a small step on a note that "
+            "Flash on the hits and a new color every four of them (once a bar on a four-on-the-floor) - "
+            "a small step on a note that "
             "fits the key, a big one on a tense note. True white walks from group to group on the "
             "beats, the heavy ones most, with a dark breath before each bar and a color sweep into "
             "some phrases. Chase turns each lamp's hue every beat, Group Switch changes group every "
@@ -50,7 +53,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 120.0,
             "hue_step_min_deg": 60.0,
             "hue_step_max_deg": 150.0,
-            "hue_every_n_beats": 4,
+            "hue_change_hits": 4.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.35,
@@ -138,7 +141,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
     "Calm - slow color flow": {
         "description": (
             "Gentle, also for music without a steady beat (the clock then follows the notes): the "
-            "color fades to a neighboring hue every two bars, a soft white flash on bar starts swings "
+            "color fades to a neighboring hue every eight hits, a soft white flash on bar starts swings "
             "from group to group, its warm/cool now and then gliding, with a breath before each new "
             "phrase and a slow color sweep now and then. Chase and Group Switch turn the hues a "
             "little, fading slowly."
@@ -151,7 +154,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 45.0,
             "hue_step_min_deg": 20.0,
             "hue_step_max_deg": 70.0,
-            "hue_every_n_beats": 8,
+            "hue_change_hits": 8.0,
             "saturation": 1.0,
             "flash_brightness": 0.9,
             "sustain_brightness": 0.5,
@@ -242,7 +245,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
     },
     "Club - punchy": {
         "description": (
-            "High energy: a new color every two beats, the jump growing with the loudness up to the "
+            "High energy: a new color every two hits, the jump growing with the loudness up to the "
             "opposite color. True white jumps between random groups, from bar starts when it's quiet "
             "to a gallop at the peaks, with doubles, dark breaths and stutters; a hard strobe into "
             "some phrases, flash strobes into some bars and fast dark sweeps. Chase every beat, "
@@ -257,7 +260,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 137.5,
             "hue_step_min_deg": 90.0,
             "hue_step_max_deg": 180.0,
-            "hue_every_n_beats": 2,
+            "hue_change_hits": 2.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.15,
@@ -360,7 +363,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "busier as the song gets louder, sometimes twice in one group or as a short strobe, each "
             "fading the way its beat calls for and cooling toward the phrase end. A fill and a "
             "washed-out dark breath end each 8-bar phrase, a dark sweep runs into the next and every "
-            "lamp flashes on it. A new color every bar, the step following the notes. The flash "
+            "lamp flashes on it. A new color every four hits, the step following the notes. The flash "
             "strobes need Lamp transitions 'direct' or 'smooth'."
         ),
         "rhythm": _CLOCK,
@@ -371,7 +374,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 120.0,
             "hue_step_min_deg": 40.0,
             "hue_step_max_deg": 150.0,
-            "hue_every_n_beats": 4,
+            "hue_change_hits": 4.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.35,
@@ -457,7 +460,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "description": (
             "Only the Chase overlay moves (Group Switch and the pulse sequencer off): one softly faded "
             "step per beat, turning each lamp's hue the more the louder the music, up to the opposite "
-            "color. A new base color per bar, a bigger step the brighter the sound; true white "
+            "color. A new base color every four hits, a bigger step the brighter the sound; true white "
             "following the Chase highlight on the hardest hits."
         ),
         "rhythm": _CLOCK,
@@ -469,7 +472,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 120.0,
             "hue_step_min_deg": 60.0,
             "hue_step_max_deg": 150.0,
-            "hue_every_n_beats": 4,
+            "hue_change_hits": 4.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.3,
@@ -505,7 +508,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "Only Group Switch moves (Chase and the pulse sequencer off): the active group changes "
             "every two beats with a short fade, its hue turned by how loud and bright the music is, "
             "the color ramping across the groups behind it (with three or more groups). A new base "
-            "color per bar, true white on the active group's accents."
+            "color every four hits, true white on the active group's accents."
         ),
         "rhythm": _CLOCK,
         "sequencer": _NO_SEQUENCER,
@@ -516,7 +519,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 120.0,
             "hue_step_min_deg": 60.0,
             "hue_step_max_deg": 150.0,
-            "hue_every_n_beats": 4,
+            "hue_change_hits": 4.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.35,
@@ -551,7 +554,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "True white walking from group to group on 16ths, thinned toward the heavy steps and "
             "building up through each phrase, with stutter dark breaths. Into a phrase or its second "
             "half, now and then a 2-beat strobe roll that swells and fades, and flash strobes into "
-            "some bars. A new color every two beats, the jump growing with the loudness; Group "
+            "some bars. A new color every two hits, the jump growing with the loudness; Group "
             "Switch in the complementary color every bar. The strobes need Lamp transitions "
             "'direct' or 'smooth' (Global box)."
         ),
@@ -563,7 +566,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "hue_step_deg": 87.6,
             "hue_step_min_deg": 60.0,
             "hue_step_max_deg": 150.0,
-            "hue_every_n_beats": 2,
+            "hue_change_hits": 2.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.48,
@@ -652,7 +655,7 @@ BUILTIN_PRESETS: Dict[str, dict] = {
         "beat_sync": {
             "hue_mode": "spectrum",
             "spectrum_source": "pitch",
-            "hue_every_n_beats": 2,
+            "hue_change_hits": 2.0,
             "saturation": 1.0,
             "flash_brightness": 1.0,
             "sustain_brightness": 0.45,

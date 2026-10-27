@@ -223,7 +223,6 @@ def _beat_sync_engine(monkeypatch, glide=False):
     bs.spectrum_source = "intensity_brightness"
     bs.dark_pulse_enabled = False
     bs.white_pulse_enabled = False
-    bs.hue_change_dynamic = False  # the faked beats come with no hits (pure tones)
     bs.hue_attack_ms = 0.0
     bs.glide_hue = glide
     bs.hue_glide_deg = 60.0
@@ -235,6 +234,8 @@ def _beat_sync_engine(monkeypatch, glide=False):
     audio = AudioCapture()
     engine = VisualizationEngine(config, audio, _Lamps())
     engine.running = True
+    # The faked beats come with no hits (pure tones): let every one of them flash.
+    monkeypatch.setattr(engine.hits, "flash_strength", lambda is_beat: 1.0 if is_beat else 0.0)
     tick = engine.tick_visual
 
     def tick_and_advance():

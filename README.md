@@ -82,7 +82,7 @@ other colour modes start from tuned settings too.
 
 - **Every lamp in sync, locally** - loopback audio from the PC (or a microphone) and the
   Tuya LAN protocol; no cloud round-trip, no phone app once set up. Any number of lamps.
-- **Five colour modes** - **Beat Sync** (the main mode: a flash on every beat, on the
+- **Five colour modes** - **Beat Sync** (the main mode: a flash on every hit, timed by the
   shared beat clock), Beat Sync White, Peak Flash, HSV Music and Band Colors.
 - **Pulses in every mode** - the pulse sequencer places dark breaths, true-white flashes
   walking round the room, strobes and colour sweeps on the beat grid, with the same
@@ -366,16 +366,28 @@ running one.
 
 ### Beat Sync
 
-The main mode: on every beat the lamps jump to a fresh, fully saturated colour at full
-brightness, then fade toward a dim *Sustain brightness* until the next beat - a
-percussive flash-and-decay that makes the rhythm obvious. Its page has these sections:
+The main mode: on every hit the lamps flash a fully saturated colour, then fade toward a
+dim *Sustain brightness* until the next hit - a percussive flash-and-decay that makes the
+rhythm obvious. The beats (the shared clock's, or Beat Sync's own detector's) time the
+flashes, but only the beats with a hit flash, as brightly as they hit: a pounding
+four-on-the-floor flashes on every beat, a half-time kick on every second, and a quiet
+passage or a breakdown doesn't pulse at all, though the clock keeps the beat going through
+it.
+
+How it knows: each beat's hit is scored by how far the bass (the beat detection band) rose
+from the dip before it and how loud it was, both against the song's own recent hits - the
+way Band Colors measures its bands. The beats expect their hits from the pattern they've
+been coming in - every beat, every second beat, beats 1 and 4 of a bar... - so a flash
+still goes out on time, ahead of the hit by the clock's lead time. A hit no beat expected
+(the drop after a break) flashes as it lands, and from then on the beats expect it again.
+Its page has these sections:
 
 **Beat detection** - Beat Sync's own detector (band, *Beat detector sensitivity*, *Min
 interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shared clock.
 
-**Colour on the beat** - how each beat's new colour is picked (*Hue mode*):
+**Colour on the hit** - how each new colour is picked (*Hue mode*):
 
-- `random` - a new hue every beat, at least *Min hue jump* away from the last one.
+- `random` - a new hue on every change, at least *Min hue jump* away from the last one.
 - `step` - moves on by a fixed angle (*Hue step*; 137.5° is the golden angle: well-spread
   colours that don't repeat for a long time). With **Hue step from** anything but `fixed`,
   the music sets each step between *Step min* and *Step max*:
@@ -391,34 +403,32 @@ interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shar
   recent range, so all music uses the whole hue range. The line under *Hue mode* shows the
   note, the key and how much of the colour comes from the pitch.
 
-**Change hue** (every beat, every 2 beats, every bar...) keeps a colour for several beats -
-every beat still flashes. With **Follow the hits** (on) the colour changes when the music
-hits instead of on a fixed count: each beat scores how hard the bass hit - how far it rose
-from the dip before it, and how loud it was, both against the song's own recent hits (the
-way Band Colors measures its bands) - and the colour changes once the scores reach **Hits
-per change**, on a beat *Change hue* allows. A pounding bass changes it as often as *Change
-hue* allows, softer hits less often, and a quiet passage or a breakdown not at all, even
-while the beat clock keeps going. *Hits per change* 1 = every hard hit (a half-strength hit
-counts a quarter); higher holds the colour longer. The line under it shows the last beat's
-hit and how close the next change is. Then the flash itself: *Saturation*, *Flash brightness*,
-*Sustain brightness* (the level between beats), *Hue snap speed* (how fast the colour
-changes to the new hue - low = a snap, high = a fade), *Brightness attack* and *Brightness
-decay* (how slowly the flash fades back to Sustain brightness).
+**Hits per change** - how many hits it takes to change the colour; there's no fixed count
+of beats. 1 = every full-strength hit gets a new colour (a half-strength hit counts a
+quarter), so a four-on-the-floor changes it on every beat and a half-time kick on every
+second; 4 = about once a bar on a four-on-the-floor; a quiet passage never changes it. The
+line under it shows the pattern the hits come in, the last hit and how close the next change
+is. Then the flash itself: *Saturation*, *Flash brightness* (on a full-strength hit; softer
+hits flash lower), *Sustain brightness* (the level between hits and through a quiet
+passage), *Hue snap speed* (how fast the colour changes to the new hue - low = a snap,
+high = a fade), *Brightness attack* and *Brightness decay* (how slowly the flash fades back
+to Sustain brightness).
 
-**Between beats** - what moves after each flash, either, both or neither:
+**Between hits** - what moves after each flash, either, both or neither:
 
 - **Fade brightness** (on) - the flash fades toward *Sustain brightness* over *Brightness
   decay* (both in the section above). Off: the brightness stays at *Flash brightness* (on RGB+CCT bulbs the coloured
   LEDs are much dimmer than the white ones, so this keeps the colour at full strength).
-- **Glide hue** - after each beat the colour travels *Glide distance* degrees toward the
-  next colour, and the next beat lands on it. *Glide timing* `beat` moves evenly through
-  the beat (the colour wheel turns with the tempo); `decay` follows the brightness decay -
-  a quick sweep right after the hit. A distance about the Hue step arrives exactly at the
-  next colour; 360 is a full rainbow every beat. Gliding sends commands continuously,
-  capped by *Lamp command rate*.
+- **Glide hue** - after each colour change the colour travels *Glide distance* degrees
+  toward the next colour, and the next change lands on it. *Glide timing* `beat` moves
+  evenly until the next change is due (as far apart as the recent changes came - the colour
+  wheel turns with the music) and waits at the end through a quiet passage; `decay` moves on
+  with each flash's decay - a quick sweep right after the hit. A distance about the Hue step
+  arrives exactly at the next colour; 360 is a full rainbow every change. Gliding sends
+  commands continuously, capped by *Lamp command rate*.
 
-**Per-beat pulses** - Beat Sync can also roll [dark and white pulses](#dark-and-white-pulses)
-on its own beats, without the sequencer. In those two sections (Global Effects tab), shown
+**Per-hit pulses** - Beat Sync can also roll [dark and white pulses](#dark-and-white-pulses)
+on its own hits, without the sequencer. In those two sections (Global Effects tab), shown
 only while Beat Sync is the mode:
 
 - *Dark / White pulse probability* - the chance per beat.
@@ -428,23 +438,24 @@ only while Beat Sync is the mode:
   `chase` highlight, the active Group Switch `group`, or `rotate` - its own walk one lamp on
   per flash through the Chase order.
 
-A dark pulse rolled on a beat starts on it - the app can't see a beat coming - and the flash
-comes when the dip ends. With the [pulse sequencer](#pulse-sequencer) running, the sequencer
+A dark pulse rolled on a hit starts on it - the app can't see a beat coming - and the flash
+comes when the dip ends. A dark pulse with no hit under it (the sequencer's on a quiet beat)
+just dips and comes back, without a flash. With the [pulse sequencer](#pulse-sequencer) running, the sequencer
 places the pulses instead and these settings are greyed out.
 
 ### Beat Sync White
 
 Beat Sync's flash-and-decay, but on the bulb's **white** LEDs: brightness and colour
-temperature instead of colour - the lamps stay white and move warm <-> cool on the beat.
+temperature instead of colour - the lamps stay white and move warm <-> cool on the hits. As
+in Beat Sync only the beats with a hit flash, as brightly as they hit.
 
 - **Temperature mode** - `random` picks a new temperature at least *Min temp jump* away;
   `alternate` ping-pongs between *Temp range min (warm)* and *max (cool)*.
-- **Change temperature** (every beat, every 2 beats, every bar...) - every beat still
-  flashes, but the temperature changes only on these beats, so it doesn't flicker warm-cool
-  on every hit. With the shared clock and *Lock to tempo* it's counted from the bar start,
-  so the change lands on the strong beats: every 2 beats = beats 1 and 3, every bar = the
-  downbeat. *Temp snap speed* - how fast it moves to the new temperature, toward warm as
-  fast as toward cool.
+- **Hits per change** - how many hits it takes to change the temperature, as in Beat Sync:
+  1 = every full-strength hit, higher = fewer changes so it doesn't flicker warm-cool on
+  every hit (4 = about once a bar on a four-on-the-floor); a quiet passage never changes it.
+  *Temp snap speed* - how fast it moves to the new temperature, toward warm as fast as
+  toward cool.
 - **Dark pulses** - with the [pulse sequencer](#pulse-sequencer) running it takes the
   sequencer's dark pulses (only those), shaped by the shared
   [Dark pulses](#dark-and-white-pulses) section; otherwise its own per-beat ones (*Dark
@@ -566,7 +577,7 @@ brightness in 0.1 % steps), not rounded through 8-bit RGB.
   Your lamp setup, Chase width, intensity and rotators, Group Switch intensity and active
   groups, what the white walk steps through, beat detection band and sensitivity, lead time,
   true-white brightness and cool ratio, the strobe's brightness and max rate, Beat Sync's
-  *Between beats* (fade, hue glide) and the Band Colors palette are left as they are. *Melody*
+  *Between hits* (fade, hue glide) and the Band Colors palette are left as they are. *Melody*
   sets HSV Music's hue range to the full circle (its `spectrum` hue spreads over it). The
   strobes and flash strobes need *Lamp transitions* `direct` or `smooth`.
 - **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
@@ -602,9 +613,9 @@ sequencer, Chase and Group Switch move on the same beats instead of each reactin
 different hits (`dsp/beat_clock.py`).
 
 - **Beat Sync (and Beat Sync White) follow the shared clock** - on in a fresh install. Their
-  own beat detection settings are then unused (greyed out), their pulses can be triggered
-  on accents or bar starts, and *Change hue* / *Change temperature* count from the bar
-  start. The pulse sequencer needs it in these two modes (the other modes don't).
+  own beat detection settings are then unused (greyed out), their flashes go out ahead of
+  the hits by *Lead time*, and their pulses can be triggered on accents or bar starts. The
+  pulse sequencer needs it in these two modes (the other modes don't).
 - **Beat detection band** - keep it on the kick drum (40-150 Hz): the cleanest beat.
 - **Beat clock sensitivity** - how far above the recent average a kick must rise to count.
   Around 1.08-1.15 suits most music; once the tempo is locked, missed kicks are filled in

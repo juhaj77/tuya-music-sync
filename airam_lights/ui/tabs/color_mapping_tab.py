@@ -32,7 +32,7 @@ from ...config.user_presets import apply_preset, snapshot_preset
 from ...config.schema import LAMP_TRANSITIONS
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
-from ..widgets.musical import beat_divisions, choice_combo, inactive_note, labeled_combo, set_active, show_note
+from ..widgets.musical import inactive_note, labeled_combo, set_active, show_note
 from ..quick_settings import (
     BAND_CHORD_TURN_TIP,
     BAND_FOCUS_TIP,
@@ -79,6 +79,17 @@ class _ModeTabs(QTabWidget):
         page_width = width - self.style().sizeFromContents(QStyle.CT_TabWidget, opt, QSize(0, 0), self).width()
         page_height = page.heightForWidth(page_width) if page.hasHeightForWidth() else page.sizeHint().height()
         return height - page.parentWidget().heightForWidth(page_width) + page_height
+
+
+def hits_pattern_text(period: int, hits: int) -> str:
+    """What the hit pattern (dsp.hits) looks like, for the status lines."""
+    if hits == 0:
+        return "none lately"
+    if period == 1:
+        return "on every beat"
+    if hits == 1:
+        return f"one every {period} beats"
+    return f"{hits} in every {period} beats"
 
 
 class ColorMappingTab(QWidget):
@@ -216,8 +227,10 @@ class ColorMappingTab(QWidget):
         beat_layout.addWidget(beat_sensitivity_note)
 
         beat_layout = beat_section(
-            "Colour on the beat", "color",
-            tooltip="Which colour each beat jumps to, how bright the flash is and how it decays.",
+            "Colour on the hit", "color",
+            tooltip="Which colour each hit jumps to, how often it changes, how bright the flash is and "
+            "how it decays. The beats time the flashes, but only the beats with a hit flash - as "
+            "brightly as they hit - so a quiet passage doesn't pulse.",
         ).content_layout()
         hue_row = QHBoxLayout()
         hue_row.addWidget(QLabel("Hue mode:"))
@@ -261,47 +274,25 @@ class ColorMappingTab(QWidget):
         self._spectrum_timer = QTimer(self)
         self._spectrum_timer.timeout.connect(self._refresh_spectrum_status)
         self._spectrum_timer.timeout.connect(self._refresh_band_status)
-        self._spectrum_timer.timeout.connect(self._refresh_hue_drive_status)
+        self._spectrum_timer.timeout.connect(self._refresh_hits_status)
         self._spectrum_timer.start(200)
 
-        hue_every_row = QHBoxLayout()
-        hue_every_row.addWidget(QLabel("Change hue:"))
-        self.beat_hue_every_combo = choice_combo(
-            beat_divisions(controller.config.rhythm.beats_per_bar), bs.hue_every_n_beats,
-            "Every beat still flashes, but the color only changes on these beats - with Follow the "
-            "hits on, only when the music has hit hard enough by then. With the shared beat clock this "
-            "is counted from the bar start, so e.g. 'every bar' changes color exactly on beat 1. The "
-            "choices follow Beats per bar in the Rhythm box (Global Effects tab).",
-        )
-        self.beat_hue_every_combo.currentIndexChanged.connect(self._on_beat_changed)
-        hue_every_row.addWidget(self.beat_hue_every_combo)
-        self.beat_hue_dynamic_checkbox = QCheckBox("Follow the hits")
-        self.beat_hue_dynamic_checkbox.setChecked(bs.hue_change_dynamic)
-        self.beat_hue_dynamic_checkbox.setToolTip(
-            "On: the color changes when the music hits, not on a fixed count. Each beat scores how hard "
-            "the bass hit - how far it rose from the dip before it, and how loud it was, both against "
-            "the song's own recent hits (like Band Colors measures its bands) - and the color changes "
-            "once the scores reach Hits per change, on a beat Change hue allows. A pounding bass changes "
-            "it as often as Change hue allows, softer hits less often, a quiet passage not at all. "
-            "Off: it changes on every beat Change hue allows."
-        )
-        self.beat_hue_dynamic_checkbox.toggled.connect(self._on_beat_changed)
-        hue_every_row.addSpacing(16)
-        hue_every_row.addWidget(self.beat_hue_dynamic_checkbox)
-        hue_every_row.addStretch(1)
-        beat_layout.addLayout(hue_every_row)
         self.beat_hue_hits_slider = FloatSlider(
             "Hits per change", 0.25, 8.0, bs.hue_change_hits, decimals=2,
-            tooltip="Follow the hits: how many full-strength hits it takes to change the color. 1 = every "
-            "hard hit changes it (as often as Change hue allows), and a half-strength hit counts a "
-            "quarter. Higher = the color holds longer and changes on the hardest stretches; lower = "
-            "softer hits change it too.",
+            tooltip="How many hits it takes to change the color - there's no fixed count of beats: it "
+            "follows where the music hits. Each beat's hit is scored by how far the bass rose from the "
+            "dip before it and how loud it was, both against the song's own recent hits (the way Band "
+            "Colors measures its bands); the beats expect their hits from the pattern they've been "
+            "coming in (every beat, every second beat, once a bar...). 1 = every full-strength hit gets "
+            "a new color, a half-strength hit counts a quarter: a pounding four-on-the-floor changes it "
+            "on every beat, a half-time kick on every second, a quiet passage not at all. 4 = about "
+            "once a bar on a four-on-the-floor.",
         )
         self.beat_hue_hits_slider.valueChanged.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_hue_hits_slider)
-        self.beat_hue_drive_label = QLabel()
-        self.beat_hue_drive_label.setWordWrap(True)
-        beat_layout.addWidget(self.beat_hue_drive_label)
+        self.beat_hits_label = QLabel()
+        self.beat_hits_label.setWordWrap(True)
+        beat_layout.addWidget(self.beat_hits_label)
 
         self.beat_hue_step_slider = FloatSlider(
             "Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg",
@@ -350,13 +341,13 @@ class ColorMappingTab(QWidget):
         )
         self.beat_flash_slider = FloatSlider(
             "Flash brightness", 0.0, 1.0, bs.flash_brightness,
-            tooltip="How bright the color is exactly on the beat, before it starts decaying - this is "
-            "the flash you actually see land on the hit itself.",
+            tooltip="How bright the color is right on a full-strength hit, before it starts decaying - "
+            "softer hits flash lower, between Sustain and this.",
         )
         self.beat_sustain_slider = FloatSlider(
             "Sustain brightness", 0.0, 1.0, bs.sustain_brightness,
-            tooltip="How bright it settles to between beats, once the flash has decayed - the resting/"
-            "idle brightness the lamp sits at until the next hit.",
+            tooltip="How bright it settles to between hits, once the flash has decayed - the resting/"
+            "idle brightness the lamp sits at until the next hit (and through a quiet passage).",
         )
         self.beat_hue_attack_slider = FloatSlider(
             "Hue snap speed", 5.0, 500.0, bs.hue_attack_ms, decimals=0, suffix=" ms",
@@ -391,24 +382,25 @@ class ColorMappingTab(QWidget):
             beat_layout.addWidget(w)
 
         beat_layout = beat_section(
-            "Between beats", "between",
-            tooltip="What happens between two beats: the brightness fades, the colour glides on toward "
+            "Between hits", "between",
+            tooltip="What happens between two hits: the brightness fades, the colour glides on toward "
             "the next one, or both.",
         ).content_layout()
         between_row = QHBoxLayout()
-        between_row.addWidget(QLabel("Between beats:"))
+        between_row.addWidget(QLabel("Between hits:"))
         self.beat_fade_checkbox = QCheckBox("Fade brightness")
         self.beat_fade_checkbox.setChecked(bs.fade_brightness)
         self.beat_fade_checkbox.setToolTip(
-            "On: the classic flash - Flash brightness on the beat, fading to Sustain brightness. Off: "
+            "On: the classic flash - up to Flash brightness on the hit, fading to Sustain brightness. Off: "
             "brightness stays at Flash brightness all the time (dark pulses still dip it) - good for "
             "RGB+CCT bulbs whose colored LEDs are much dimmer than their white ones."
         )
         self.beat_glide_checkbox = QCheckBox("Glide hue")
         self.beat_glide_checkbox.setChecked(bs.glide_hue)
         self.beat_glide_checkbox.setToolTip(
-            "On: after each beat the color glides toward the next color, and the next beat lands on "
-            "it - the rhythm shows as moving color. Works together with Fade brightness or on its own."
+            "On: after each color change the color glides toward the next color, and the next change "
+            "lands on it - the rhythm shows as moving color. Works together with Fade brightness or on "
+            "its own."
         )
         for cb in (self.beat_fade_checkbox, self.beat_glide_checkbox):
             cb.toggled.connect(self._on_beat_changed)
@@ -419,8 +411,9 @@ class ColorMappingTab(QWidget):
         self.beat_glide_timing_combo.addItems(["beat", "decay"])
         self.beat_glide_timing_combo.setCurrentText(bs.hue_glide_timing)
         self.beat_glide_timing_combo.setToolTip(
-            "beat: the color moves evenly through the whole beat and arrives right as the next beat "
-            "hits - a color wheel turning in time with the music (uses the tempo). decay: follows "
+            "beat: the color moves evenly until the next color change is due (as far apart as the "
+            "recent changes came) and arrives as it comes - a color wheel turning in time with the "
+            "music; through a quiet passage it waits at the end. decay: moves on with each flash's "
             "Brightness attack/decay - a quick sweep right after the hit, then still."
         )
         self.beat_glide_timing_combo.currentTextChanged.connect(self._on_beat_changed)
@@ -429,9 +422,10 @@ class ColorMappingTab(QWidget):
         beat_layout.addLayout(between_row)
         self.beat_hue_glide_slider = FloatSlider(
             "Glide distance", 0.0, 360.0, bs.hue_glide_deg, decimals=0, suffix=" deg",
-            tooltip="How far around the color wheel the color travels between two beats, toward the next "
-            "color. About the Hue step (in 'step' mode) = it arrives exactly at the next color; more "
-            "overshoots and snaps back on the beat; 360 = a full rainbow every beat. In 'spectrum' mode "
+            tooltip="How far around the color wheel the color travels between two color changes, toward "
+            "the next color. About the Hue step (in 'step' mode) = it arrives exactly at the next color; "
+            "more overshoots and snaps back on the change; 360 = a full rainbow every change. In "
+            "'spectrum' mode "
             "the color glides this far the way the music's color last moved, turning round at the ends "
             "of the hue range.",
         )
@@ -450,7 +444,7 @@ class ColorMappingTab(QWidget):
         bsw = cm.beat_sync_white
         bsw_desc_label = QLabel(
             "Same rhythm-reactive envelope as Beat Sync, but drives the bulb's WHITE work_mode "
-            "(brightness + color temperature) instead of RGB - warm/cool flashes on the beat. "
+            "(brightness + color temperature) instead of RGB - warm/cool flashes on the hits. "
             "See DEVICE_NOTES.md: the underlying set_white() call is not yet independently "
             "confirmed against the physical bulbs the way RGB is."
         )
@@ -499,21 +493,19 @@ class ColorMappingTab(QWidget):
         bsw_temp_mode_note.setWordWrap(True)
         bsw_layout.addWidget(bsw_temp_mode_note)
 
-        bsw_every_row = QHBoxLayout()
-        bsw_every_row.addWidget(QLabel("Change temperature:"))
-        self.bsw_temp_every_combo = choice_combo(
-            beat_divisions(controller.config.rhythm.beats_per_bar), bsw.temp_every_n_beats,
-            "Every beat still flashes, but the temperature only changes on these beats - fewer changes, so "
-            "it doesn't flicker warm-cool on every hit. With the shared beat clock and Lock to tempo (Global "
-            "Effects tab, Rhythm box) it's counted from the bar start, so the change lands on the strong beats: "
-            "every 2 beats = beats 1 and 3, every bar = the downbeat. The choices follow Beats per bar there.",
+        self.bsw_temp_hits_slider = FloatSlider(
+            "Hits per change", 0.25, 8.0, bsw.temp_change_hits, decimals=2,
+            tooltip="How many hits it takes to change the temperature - like Beat Sync's hue, there's no "
+            "fixed count of beats: only the beats with a hit flash, as brightly as they hit, and 1 = every "
+            "full-strength hit gets a new temperature (a half-strength hit counts a quarter). Higher = "
+            "fewer changes, so it doesn't flicker warm-cool on every hit; 4 = about once a bar on a "
+            "four-on-the-floor.",
         )
-        self.bsw_temp_every_combo.currentIndexChanged.connect(self._on_beat_white_changed)
-        bsw_every_row.addWidget(self.bsw_temp_every_combo)
-        bsw_every_row.addStretch(1)
-        bsw_layout.addLayout(bsw_every_row)
-        self.bsw_temp_every_note = inactive_note()
-        bsw_layout.addWidget(self.bsw_temp_every_note)
+        self.bsw_temp_hits_slider.valueChanged.connect(self._on_beat_white_changed)
+        bsw_layout.addWidget(self.bsw_temp_hits_slider)
+        self.bsw_hits_label = QLabel()
+        self.bsw_hits_label.setWordWrap(True)
+        bsw_layout.addWidget(self.bsw_hits_label)
 
         self.bsw_temp_min_slider = FloatSlider("Temp range min (warm)", 0.0, 1.0, bsw.temp_min, decimals=2)
         self.bsw_temp_max_slider = FloatSlider("Temp range max (cool)", 0.0, 1.0, bsw.temp_max, decimals=2)
@@ -862,12 +854,8 @@ class ColorMappingTab(QWidget):
             )
         set_active([self.beat_spectrum_source_combo], bs.hue_mode == "spectrum", f"Hue mode is '{bs.hue_mode}'.")
         set_active(
-            [self.beat_hue_hits_slider], bs.hue_change_dynamic,
-            "Follow the hits is off: the color changes on every beat Change hue allows.",
-        )
-        set_active(
             [self.beat_sustain_slider], bs.fade_brightness,
-            "Fade brightness is off: brightness stays at Flash brightness between beats.",
+            "Fade brightness is off: brightness stays at Flash brightness between hits.",
         )
         set_active([self.beat_hue_glide_slider, self.beat_glide_timing_combo], bs.glide_hue, "Glide hue is off.")
         set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
@@ -898,14 +886,6 @@ class ColorMappingTab(QWidget):
             "per-beat ones are greyed out - they apply again while the sequencer is off or the beat clock hasn't "
             "locked yet."
         ) if sequencing else "")
-        if bsw.temp_every_n_beats > 1 and not (rh.shared_clock and rh.tempo_lock):
-            show_note(self.bsw_temp_every_note, (
-                "Counted from the bar start only with the shared beat clock and Lock to tempo (Global Effects "
-                "tab, Rhythm box) - "
-                "now it counts the detected beats, so the changes can drift off the strong beats."
-            ))
-        else:
-            show_note(self.bsw_temp_every_note, "")
 
     def _add_smoothing_sliders(self, layout) -> "tuple[FloatSlider, FloatSlider]":
         """HSV Music's Attack/Release (the level smoothing), as on the Quick
@@ -1116,8 +1096,6 @@ class ColorMappingTab(QWidget):
         bs.hue_step_source = self.beat_hue_step_source_combo.currentText()
         bs.hue_step_min_deg = self.beat_hue_step_min_slider.value()
         bs.hue_step_max_deg = self.beat_hue_step_max_slider.value()
-        bs.hue_every_n_beats = self.beat_hue_every_combo.currentData()
-        bs.hue_change_dynamic = self.beat_hue_dynamic_checkbox.isChecked()
         bs.hue_change_hits = self.beat_hue_hits_slider.value()
         bs.min_hue_jump_deg = self.beat_min_jump_slider.value()
         bs.saturation = self.beat_saturation_slider.value()
@@ -1144,7 +1122,7 @@ class ColorMappingTab(QWidget):
         bsw.temp_min = self.bsw_temp_min_slider.value()
         bsw.temp_max = self.bsw_temp_max_slider.value()
         bsw.min_temp_jump = self.bsw_min_jump_slider.value()
-        bsw.temp_every_n_beats = self.bsw_temp_every_combo.currentData()
+        bsw.temp_change_hits = self.bsw_temp_hits_slider.value()
         bsw.flash_brightness = self.bsw_flash_slider.value()
         bsw.sustain_brightness = self.bsw_sustain_slider.value()
         bsw.temp_attack_ms = self.bsw_temp_attack_slider.value()
@@ -1238,24 +1216,33 @@ class ColorMappingTab(QWidget):
             apply_builtin_preset(self.controller.config, name)
             self.controller.replace_config_settings()
 
-    def _refresh_hue_drive_status(self) -> None:
-        """The line under Hits per change: how hard the beats hit right now."""
+    def _refresh_hits_status(self) -> None:
+        """The line under Hits per change (Beat Sync and Beat Sync White):
+        the pattern the hits come in and how close the next change is."""
         cfg = self.controller.config.color_mapping
-        if cfg.mode != "beat_sync" or not cfg.beat_sync.hue_change_dynamic:
-            self.beat_hue_drive_label.setText("")
+        labels = {"beat_sync": self.beat_hits_label, "beat_sync_white": self.bsw_hits_label}
+        for mode, other in labels.items():
+            if mode != cfg.mode:
+                other.setText("")
+        label = labels.get(cfg.mode)
+        if label is None:
             return
         engine = self.controller.engine
         if not engine.running:
-            self.beat_hue_drive_label.setText("Hits: - (runs while the visualizer is on)")
+            label.setText("Hits: - (runs while the visualizer is on)")
             return
-        drive = engine.hue_drive
+        hits = engine.hits
+        if cfg.mode == "beat_sync":
+            per_change = cfg.beat_sync.hue_change_hits
+        else:
+            per_change = cfg.beat_sync_white.temp_change_hits
         text = (
-            f"Hits: last beat {drive.hit:.0%}, {drive.drive:.2f} of {cfg.beat_sync.hue_change_hits:.2f} "
-            "toward the next change"
+            f"Hits: {hits_pattern_text(hits.period, hits.pattern_hits)}, the last one {hits.hit:.0%}"
+            f"  |  {hits.drive:.2f} of {per_change:.2f} toward the next change"
         )
-        if drive.typical_gap is not None:
-            text += f"  |  lately a change every {drive.typical_gap} beat{'s' if drive.typical_gap > 1 else ''}"
-        self.beat_hue_drive_label.setText(text)
+        if hits.typical_interval_s is not None:
+            text += f", lately every {hits.typical_interval_s:.1f} s"
+        label.setText(text)
 
     def _refresh_spectrum_status(self) -> None:
         """The line under Hue mode: what the music-driven spectrum hue / hue step is doing."""

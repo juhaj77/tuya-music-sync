@@ -176,18 +176,17 @@ def test_beat_sync_white_detector_greys_out_on_the_shared_clock(window, qapp):
     assert cmt.bsw_sensitivity_slider.isEnabled()
 
 
-def test_change_temperature_every_n_beats(window, qapp):
+def test_hits_per_change_replaces_the_every_n_beats_choices(window, qapp):
     config = window.controller.config
     cmt = _color_mapping(window, qapp, "beat_sync_white")
-    combo = cmt.bsw_temp_every_combo
-    assert [combo.itemData(i) for i in range(combo.count())] == [1, 2, 4, 8, 16]  # 4/4: in step with the bar
-    combo.setCurrentIndex(1)
-    assert config.color_mapping.beat_sync_white.temp_every_n_beats == 2
-    assert AppConfig.from_dict(config.to_dict()).color_mapping.beat_sync_white.temp_every_n_beats == 2
-    assert not cmt.bsw_temp_every_note.isVisibleTo(cmt)  # the clock with Lock to tempo: counted from the bar
-    _effects(window, qapp, "beat_sync_white").rhythm.rhythm_lock_checkbox.setChecked(False)
-    cmt = _color_mapping(window, qapp)
-    assert cmt.bsw_temp_every_note.isVisibleTo(cmt) and "bar start" in cmt.bsw_temp_every_note.text()
+    assert not hasattr(cmt, "bsw_temp_every_combo") and not hasattr(cmt, "beat_hue_every_combo")
+    cmt.bsw_temp_hits_slider._spin.setValue(4.0)
+    assert config.color_mapping.beat_sync_white.temp_change_hits == 4.0
+    cmt.beat_hue_hits_slider._spin.setValue(2.0)
+    assert config.color_mapping.beat_sync.hue_change_hits == 2.0
+    again = AppConfig.from_dict(config.to_dict()).color_mapping
+    assert again.beat_sync_white.temp_change_hits == 4.0 and again.beat_sync.hue_change_hits == 2.0
+    assert cmt.bsw_temp_hits_slider.isEnabled() and cmt.beat_hue_hits_slider.isEnabled()
 
 
 def test_the_color_mapping_tab_is_as_tall_as_the_mode_page_shown(window, qapp):

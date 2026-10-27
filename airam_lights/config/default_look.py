@@ -7,7 +7,10 @@ Beat Sync on the shared beat clock, the pulse sequencer walking true-white
 flashes through the lamp groups with strobes, flash strobes, colour and dark
 sweeps, Chase and Group Switch following the music's hue - plus the other
 colour modes as they were tuned (taken from the author's settings,
-2026-10-26).
+2026-10-26). Beat Sync's hue comes from the music's notes (hue_mode
+"spectrum" from "pitch", the author's pick on 2026-10-27 - it worked better
+than the "step" mode); its step settings stay tuned for anyone switching
+back to "step".
 
 Section names: "color_mapping" is its top-level settings (mode, brightness,
 ...); "beat_sync", "beat_sync_white", "peak_flash", "hsv", "band_colors"
@@ -26,7 +29,8 @@ DEFAULT_LOOK: Dict[str, dict] = {   'beat_sync': {   'detect_low_hz': 30.0,
                      'sensitivity': 1.15,
                      'min_interval_ms': 33.0,
                      'min_energy': 0.05,
-                     'hue_mode': 'step',
+                     'hue_mode': 'spectrum',
+                     'spectrum_source': 'pitch',
                      'hue_step_deg': 139.5,
                      'hue_step_source': 'pitch',
                      'hue_step_min_deg': 39.0,
