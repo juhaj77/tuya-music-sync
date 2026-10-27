@@ -215,6 +215,16 @@ class BeatSyncModeConfig:
     # e.g. 4 with the shared beat clock (RhythmConfig) = one color per bar,
     # which reads as a pattern instead of a new random color on every hit.
     hue_every_n_beats: int = 1
+    # Follow the hits: the hue changes when the music hits, not on a fixed
+    # count - every beat scores how hard the beat band hit (its rise from the
+    # dip before the hit and its loudness, both against the music's own recent
+    # range, see dsp.hue_drive), and the hue changes on a beat
+    # hue_every_n_beats allows once the scores add up to hue_change_hits (1 =
+    # one full-strength hit). A pounding bass changes it as often as
+    # hue_every_n_beats allows, softer hits less often, a quiet passage not
+    # at all.
+    hue_change_dynamic: bool = True
+    hue_change_hits: float = 1.0
     min_hue_jump_deg: float = 60.0  # used when hue_mode == "random": force a visibly different color each hit
 
     saturation: float = 1.0
@@ -363,6 +373,8 @@ class BeatSyncModeConfig:
             hue_step_max_deg=float(d.get("hue_step_max_deg", 150.0)),
             hue_step_deg=float(d.get("hue_step_deg", 137.5)),
             hue_every_n_beats=max(1, int(d.get("hue_every_n_beats", 1))),
+            hue_change_dynamic=bool(d.get("hue_change_dynamic", True)),
+            hue_change_hits=max(0.1, float(d.get("hue_change_hits", 1.0))),
             min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
             saturation=float(d.get("saturation", 1.0)),
             flash_brightness=float(d.get("flash_brightness", 1.0)),

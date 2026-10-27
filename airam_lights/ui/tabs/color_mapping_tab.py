@@ -261,20 +261,47 @@ class ColorMappingTab(QWidget):
         self._spectrum_timer = QTimer(self)
         self._spectrum_timer.timeout.connect(self._refresh_spectrum_status)
         self._spectrum_timer.timeout.connect(self._refresh_band_status)
+        self._spectrum_timer.timeout.connect(self._refresh_hue_drive_status)
         self._spectrum_timer.start(200)
 
         hue_every_row = QHBoxLayout()
         hue_every_row.addWidget(QLabel("Change hue:"))
         self.beat_hue_every_combo = choice_combo(
             beat_divisions(controller.config.rhythm.beats_per_bar), bs.hue_every_n_beats,
-            "Every beat still flashes, but the color only changes on these beats. With the shared beat "
-            "clock this is counted from the bar start, so e.g. 'every bar' changes color exactly on "
-            "beat 1. The choices follow Beats per bar in the Rhythm box (Global Effects tab).",
+            "Every beat still flashes, but the color only changes on these beats - with Follow the "
+            "hits on, only when the music has hit hard enough by then. With the shared beat clock this "
+            "is counted from the bar start, so e.g. 'every bar' changes color exactly on beat 1. The "
+            "choices follow Beats per bar in the Rhythm box (Global Effects tab).",
         )
         self.beat_hue_every_combo.currentIndexChanged.connect(self._on_beat_changed)
         hue_every_row.addWidget(self.beat_hue_every_combo)
+        self.beat_hue_dynamic_checkbox = QCheckBox("Follow the hits")
+        self.beat_hue_dynamic_checkbox.setChecked(bs.hue_change_dynamic)
+        self.beat_hue_dynamic_checkbox.setToolTip(
+            "On: the color changes when the music hits, not on a fixed count. Each beat scores how hard "
+            "the bass hit - how far it rose from the dip before it, and how loud it was, both against "
+            "the song's own recent hits (like Band Colors measures its bands) - and the color changes "
+            "once the scores reach Hits per change, on a beat Change hue allows. A pounding bass changes "
+            "it as often as Change hue allows, softer hits less often, a quiet passage not at all. "
+            "Off: it changes on every beat Change hue allows."
+        )
+        self.beat_hue_dynamic_checkbox.toggled.connect(self._on_beat_changed)
+        hue_every_row.addSpacing(16)
+        hue_every_row.addWidget(self.beat_hue_dynamic_checkbox)
         hue_every_row.addStretch(1)
         beat_layout.addLayout(hue_every_row)
+        self.beat_hue_hits_slider = FloatSlider(
+            "Hits per change", 0.25, 8.0, bs.hue_change_hits, decimals=2,
+            tooltip="Follow the hits: how many full-strength hits it takes to change the color. 1 = every "
+            "hard hit changes it (as often as Change hue allows), and a half-strength hit counts a "
+            "quarter. Higher = the color holds longer and changes on the hardest stretches; lower = "
+            "softer hits change it too.",
+        )
+        self.beat_hue_hits_slider.valueChanged.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_hue_hits_slider)
+        self.beat_hue_drive_label = QLabel()
+        self.beat_hue_drive_label.setWordWrap(True)
+        beat_layout.addWidget(self.beat_hue_drive_label)
 
         self.beat_hue_step_slider = FloatSlider(
             "Hue step (for 'step')", 1.0, 180.0, bs.hue_step_deg, decimals=1, suffix=" deg",
@@ -835,6 +862,10 @@ class ColorMappingTab(QWidget):
             )
         set_active([self.beat_spectrum_source_combo], bs.hue_mode == "spectrum", f"Hue mode is '{bs.hue_mode}'.")
         set_active(
+            [self.beat_hue_hits_slider], bs.hue_change_dynamic,
+            "Follow the hits is off: the color changes on every beat Change hue allows.",
+        )
+        set_active(
             [self.beat_sustain_slider], bs.fade_brightness,
             "Fade brightness is off: brightness stays at Flash brightness between beats.",
         )
@@ -1086,6 +1117,8 @@ class ColorMappingTab(QWidget):
         bs.hue_step_min_deg = self.beat_hue_step_min_slider.value()
         bs.hue_step_max_deg = self.beat_hue_step_max_slider.value()
         bs.hue_every_n_beats = self.beat_hue_every_combo.currentData()
+        bs.hue_change_dynamic = self.beat_hue_dynamic_checkbox.isChecked()
+        bs.hue_change_hits = self.beat_hue_hits_slider.value()
         bs.min_hue_jump_deg = self.beat_min_jump_slider.value()
         bs.saturation = self.beat_saturation_slider.value()
         bs.flash_brightness = self.beat_flash_slider.value()
@@ -1204,6 +1237,25 @@ class ColorMappingTab(QWidget):
         if name:
             apply_builtin_preset(self.controller.config, name)
             self.controller.replace_config_settings()
+
+    def _refresh_hue_drive_status(self) -> None:
+        """The line under Hits per change: how hard the beats hit right now."""
+        cfg = self.controller.config.color_mapping
+        if cfg.mode != "beat_sync" or not cfg.beat_sync.hue_change_dynamic:
+            self.beat_hue_drive_label.setText("")
+            return
+        engine = self.controller.engine
+        if not engine.running:
+            self.beat_hue_drive_label.setText("Hits: - (runs while the visualizer is on)")
+            return
+        drive = engine.hue_drive
+        text = (
+            f"Hits: last beat {drive.hit:.0%}, {drive.drive:.2f} of {cfg.beat_sync.hue_change_hits:.2f} "
+            "toward the next change"
+        )
+        if drive.typical_gap is not None:
+            text += f"  |  lately a change every {drive.typical_gap} beat{'s' if drive.typical_gap > 1 else ''}"
+        self.beat_hue_drive_label.setText(text)
 
     def _refresh_spectrum_status(self) -> None:
         """The line under Hue mode: what the music-driven spectrum hue / hue step is doing."""

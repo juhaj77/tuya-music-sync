@@ -63,6 +63,7 @@ from ..effects.pulse_sequencer import (
     strobe_steps,
 )
 from ..dsp.smoothing import AttackReleaseSmoother, HueSmoother
+from ..dsp.hue_drive import HueDrive
 from ..dsp.hue_step import SOURCES as HUE_STEP_SOURCES, HueStepSignals
 from ..dsp.pitch import PitchTracker
 from ..dsp.spectral_features import FeatureFrame, SpectralFeatures
@@ -268,6 +269,9 @@ class VisualizationEngine:
         # the hue glide spreads over all N beats instead of starting over on
         # each one (see _hue_glide_progress).
         self._glide_beats_done = 0
+        # Follow the hits (BeatSyncModeConfig.hue_change_dynamic): how hard
+        # each beat hit, adding up to a hue change - public for display.
+        self.hue_drive = HueDrive()
 
         # Pulse sequencer (see effects/pulse_sequencer.py and _tick_sequencer):
         # per-lamp white flash state, since its flashes walk between groups
@@ -741,16 +745,21 @@ class VisualizationEngine:
         # pulse; the per-beat probability rolls below step aside.
         roll_pulses = not self._sequencing
 
+        self.hue_drive.update(raw_energy, dt)
         flash_now = False
         if is_beat:
             every_n = max(1, int(cfg.hue_every_n_beats))
+            if clock is not None:
+                change = beat_divides(clock, every_n)
+            else:
+                change = self._beat_sync_beat_count % every_n == 0
+                self._beat_sync_beat_count += 1
+            if cfg.hue_change_dynamic:
+                # Only once the music has hit hard enough (see dsp.hue_drive).
+                change = self.hue_drive.beat(cfg.hue_change_hits, change)
             # A change still waiting for its flash (held back by a dark pulse
             # this beat came in the middle of) isn't dropped by this beat.
-            if clock is not None:
-                self._beat_hue_due = self._beat_hue_due or beat_divides(clock, every_n)
-            else:
-                self._beat_hue_due = self._beat_hue_due or self._beat_sync_beat_count % every_n == 0
-                self._beat_sync_beat_count += 1
+            self._beat_hue_due = self._beat_hue_due or change
 
             # Also gated on "not currently active" for dark, so a fixed-
             # duration pulse can never be extended/re-rolled mid-flight by a
@@ -1093,6 +1102,8 @@ class VisualizationEngine:
             self._beat_white_dark_until = None
         if new == "band_colors":
             self._band_colors.reset()  # its bands' ranges start over from the music playing now
+        elif new == "beat_sync":
+            self.hue_drive.reset()  # likewise the hits' ranges
         if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White (a dark sweep dims its white)
             self._end_sweep("_color_sweep", self._seq_position)
 
@@ -1707,7 +1718,9 @@ class VisualizationEngine:
         yet, follows the flash's decay. With hue_every_n_beats above 1 each
         beat carries on from where the one before left off, so the glide
         spans all N beats instead of starting over (and jumping back) on
-        every beat that doesn't change the hue."""
+        every beat that doesn't change the hue. Following the hits, the
+        glide spans as many beats as the recent changes came apart (at least
+        N) and then waits at the end for the next change."""
         within = 1.0 - decay_glide
         if cfg.hue_glide_timing == "beat" and self.last_beat_time is not None:
             if self.config.rhythm.shared_clock:
@@ -1716,8 +1729,12 @@ class VisualizationEngine:
                 period = self._beat_detector.average_interval_s()
             if period:
                 within = clip((wall_now - self.last_beat_time) / period)
-        every_n = max(1, int(cfg.hue_every_n_beats))
-        return clip((min(self._glide_beats_done, every_n - 1) + within) / every_n)
+        span = max(1, int(cfg.hue_every_n_beats))
+        if cfg.hue_change_dynamic:
+            span = max(span, self.hue_drive.typical_gap or span)
+        if self._glide_beats_done >= span:
+            return 1.0
+        return clip((self._glide_beats_done + within) / span)
 
     def _upcoming_beat_hue(self, cfg) -> float:
         """The color the next hue change will land on - the hue glide moves

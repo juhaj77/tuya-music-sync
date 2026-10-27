@@ -392,7 +392,15 @@ interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shar
   note, the key and how much of the colour comes from the pitch.
 
 **Change hue** (every beat, every 2 beats, every bar...) keeps a colour for several beats -
-every beat still flashes. Then the flash itself: *Saturation*, *Flash brightness*,
+every beat still flashes. With **Follow the hits** (on) the colour changes when the music
+hits instead of on a fixed count: each beat scores how hard the bass hit - how far it rose
+from the dip before it, and how loud it was, both against the song's own recent hits (the
+way Band Colors measures its bands) - and the colour changes once the scores reach **Hits
+per change**, on a beat *Change hue* allows. A pounding bass changes it as often as *Change
+hue* allows, softer hits less often, and a quiet passage or a breakdown not at all, even
+while the beat clock keeps going. *Hits per change* 1 = every hard hit (a half-strength hit
+counts a quarter); higher holds the colour longer. The line under it shows the last beat's
+hit and how close the next change is. Then the flash itself: *Saturation*, *Flash brightness*,
 *Sustain brightness* (the level between beats), *Hue snap speed* (how fast the colour
 changes to the new hue - low = a snap, high = a fade), *Brightness attack* and *Brightness
 decay* (how slowly the flash fades back to Sustain brightness).
