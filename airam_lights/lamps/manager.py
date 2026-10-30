@@ -830,20 +830,30 @@ class LampManager:
     def set_selected(self, device_id: str, selected: bool) -> None:
         dev = self.devices.get(device_id)
         if dev:
-            dev.config.selected = selected
+            self._select(dev, selected)
 
     def select_all(self) -> None:
         for dev in self.devices.values():
-            dev.config.selected = True
+            self._select(dev, True)
 
     def clear_selection(self) -> None:
         for dev in self.devices.values():
-            dev.config.selected = False
+            self._select(dev, False)
 
     def apply_group(self, group_device_ids: List[str]) -> None:
         group_set = set(group_device_ids)
         for dev in self.devices.values():
-            dev.config.selected = dev.config.id in group_set
+            self._select(dev, dev.config.id in group_set)
+
+    def _select(self, dev: LampDevice, selected: bool) -> None:
+        """A lamp taken out of the selection goes dark - nothing sends to it
+        any more, so it would otherwise keep its last colour. One black, as a
+        dark pulse sends; it stays on the network and in the device list."""
+        was = dev.config.selected
+        dev.config.selected = selected
+        worker = self.workers.get(dev.config.id)
+        if was and not selected and worker is not None:
+            worker.set_target(Color.black())
 
     # -- runtime -------------------------------------------------------------------
 

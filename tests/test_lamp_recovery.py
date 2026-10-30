@@ -129,3 +129,23 @@ def test_missing_credentials_is_a_readable_error(monkeypatch):
     monkeypatch.setattr(manager_module.cloud_keys, "load_credentials", lambda: None)
     with pytest.raises(RuntimeError, match="credentials"):
         manager_module.cloud_keys.fetch_local_keys(["x"])
+
+
+def test_a_lamp_taken_out_of_the_selection_goes_dark():
+    manager = LampManager(NetworkConfig())
+    sent = {}
+
+    def lamp(device_id, selected):
+        manager.workers[device_id] = SimpleNamespace(set_target=lambda c, d=device_id: sent.__setitem__(d, c))
+        return SimpleNamespace(config=SimpleNamespace(id=device_id, selected=selected, enabled=True))
+
+    manager.devices = {"a": lamp("a", True), "b": lamp("b", True), "c": lamp("c", False)}
+    manager.set_selected("a", False)
+    assert sent == {"a": Color.black()}  # one black - it stays in the device list
+    manager.set_selected("a", True)
+    manager.apply_group(["a"])
+    assert set(sent) == {"a", "b"} and sent["b"] == Color.black()
+    sent.clear()
+    manager.clear_selection()
+    assert set(sent) == {"a"}  # "c" was never selected: left alone
+    assert manager.selected_device_ids() == []
