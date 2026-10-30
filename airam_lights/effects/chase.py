@@ -26,6 +26,18 @@ def _smoothstep(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
+def _boost(value: float, boost: float, max_boosted: Optional[float]) -> float:
+    """A lamp's brightness `value` lifted by the highlight's `boost` (0 = as
+    it is). With `max_boosted` the lift stops there - a value already above
+    it is left as it is - so on a lamp under the highlight the mode's own
+    pulse still shows: a flash at full, the level between flashes lifted to
+    no more than `max_boosted` instead of up to full with it."""
+    boosted = clip(value * (1.0 + boost))
+    if max_boosted is None:
+        return boosted
+    return max(value, min(boosted, max_boosted))
+
+
 def _falloff_weight(dist: float, width: float, curve: str) -> float:
     """0..1 highlight weight at a given distance (in chase positions) from
     the nearest rotator. 'linear' falls off at a constant rate, so the peak
@@ -384,14 +396,21 @@ class ChaseAnimator:
             active.update(groups[index])
         return active
 
-    def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
+    def apply(
+        self, colors: Dict[str, Color], groups: List[List[str]], max_boosted: Optional[float] = None
+    ) -> Dict[str, Color]:
         """Renders the current position onto `colors`, returning a new dict.
         Brightness is always a multiplicative boost on each lamp's own
         current value - never an independent/fixed brightness - so a lamp
         the active mode has deliberately driven to black (e.g. a Beat Sync
-        dark pulse) stays black no matter the chase's intensity or width."""
+        dark pulse) stays black no matter the chase's intensity or width.
+
+        With a rotator on every position (2 rotators on 2 lamps) nothing
+        travels - every lamp would just sit boosted - so it does nothing.
+
+        `max_boosted` (see _boost): the music app's small setups."""
         n = len(groups)
-        if n < 2:
+        if n < 2 or max(1, int(self.config.num_rotators)) >= n:
             return colors
 
         cfg = self.config
@@ -447,7 +466,7 @@ class ChaseAnimator:
                 else:
                     h_out = _hue_part_way(h_base, target_hue, weight, self._hue_deltas, device_id)
                 s_out = lerp(s_base, target_sat, weight)
-                v_out = clip(v_base * (1.0 + weight * cfg.intensity))
+                v_out = _boost(v_base, weight * cfg.intensity, max_boosted)
 
                 result[device_id] = Color.from_hsv(h_out, s_out, v_out)
         return result
@@ -679,13 +698,20 @@ class GroupSwitchAnimator:
             return set()
         return spread_positions(groups, int(math.floor(self.position)) % len(groups), self.config.num_active_groups)
 
-    def apply(self, colors: Dict[str, Color], groups: List[List[str]]) -> Dict[str, Color]:
+    def apply(
+        self, colors: Dict[str, Color], groups: List[List[str]], max_boosted: Optional[float] = None
+    ) -> Dict[str, Color]:
         """Renders the current active group onto `colors`. Brightness is,
         like Chase, always a multiplicative boost on the lamp's own current
         value - a lamp the active mode has already driven to black stays
-        black no matter this effect's intensity."""
+        black no matter this effect's intensity.
+
+        With every group active at once nothing switches - every lamp would
+        just sit boosted - so it does nothing.
+
+        `max_boosted` (see _boost): the music app's small setups."""
         n = len(groups)
-        if n < 2:
+        if n < 2 or max(1, int(self.config.num_active_groups)) >= n:
             return colors
 
         cfg = self.config
@@ -744,7 +770,7 @@ class GroupSwitchAnimator:
                         target_hue = _hue_part_way(h_base, target_hue, amount, self._hue_deltas, device_id)
                     target_sat = lerp(s_base, target_sat, amount)
 
-                v_out = clip(v_base * (1.0 + cfg.intensity * amount))
+                v_out = _boost(v_base, cfg.intensity * amount, max_boosted)
                 result[device_id] = Color.from_hsv(target_hue, target_sat, v_out)
         return result
 

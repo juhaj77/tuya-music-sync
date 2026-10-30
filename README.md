@@ -56,10 +56,14 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
    room) and an *Effect group* ([details](#devices--setup-tab)). The default show is tuned
    for several lamps: Chase walks the Chase order, Group Switch and the white flashes walk
    the Effect groups.
-   > **Small setup** (one lamp, or all lamps in one spot)? Switch **Group Switch** off,
-   > give the lamps at least a Chase order or switch **Chase** off too (Global Effects
-   > tab), and set the pulse sequencer's *Walk through* to `chase_order` - without an
-   > order every white flash lands on every lamp at once.
+   > **Small setup** (one or two lamps, or all lamps in one spot)? The default show copes:
+   > Chase and Group Switch step aside when they have nothing to move round (one lamp, or a
+   > highlight / active group on every lamp); on one or two lamps their brightness boost lifts
+   > the level between flashes only part of the way, so the beat still pulses under the
+   > highlight; and the pulse sequencer's white flashes get
+   > shorter, at most one a bar and only while the music hits, so they don't take over the
+   > lamps. With several lamps give them a Chase order and Effect groups anyway - without
+   > them every white flash lands on every lamp at once.
 5. **Play.** On the **Visualizer** tab keep the source on *Loopback*, play some music,
    check the level meter moves, and press **Start Music Visualization**.
 6. **Tune.** The **Quick Controls** on the Visualizer tab hold the most useful settings of the
@@ -654,7 +658,8 @@ together as one position - e.g. give the two lamps on each of four walls the sam
   bass detector) or a loudness peak, then steps on *beat multiplier* positions; `clock`:
   steps every N beats of the shared clock (the fresh-install choice).
 - **Number of rotators** - highlights travelling at once, evenly spaced (2 = opposite
-  sides). **Reverse direction** flips the way round.
+  sides). With as many rotators as positions nothing travels, so Chase does nothing (2
+  rotators on 2 lamps). **Reverse direction** flips the way round.
 - **Highlight width** - how many positions the glow spans: low = a crisp travelling spot.
   Scale it with the lamp count: about a third of the lamps in the chase is a good start.
 - **Falloff curve** - `linear`, or `bezier`, which lingers near the peak colour (try it if
@@ -682,8 +687,8 @@ together as one position - e.g. give the two lamps on each of four walls the sam
 Lamps take turns by **Effect group**: one group is fully "active" at a time with a hard,
 instant switch - a clean alternation instead of Chase's travelling gradient. Same speed
 sources as Chase (`off`, `beat`, `intensity_peak`, `clock` - every N beats) and the same
-colour modes, without width or falloff. Needs at least two groups - with one lamp or one
-group, switch it off.
+colour modes, without width or falloff. Needs at least two groups, and does nothing with
+one group or with every group active at once.
 
 - **Active groups at once** - that many groups active together, evenly spaced (four groups,
   2 active: groups 1+3, then 2+4). White pulses that follow the group land on all of them.
@@ -760,6 +765,9 @@ its per-beat pulses and the other modes have none.
   room: `forward`, `backward` (e.g. against the Group Switch colours), `pingpong`, `random`
   or `all`. **Walk through** - the Effect groups (`groups`) or the Chase order lamp by lamp
   (`chase_order`). *Double chance* sometimes repeats a flash in the same group an 8th later.
+  On a small setup (one or two lamps, or no groups to walk through, so a flash covers
+  everything) the white flashes are half as long, at most one a bar, and only while the
+  music hits - in Beat Sync not after its hits stop, in the other modes not while it's calm.
 - **Thinning** - calming the flashes the way a drummer would:
   - *Accent focus* drops the light positions first (16ths, then the "ands", then beats 2
     and 4, then 3 - the downbeat stays);

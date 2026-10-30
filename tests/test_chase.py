@@ -1170,3 +1170,34 @@ def test_group_switch_hue_step_settings_survive_a_save():
         "hue_shift_relative", "pitch", 5.0, 120.0
     )
     assert GroupSwitchEffectConfig.from_dict({}).hue_step_source == "fixed"
+
+
+
+def test_chase_and_group_switch_do_nothing_when_nothing_can_move():
+    # A rotator on every position / every group active: nothing travels, every
+    # lamp would just sit boosted (2 rotators on 2 lamps) - the pulses stay as they are.
+    colors = {"a": Color.from_hsv(0.0, 1.0, 0.3), "b": Color.from_hsv(120.0, 1.0, 0.3)}
+    groups = [["a"], ["b"]]
+    assert ChaseAnimator(ChaseEffectConfig(num_rotators=2, intensity=8.0)).apply(colors, groups) == colors
+    assert GroupSwitchAnimator(GroupSwitchEffectConfig(num_active_groups=2, intensity=8.0)).apply(colors, groups) == colors
+    # One of them on two lamps still moves.
+    for animator in (ChaseAnimator(ChaseEffectConfig(num_rotators=1, intensity=8.0)),
+                     GroupSwitchAnimator(GroupSwitchEffectConfig(num_active_groups=1, intensity=8.0))):
+        assert animator.apply(colors, groups) != colors
+
+
+def test_a_boost_ceiling_keeps_the_pulse_under_the_highlight():
+    # The music app's small setups (max_boosted): the flash stays at full, the
+    # level between flashes is lifted to the ceiling at most, black stays black.
+    groups = [["a"], ["b"]]
+    for animator in (ChaseAnimator(ChaseEffectConfig(num_rotators=1, width=0.5, intensity=8.0)),
+                     GroupSwitchAnimator(GroupSwitchEffectConfig(num_active_groups=1, intensity=8.0))):
+        lit = next(lamp for lamp, c in animator.apply({"a": Color.from_hsv(0, 1, 0.27), "b": Color.from_hsv(0, 1, 0.27)}, groups).items()
+                   if c.to_hsv()[2] > 0.9)
+        def value(v, ceiling):
+            return animator.apply({lamp: Color.from_hsv(0, 1, v) for lamp in "ab"}, groups, ceiling)[lit].to_hsv()[2]
+        assert value(0.27, None) == pytest.approx(1.0)  # without it (bigger setups): flattened to full
+        assert value(0.27, 0.6) == pytest.approx(0.6)
+        assert value(1.0, 0.6) == pytest.approx(1.0)
+        assert value(0.8, 0.6) == pytest.approx(0.8)
+        assert value(0.0, 0.6) == pytest.approx(0.0)

@@ -109,6 +109,16 @@ _WHITE_CHAIN_GAP_TOLERANCE_S = 0.3
 # A shorter tolerance: one lamp's RGB gap between two of its own flashes is
 # already a real chance for its worker to send the reverted color.
 _SEQ_WHITE_GAP_TOLERANCE_S = 0.15
+# A small setup (1-2 lamps, or no walk positions so every flash lands on every
+# lamp): the sequencer's white flash would take over the whole show, so it's
+# shortened by this, at most one a bar, and only while the music hits (see
+# _small_setup_white_allowed).
+_SMALL_SETUP_WHITE_LENGTH = 0.5
+# On 1-2 lamps a Chase / Group Switch highlight is half the show or all of it:
+# its brightness boost lifts the level between flashes to this at most, so the
+# pulse still shows (bigger setups: the full boost, see chase._boost).
+_SMALL_SETUP_MAX_BOOSTED = 0.6
+_SMALL_SETUP_LAMPS = 2
 
 # Note tracking (see _tick_music_signals): ~170 ms at 48 kHz, ~5.9 Hz per
 # bin, and a harmonic/percussive split over the last 5 ticks (~170 ms at 30 Hz).
@@ -277,6 +287,7 @@ class VisualizationEngine:
         # each flash (see _hue_glide_progress).
         self._glide_beats_done = 0
         self._hue_changed_at: Optional[float] = None
+        self._last_hit_at = -1e9  # the last hit Beat Sync flashed (see _small_setup_white_allowed)
 
         # Pulse sequencer (see effects/pulse_sequencer.py and _tick_sequencer):
         # per-lamp white flash state, since its flashes walk between groups
@@ -298,6 +309,7 @@ class VisualizationEngine:
         self._seq_white_attack: Dict[str, float] = {}
         self._seq_white_release: Dict[str, float] = {}
         self._seq_white_curve: Dict[str, str] = {}  # the release curve of each lamp's current flash
+        self._small_white_at = -1e9  # a small setup's last sequencer white flash
         self._seq_white_brightness: Dict[str, float] = {}
         self._seq_continuous_since: Dict[str, float] = {}
         self._seq_last_active: Dict[str, float] = {}
@@ -761,6 +773,7 @@ class VisualizationEngine:
         flash_now = False
         if hit:
             self._beat_flash_strength = strength
+            self._last_hit_at = wall_now
             # A change still waiting for its flash (held back by a dark pulse
             # this hit came in the middle of) isn't dropped by this hit.
             change = self.hits.count_flash(strength, cfg.hue_change_hits)
@@ -1175,6 +1188,9 @@ class VisualizationEngine:
         if not cfg.white_pulse_enabled:
             return
         groups = self._seq_groups
+        small = len(selected_ids) <= _SMALL_SETUP_LAMPS or len(groups) < 2
+        if small and not self._small_setup_white_allowed(wall_now):
+            return
         if event.group is not None and len(groups) >= 2:
             lamps = spread_positions(groups, event.group % len(groups), cfg.white_pulse_rotators)
         else:
@@ -1184,6 +1200,9 @@ class VisualizationEngine:
         attack = cfg.white_pulse_attack_ms / 1000.0 * event.attack
         hold = cfg.white_pulse_duration_ms / 1000.0 * event.length * event.hold
         release = cfg.white_pulse_release_ms / 1000.0 * event.release
+        if small:
+            hold *= _SMALL_SETUP_WHITE_LENGTH
+            release *= _SMALL_SETUP_WHITE_LENGTH
         length = attack + hold + release
         gap = self.config.sequencer.min_group_gap_ms / 1000.0
         temp = self._white_pulse_temp(cfg, self._clock_beat, event)
@@ -1215,6 +1234,8 @@ class VisualizationEngine:
                 attack=attack / period, hold=hold / period, release=release / period, curve=curve,
                 temp=temp_start if lamps else temp, temp_end=temp_end,
             )
+        if small and (lamps or flash_strobe):
+            self._small_white_at = wall_now
         for lamp in lamps:
             self._seq_white_started[lamp] = wall_now
             self._seq_white_until[lamp] = wall_now + length
@@ -1228,6 +1249,19 @@ class VisualizationEngine:
                 self._seq_white_temp_end.pop(lamp, None)
             else:
                 self._seq_white_temp_end[lamp] = temp_end
+
+    def _small_setup_white_allowed(self, wall_now: float) -> bool:
+        """Whether a small setup's sequencer white flash may go out now (see
+        _SMALL_SETUP_WHITE_LENGTH): its lamps are the whole show, so at most
+        one a bar, and only while the music hits - in Beat Sync a hit
+        flashed within the hits' own pattern (a quiet passage or a breakdown
+        gets none), in the other modes the music isn't calm."""
+        period = self._beat_clock.period_s or 0.5
+        if wall_now - self._small_white_at < self.config.rhythm.beats_per_bar * period - 0.05:
+            return False
+        if self.config.color_mapping.mode == "beat_sync":
+            return wall_now - self._last_hit_at <= (self.hits.period + 0.5) * period
+        return self._sequencer.level != "calm"
 
     def _log_seq_event(self, event: PulseEvent, length: float, **extra) -> dict:
         """Remembers a pulse the sequencer actually played, where it sits on
@@ -1962,7 +1996,7 @@ class VisualizationEngine:
             dwell_weights=dwell_weights,
             clock_beat=self._clock_beat,
         )
-        return self._chase_animator.apply(colors, groups)
+        return self._chase_animator.apply(colors, groups, self._max_boosted(selected_ids))
 
     @staticmethod
     def _overlay_follows_music(cfg, mode: str) -> bool:
@@ -2069,4 +2103,9 @@ class VisualizationEngine:
             now_s=wall_now,
             clock_beat=self._clock_beat,
         )
-        return self._group_switch_animator.apply(colors, groups)
+        return self._group_switch_animator.apply(colors, groups, self._max_boosted(selected_ids))
+
+    @staticmethod
+    def _max_boosted(selected_ids) -> Optional[float]:
+        """The overlays' boost ceiling: only on a small setup (see _SMALL_SETUP_MAX_BOOSTED)."""
+        return _SMALL_SETUP_MAX_BOOSTED if len(selected_ids) <= _SMALL_SETUP_LAMPS else None

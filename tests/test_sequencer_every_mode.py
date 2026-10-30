@@ -4,6 +4,7 @@ Sync does, Beat Sync White only its dark pulses and dark sweeps - plus Beat
 Sync White's temperature changing every N beats, on the bar (fake clock and
 a synthetic kick, no audio, no lamps)."""
 import random
+import sys
 
 import numpy as np
 import pytest
@@ -490,3 +491,55 @@ def test_coming_back_to_beat_sync_replays_no_old_white_flash(monkeypatch):
     lamps.white_calls.clear()
     _run(engine, clock, 3 * TICK)
     assert not lamps.white_calls
+
+
+
+# -- a small setup: the white flash would be the whole show ----------------------------------------
+
+
+def _white_starts(engine, clock, seconds):
+    starts, last = [], engine._small_white_at
+
+    def on_tick():
+        nonlocal last
+        if engine._small_white_at != last:
+            starts.append(clock.now)
+            last = engine._small_white_at
+
+    _run(engine, clock, seconds, on_tick)
+    return starts
+
+
+@pytest.mark.parametrize("devices", [["a"], ["a", "b"]])
+def test_a_small_setup_gets_short_white_flashes_at_most_once_a_bar_and_only_on_the_hits(monkeypatch, devices):
+    monkeypatch.setattr(sys.modules[__name__], "DEVICES", devices)
+    engine, clock, lamps = _make_engine(monkeypatch, "beat_sync", shared_clock=True)
+    engine.config.color_mapping.beat_sync.dark_pulse_enabled = False
+    _run(engine, clock, 6.0)  # let the clock lock
+    starts = _white_starts(engine, clock, 8.0)
+    bar = 4 * PERIOD
+    assert 3 <= len(starts) <= 8.0 / bar + 1  # a flash on every beat would be 16
+    assert all(b - a >= bar - 0.1 for a, b in zip(starts, starts[1:]))
+    full = engine.config.color_mapping.beat_sync
+    for lamp in devices:
+        if lamp in engine._seq_white_release:
+            assert engine._seq_white_release[lamp] <= 0.5 * full.white_pulse_release_ms / 1000.0 * 1.5
+    # A breakdown: the clock keeps the beat, but no hits - no white flashes after the last hit's pattern.
+    monkeypatch.setattr(ve_module, "band_energy", lambda frame, lo, hi: 0.4)
+    _run(engine, clock, 2 * PERIOD)
+    assert engine._beat_clock.locked
+    assert _white_starts(engine, clock, 6.0) == []
+
+
+def test_a_bigger_setup_keeps_its_white_flashes(monkeypatch):
+    engine, clock, lamps = _make_engine(monkeypatch, "beat_sync", shared_clock=True)  # 4 lamps, 2 groups
+    _run(engine, clock, 6.0)
+    flashes = []
+    _run(engine, clock, 8.0, lambda: flashes.extend(t for t in engine._seq_white_started.values() if t == clock.now))
+    assert len(flashes) > 8.0 / (4 * PERIOD) + 1
+    assert engine._small_white_at < 0
+
+
+def test_the_overlays_boost_ceiling_is_only_for_a_small_setup():
+    assert VisualizationEngine._max_boosted(["a", "b"]) == ve_module._SMALL_SETUP_MAX_BOOSTED
+    assert VisualizationEngine._max_boosted(["a", "b", "c"]) is None
