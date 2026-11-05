@@ -416,6 +416,29 @@ class ColorMappingTab(QWidget):
         self.beat_hue_glide_slider.valueChanged.connect(self._on_beat_changed)
         beat_layout.addWidget(self.beat_hue_glide_slider)
 
+        beat_layout = beat_section(
+            "Across the lamps", "lamps",
+            tooltip="How a new colour travels along the lamps' Chase order, hit by hit, and how far apart their "
+            "colours are. The flash stays on every lamp at once: only the colour travels.",
+        ).content_layout()
+        self.beat_wave_slider = FloatSlider(
+            "Wave length", 1.0, 8.0, bs.wave_hits, decimals=2, suffix=" hits",
+            tooltip="How many hits a new colour takes from the first lamp in the Chase order to the last, counted "
+            "as in Hits per change (a half-strength hit counts a quarter). Only the hits move it: a beat with no "
+            "hit moves nothing, and through a quiet passage the wave waits where it is. 1 = every lamp changes "
+            "on the same hit. It runs along the Chase order; Chase's Reverse direction turns it round.",
+        )
+        self.beat_spread_slider = FloatSlider(
+            "Hue spread", 0.0, 180.0, bs.spread_deg, decimals=0, suffix=" deg",
+            tooltip="Fans the lamps out over this many degrees along the Chase order, so the room shows neighbouring "
+            "colours instead of one. 0 = the same colour on every lamp.",
+        )
+        for w in (self.beat_wave_slider, self.beat_spread_slider):
+            w.valueChanged.connect(self._on_beat_changed)
+            beat_layout.addWidget(w)
+        self.beat_lamps_note = inactive_note()
+        beat_layout.addWidget(self.beat_lamps_note)
+
         self.beat_low_spin.valueChanged.connect(self._on_beat_changed)
         self.beat_high_spin.valueChanged.connect(self._on_beat_changed)
 
@@ -848,6 +871,15 @@ class ColorMappingTab(QWidget):
         set_active([self.beat_hue_glide_slider, self.beat_glide_timing_combo], bs.glide_hue, "Glide hue is off.")
         set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
         set_active([self.hue_min_slider, self.hue_max_slider], bs.hue_mode == "spectrum", f"Hue mode is '{bs.hue_mode}'.")
+        ordered = self._lamps_have_an_order()
+        set_active(
+            [self.beat_wave_slider, self.beat_spread_slider], ordered,
+            "It needs at least two lamps with different Chase orders (Devices & Setup tab).",
+        )
+        show_note(self.beat_lamps_note, "" if ordered else (
+            "The wave and the spread go along the Chase order: give at least two lamps different Chase orders "
+            "on the Devices & Setup tab. Until then every lamp shows the same colour."
+        ))
 
         self._update_bsw_states()
         self._update_peak_states()
@@ -886,6 +918,11 @@ class ColorMappingTab(QWidget):
             f"Hue source is '{pf.hue_source}'.",
         )
 
+    def _lamps_have_an_order(self) -> bool:
+        """Whether there's a Chase order for colours to travel along."""
+        effects = self.controller.config.per_lamp_effects.values()
+        return len({e.chase_order for e in effects if e.chase_order is not None}) >= 2
+
     def _update_steps_states(self) -> None:
         """Color Steps' own settings: what goes by the clock while there's a
         grid, and what travels along the lamps while they have an order."""
@@ -900,8 +937,7 @@ class ColorMappingTab(QWidget):
             "Lock to tempo is off (Global Effects tab, Rhythm box), so there's no beat grid to wait for: the "
             "steps go out on the peaks, as with Step on 'peak'."
         ) if no_grid else "")
-        positions = {e.chase_order for e in cfg.per_lamp_effects.values() if e.chase_order is not None}
-        ordered = len(positions) >= 2
+        ordered = self._lamps_have_an_order()
         set_active(
             [self.steps_wave_slider, self.steps_spread_slider], ordered,
             "It needs at least two lamps with different Chase orders (Devices & Setup tab).",
@@ -1326,6 +1362,8 @@ class ColorMappingTab(QWidget):
         bs.glide_hue = self.beat_glide_checkbox.isChecked()
         bs.hue_glide_timing = self.beat_glide_timing_combo.currentText()
         bs.hue_glide_deg = self.beat_hue_glide_slider.value()
+        bs.wave_hits = self.beat_wave_slider.value()
+        bs.spread_deg = self.beat_spread_slider.value()
         self._update_beat_states()
         self.controller.apply_config_changes()
 

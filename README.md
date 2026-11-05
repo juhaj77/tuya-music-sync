@@ -430,6 +430,20 @@ to Sustain brightness).
   arrives exactly at the next colour; 360 is a full rainbow every change. Gliding sends
   commands continuously, capped by *Lamp command rate*.
 
+**Across the lamps** - along the lamps' *Chase order* (Devices & Setup tab; without one every
+lamp shows the same colour, and lamps outside it go with the first). The flash stays on every
+lamp at once: only the colour travels (`effects/hit_wave.py`).
+
+- **Wave length** - how many hits a new colour takes from the first lamp to the last, counted
+  as in *Hits per change*. Only the hits move it: a beat with no hit moves nothing, and through
+  a quiet passage the wave waits where it is. 1 = every lamp on the same hit. With *Hits per
+  change* 4 and Wave length 4 one colour crosses the room at a time; with *Hits per change* 1 a
+  new colour starts on every hit and the older ones move on down the line. It runs along the
+  Chase order; Chase's *Reverse direction* turns it round. With *Glide hue*, a lamp the new colour hasn't
+  reached yet carries on gliding from the one before.
+- **Hue spread** - fans the lamps out over this many degrees, so the room shows neighbouring
+  colours.
+
 **Per-hit pulses** - Beat Sync can also roll [dark and white pulses](#dark-and-white-pulses)
 on its own hits, without the sequencer. In those two sections (Global Effects tab), shown
 only while Beat Sync is the mode:

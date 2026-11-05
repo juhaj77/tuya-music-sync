@@ -50,6 +50,7 @@ from ..effects.chase import (
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
 from ..effects.band_colors import BandColorsState, BandColorTracker, band_edges
 from ..effects.color_steps import ColorStepsState, ColorStepTracker
+from ..effects.hit_wave import HitWave, WaveColor
 from ..effects.pulse_sequencer import (
     STEPS_PER_BEAT,
     LoudnessTracker,
@@ -286,6 +287,7 @@ class VisualizationEngine:
         # each flash (see _hue_glide_progress).
         self._glide_beats_done = 0
         self._hue_changed_at: Optional[float] = None
+        self._beat_wave = HitWave()  # Across the lamps: what has reached each Chase position
         self._last_hit_at = -1e9  # the last hit Beat Sync flashed (see _small_setup_white_allowed)
 
         # Pulse sequencer (see effects/pulse_sequencer.py and _tick_sequencer):
@@ -821,12 +823,14 @@ class VisualizationEngine:
         if self._beat_white_pulse_until is not None and wall_now >= self._beat_white_pulse_until:
             self._beat_white_pulse_until = None
 
+        hue_changed = False
         if flash_now:
             if self._beat_hue_due:
                 self._beat_target_hue = self._pick_next_beat_hue(cfg, frame)
                 self._beat_hue_due = False
                 self._glide_beats_done = 0
                 self._hue_changed_at = wall_now
+                hue_changed = True
             else:
                 self._glide_beats_done += 1
             self.last_beat_time = wall_now
@@ -841,26 +845,9 @@ class VisualizationEngine:
             value_s = cfg.flash_brightness  # full strength all the time (dark pulses still dip it below)
         glide = self._smoother_beat_glide.update(1.0 if flash_now else 0.0, dt)
         target_hue = self._beat_target_hue
-        if cfg.glide_hue and cfg.hue_mode == "spectrum" and self._beat_target_x is not None:
-            # Glide hue_glide_deg over the beat, the way the music's color
-            # last moved (see _pick_next_beat_hue), inside the hue range - the
-            # next color isn't known before the beat, and gliding only as far
-            # as the music's color right now barely moves at all while a note
-            # holds.
-            progress = self._hue_glide_progress(cfg, glide, wall_now)
-            hue_range = self.config.color_mapping.hue_range
-            span = abs(hue_range.hue_max_deg - hue_range.hue_min_deg)
-            x = self._beat_target_x
-            if span > 1e-6:
-                x += self._spectrum_glide_dir * (cfg.hue_glide_deg / span) * progress
-                if span < 359.0:
-                    x = max(0.0, min(1.0, x))
-            target_hue = lerp(hue_range.hue_min_deg, hue_range.hue_max_deg, x) % 360.0
-        elif cfg.glide_hue:
-            progress = self._hue_glide_progress(cfg, glide, wall_now)
-            toward = self._upcoming_beat_hue(cfg)
-            direction = -1.0 if ((toward - self._beat_target_hue + 180.0) % 360.0) - 180.0 < 0.0 else 1.0
-            target_hue = (self._beat_target_hue + direction * cfg.hue_glide_deg * progress) % 360.0
+        if cfg.glide_hue:
+            progress = self._hue_glide_progress(cfg, glide, wall_now, self._hue_changed_at, self._glide_beats_done)
+            target_hue = self._glided_hue(cfg, self._beat_color(cfg), progress)
         hue_s = self._hue_smoother_beat.update(target_hue, dt)
         # Dark pulse is layered on top as an independent multiplicative dip,
         # smoothed on its own attack/release - not folded into target_value
@@ -963,11 +950,15 @@ class VisualizationEngine:
             else None
         )
 
-        color = self.color_engine.compute_beat_sync(hue_s, saturation_s, clip(value_s))
+        room_color = self.color_engine.compute_beat_sync(hue_s, saturation_s, clip(value_s))
+        lamp_hues = self._tick_beat_wave(cfg, selected_ids, flash_now, hue_changed, glide, hue_s, dt, wall_now)
         colors: Dict[str, Color] = {}
         white_targets: Dict[str, WhiteTarget] = {}
         for device_id in selected_ids:
             effect = self.config.per_lamp_effects.get(device_id)
+            color = room_color
+            if device_id in lamp_hues:
+                color = self.color_engine.compute_beat_sync(lamp_hues[device_id], saturation_s, clip(value_s))
             colors[device_id] = color
 
             white_mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
@@ -986,6 +977,45 @@ class VisualizationEngine:
         self._beat_sync_white_targets = white_targets
         self._white_targets_preselected = self._sequencing
         return colors
+
+    def _tick_beat_wave(
+        self, cfg, selected_ids, flash_now: bool, hue_changed: bool, decay_glide: float, hue_s: float, dt: float,
+        wall_now: float,
+    ) -> Dict[str, float]:
+        """Across the lamps (effects/hit_wave.py): each lamp's own hue, along
+        the Chase order (the other way with Chase's Reverse direction), the
+        lamps outside it going with its first position. {} while they all show the room's
+        hue: no order, or Wave length 1 with no Hue spread. Tracked even then,
+        so turning the wave on starts from what the lamps show."""
+        groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        wave = self._beat_wave
+        if len(groups) < 2:
+            wave.reset()
+            return {}
+        current = self._beat_color(cfg)
+        wave.resize(len(groups), current, hue_s, self._hue_changed_at, self._glide_beats_done)
+        if flash_now:
+            wave.flash(self._beat_flash_strength, cfg.wave_hits, current if hue_changed else None, wall_now)
+        hues = []
+        for place in wave.places:
+            target = place.color.hue
+            if cfg.glide_hue:
+                # From the lamp's own colour and arrival: one the new colour
+                # hasn't reached yet carries on with the last one's glide.
+                progress = self._hue_glide_progress(cfg, decay_glide, wall_now, place.arrived_at, place.flashes)
+                target = self._glided_hue(cfg, place.color, progress)
+            place.hue.time_constant_ms = cfg.hue_attack_ms
+            hues.append(place.hue.update(target, dt))
+        if cfg.wave_hits <= 1.0 and cfg.spread_deg <= 0.0:
+            return {}
+        if self.config.chase.reverse:
+            hues.reverse()
+        n = len(hues)
+        hues = [(hue + cfg.spread_deg * (i / (n - 1) - 0.5)) % 360.0 for i, hue in enumerate(hues)]
+        lamp_hues = dict.fromkeys(selected_ids, hues[0])
+        for hue, group in zip(hues, groups):
+            lamp_hues.update(dict.fromkeys(group, hue))
+        return lamp_hues
 
     def _under_white(self, color: Color, fraction: float, device_id: Optional[str] = None) -> Optional[Color]:
         """The colour kept under a white flash `fraction` (0..1) of the way in:
@@ -1132,6 +1162,7 @@ class VisualizationEngine:
             self._color_steps.reset()  # likewise its peaks' and the charge
         elif new in ("beat_sync", "beat_sync_white"):
             self.hits.reset()  # likewise the hits' ranges and pattern
+            self._beat_wave.reset()  # and the lamps start from the room's colour
         if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White (a dark sweep dims its white)
             self._end_sweep("_color_sweep", self._seq_position)
 
@@ -1759,9 +1790,13 @@ class VisualizationEngine:
             candidate = random.uniform(0.0, 360.0)
         return candidate
 
-    def _hue_glide_progress(self, cfg, decay_glide: float, wall_now: float) -> float:
-        """0 right on a hue change .. 1 by the next one, then it waits there
-        until the hue changes. Timing "beat" spreads it evenly over the time
+    def _hue_glide_progress(
+        self, cfg, decay_glide: float, wall_now: float, changed_at: Optional[float], flashes_done: int
+    ) -> float:
+        """0 right on a hue change (the room's, or a new colour reaching one
+        lamp: at `changed_at`, `flashes_done` flashes ago) .. 1 by the next
+        one, then it waits there until the hue changes. Timing "beat" spreads
+        it evenly over the time
         the recent hue changes came apart (dsp.hits - before there are two,
         one beat: the shared clock's tempo, or Beat Sync's own detector's
         average interval), so the color keeps moving and arrives as the next
@@ -1770,7 +1805,7 @@ class VisualizationEngine:
         the recent changes came apart - carrying on from where the flash
         before left off, not starting over (and jumping back) on every flash
         that doesn't change the hue."""
-        if cfg.hue_glide_timing == "beat" and self._hue_changed_at is not None:
+        if cfg.hue_glide_timing == "beat" and changed_at is not None:
             interval = self.hits.typical_interval_s
             if interval is None:
                 if self.config.rhythm.shared_clock:
@@ -1778,11 +1813,41 @@ class VisualizationEngine:
                 else:
                     interval = self._beat_detector.average_interval_s()
             if interval:
-                return clip((wall_now - self._hue_changed_at) / interval)
+                return clip((wall_now - changed_at) / interval)
         span = self.hits.typical_flashes or 1
-        if self._glide_beats_done >= span:
+        if flashes_done >= span:
             return 1.0
-        return clip((self._glide_beats_done + 1.0 - decay_glide) / span)
+        return clip((flashes_done + 1.0 - decay_glide) / span)
+
+    def _beat_color(self, cfg) -> WaveColor:
+        """The colour Beat Sync is on now and the way its glide goes: toward
+        the next color - in "spectrum", where that isn't known yet, the way the
+        music's color last moved (see _pick_next_beat_hue)."""
+        direction = 1.0
+        if cfg.glide_hue:
+            if cfg.hue_mode == "spectrum" and self._beat_target_x is not None:
+                direction = self._spectrum_glide_dir
+            else:
+                toward = self._upcoming_beat_hue(cfg)
+                direction = -1.0 if ((toward - self._beat_target_hue + 180.0) % 360.0) - 180.0 < 0.0 else 1.0
+        return WaveColor(self._beat_target_hue, self._beat_target_x, direction)
+
+    def _glided_hue(self, cfg, color: WaveColor, progress: float) -> float:
+        """Where `color` has got to, `progress` (0..1) of the way through its glide."""
+        if cfg.hue_mode == "spectrum" and color.x is not None:
+            # Glide hue_glide_deg over the beat inside the hue range - the
+            # next color isn't known before the beat, and gliding only as far
+            # as the music's color right now barely moves at all while a note
+            # holds.
+            hue_range = self.config.color_mapping.hue_range
+            span = abs(hue_range.hue_max_deg - hue_range.hue_min_deg)
+            x = color.x
+            if span > 1e-6:
+                x += color.glide_direction * (cfg.hue_glide_deg / span) * progress
+                if span < 359.0:
+                    x = max(0.0, min(1.0, x))
+            return lerp(hue_range.hue_min_deg, hue_range.hue_max_deg, x) % 360.0
+        return (color.hue + color.glide_direction * cfg.hue_glide_deg * progress) % 360.0
 
     def _upcoming_beat_hue(self, cfg) -> float:
         """The color the next hue change will land on - the hue glide moves

@@ -278,6 +278,12 @@ class BeatSyncModeConfig:
     hue_glide_deg: float = 120.0
     hue_glide_timing: str = "beat"  # "beat" | "decay"
 
+    # Across the lamps (effects/hit_wave.py), along the Chase order. wave_hits:
+    # how many hits a new colour takes from the first lamp to the last, counted
+    # as in hue_change_hits - only the hits move it. 1 = every lamp on one hit.
+    wave_hits: float = 1.0
+    spread_deg: float = 0.0  # the lamps fanned out over this many degrees
+
     # "Dark pulses": on a random subset of beats, briefly dip toward black
     # (a rhythm-synced pause) BEFORE flashing to the new color, instead of
     # flashing immediately - a tension-and-release, strobe-like accent.
@@ -414,6 +420,8 @@ class BeatSyncModeConfig:
             glide_hue=bool(d.get("glide_hue", d.get("decay_mode") == "hue")),
             hue_glide_deg=float(d.get("hue_glide_deg", 120.0)),
             hue_glide_timing=d.get("hue_glide_timing") if d.get("hue_glide_timing") in ("beat", "decay") else "beat",
+            wave_hits=max(1.0, float(d.get("wave_hits", 1.0))),
+            spread_deg=float(d.get("spread_deg", 0.0)),
             dark_pulse_enabled=bool(d.get("dark_pulse_enabled", True)),
             dark_pulse_probability=float(d.get("dark_pulse_probability", 0.0)),
             dark_pulse_trigger=_pulse_trigger(d.get("dark_pulse_trigger")),
