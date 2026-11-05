@@ -64,6 +64,20 @@ def test_quick_slider_and_color_mapping_slider_follow_each_other(window):
     assert bs.hue_attack_ms == pytest.approx(222.0)
 
 
+def test_hit_sensitivity_sliders_follow_each_other(window):
+    vis, cmt = window.tabs.widget(0), window.tabs.widget(2)
+    cm = window.controller.config.color_mapping
+
+    vis.quick_sliders[("beat_sync", "color_mapping.beat_sync.hit_sensitivity")]._spin.setValue(2.0)
+    assert cm.beat_sync.hit_sensitivity == pytest.approx(2.0)
+    assert cmt.beat_hit_sensitivity_slider.value() == pytest.approx(2.0)
+
+    cmt.bsw_hit_sensitivity_slider._spin.setValue(0.75)
+    assert cm.beat_sync_white.hit_sensitivity == pytest.approx(0.75)
+    assert vis.quick_sliders[("beat_sync_white", "color_mapping.beat_sync_white.hit_sensitivity")].value() == pytest.approx(0.75)
+    assert cm.beat_sync.hit_sensitivity == pytest.approx(2.0)  # each mode its own
+
+
 def test_band_colors_settings_follow_each_other(window):
     vis, cmt = window.tabs.widget(0), window.tabs.widget(2)
     cm = window.controller.config.color_mapping

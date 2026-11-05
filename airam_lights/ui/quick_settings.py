@@ -8,13 +8,15 @@ follow each other through AppController.linkedSettingChanged (see
 link_slider()). A path is relative to AppConfig ("rhythm.sensitivity",
 "color_mapping.band_colors.focus").
 
-The sensitivities are three different things, so they're named apart:
+The sensitivities are four different things, so they're named apart:
 - Beat clock sensitivity: the shared beat clock (Global Effects tab) - what Beat Sync
   and Beat Sync White react to when they follow it, what Color Steps lets its
   hue steps out on, the pulse sequencer, and Chase / Group Switch on speed
   source 'clock'.
 - Beat detector sensitivity: Beat Sync's / Beat Sync White's own detector,
   used only when they don't follow the clock.
+- Hit sensitivity: which of those beats flash in Beat Sync / Beat Sync White
+  (dsp.hits), with either beat source. The only one where higher = more.
 - Peak sensitivity: Peak Flash's peak detector (it never uses the clock).
 """
 from __future__ import annotations
@@ -47,6 +49,13 @@ CLOCK_SENSITIVITY = QuickSetting(
 _DETECTOR_SENSITIVITY_TIP = (
     "This mode's own beat detector - used only when it doesn't follow the shared beat clock "
     "(Global Effects -> Rhythm). Higher = only sharp, obvious hits count as a beat."
+)
+# Beat Sync's and Beat Sync White's, the same text on the Color Mapping page.
+HIT_SENSITIVITY_TIP = (
+    "How soft a hit can be and still flash: it multiplies how far the bass rose on each beat, so at 2 half "
+    "the rise does the same. Higher = softer hits flash too, and every hit flashes brighter. Raise it if the "
+    "lamps sit idle while the music plays on, lower it if they pulse on every beat. From about 2.5, even a "
+    "held chord's wobble starts to flash."
 )
 
 # Band Colors' settings, the same text on the Color Mapping page.
@@ -100,6 +109,8 @@ QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
     "beat_sync": [
         QuickSetting("color_mapping.beat_sync.sensitivity", "Beat detector sensitivity", 1.05, 4.0,
                      tooltip=_DETECTOR_SENSITIVITY_TIP),
+        QuickSetting("color_mapping.beat_sync.hit_sensitivity", "Hit sensitivity", 0.5, 3.0,
+                     tooltip=HIT_SENSITIVITY_TIP),
         QuickSetting("color_mapping.beat_sync.sustain_brightness", "Sustain brightness", 0.0, 1.0,
                      tooltip="How bright the lamps stay between hits."),
         QuickSetting("color_mapping.beat_sync.brightness_release_ms", "Brightness decay", 50.0, 2000.0, 0, " ms",
@@ -110,6 +121,8 @@ QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
     "beat_sync_white": [
         QuickSetting("color_mapping.beat_sync_white.sensitivity", "Beat detector sensitivity", 1.05, 4.0,
                      tooltip=_DETECTOR_SENSITIVITY_TIP),
+        QuickSetting("color_mapping.beat_sync_white.hit_sensitivity", "Hit sensitivity", 0.5, 3.0,
+                     tooltip=HIT_SENSITIVITY_TIP),
         QuickSetting("color_mapping.beat_sync_white.sustain_brightness", "Sustain brightness", 0.0, 1.0,
                      tooltip="How bright the lamps stay between hits."),
         QuickSetting("color_mapping.beat_sync_white.brightness_release_ms", "Brightness decay", 50.0, 2000.0, 0,

@@ -11,6 +11,7 @@ envelope (see test_rhythm_engine).
 import math
 
 import numpy as np
+import pytest
 
 import airam_lights.engine.visualization_engine as ve_module
 from airam_lights.config.schema import AppConfig, BeatSyncModeConfig, BeatSyncWhiteModeConfig
@@ -129,6 +130,44 @@ def test_softer_hits_flash_lower_and_change_less_often():
     assert len(_changed(later)) < 0.6 * len(later)
 
 
+def test_hit_sensitivity_lets_softer_hits_flash():
+    soft = _song(lambda k: True, rise=0.05)  # ~4.5 dB: real music's typical beat
+    plain = _play(HitTracker(), 0.0, 10.0, soft)
+    assert not _flashed({k: v for k, v in plain.items() if k >= 2})
+    sensitive = _play(HitTracker(sensitivity=1.5), 0.0, 10.0, soft)
+    assert _flashed({k: v for k, v in sensitive.items() if k >= 2}) == [k for k in sorted(sensitive) if k >= 2]
+
+
+def test_hit_sensitivity_survives_a_reset():
+    tracker = HitTracker(sensitivity=2.0)
+    tracker.reset()
+    assert tracker.sensitivity == 2.0
+
+
+def test_raised_hit_sensitivity_still_leaves_a_held_note_dark():
+    tracker = HitTracker(sensitivity=1.5)
+    _play(tracker, 0.0, 6.0, _song(lambda k: True))
+    pad = _play(tracker, 6.0, 10.0, lambda t: 0.6 + 0.01 * math.sin(t * 7.0))
+    assert len(_flashed(pad)) <= 1
+
+
+def test_music_coming_back_from_silence_does_not_dim_the_hits_after_it():
+    """The huge "rise" out of a pause isn't learnt as the song's strongest,
+    which would make its ordinary hits read as weak for the next 20 s."""
+    tracker = HitTracker()
+    song = _song(lambda k: True, rise=0.08)
+    _play(tracker, 0.0, 6.0, song)
+    _play(tracker, 6.0, 3.0, lambda t: 0.0)
+    after = _play(tracker, 9.0, 8.0, song)
+    steady = {k: v for k, v in after.items() if k >= 22}  # (9 s = beat 18)
+    assert _flashed(steady) == sorted(steady)
+
+
+def test_a_soft_hit_no_beat_expected_flashes_as_it_lands():
+    beats = _play(HitTracker(), 0.0, 8.0, _song(lambda k: k >= 12, rise=0.07))  # half-strength
+    assert _flashed({k: v for k, v in beats.items() if 2 <= k <= 12}) == [12]
+
+
 def test_more_hits_per_change_hold_the_colour_longer():
     one = _play(HitTracker(), 0.0, 10.0, _song(lambda k: True), hits=1.0)
     four = _play(HitTracker(), 0.0, 10.0, _song(lambda k: True), hits=4.0)
@@ -186,6 +225,17 @@ def test_old_settings_files_load():
     assert BeatSyncWhiteModeConfig.from_dict({"temp_change_hits": 0}).temp_change_hits == 0.1
 
 
+def test_hit_sensitivity_settings():
+    assert BeatSyncModeConfig.from_dict({}).hit_sensitivity == 1.25  # an older settings file
+    assert BeatSyncWhiteModeConfig.from_dict({}).hit_sensitivity == 1.25
+    assert BeatSyncModeConfig.from_dict({"hit_sensitivity": 0}).hit_sensitivity == 0.1
+    config = AppConfig()
+    config.color_mapping.beat_sync.hit_sensitivity = 2.0
+    config.color_mapping.beat_sync_white.hit_sensitivity = 0.75
+    again = AppConfig.from_dict(config.to_dict()).color_mapping
+    assert again.beat_sync.hit_sensitivity == 2.0 and again.beat_sync_white.hit_sensitivity == 0.75
+
+
 # -- the engine ------------------------------------------------------------------------------------
 
 
@@ -200,12 +250,12 @@ def _pattern_engine(monkeypatch, mode="beat_sync", **beat_sync):
             setattr(bs, key, value)
 
     engine, clock, lamps = _make_engine(monkeypatch, configure)
-    kicks = {"on": lambda k: True}
+    kicks = {"on": lambda k: True, "level": 0.9}
 
     def energy(frame, lo, hi):
         beats = (clock.now - 1000.0) / PERIOD
         k = round(beats)
-        return 0.9 if kicks["on"](k) and abs(beats - k) * PERIOD < TICK / 2 else 0.4
+        return kicks["level"] if kicks["on"](k) and abs(beats - k) * PERIOD < TICK / 2 else 0.4
 
     monkeypatch.setattr(ve_module, "band_energy", energy)
     return engine, clock, kicks
@@ -259,6 +309,24 @@ def test_engine_half_time_kick_flashes_every_second_beat(monkeypatch):
     assert flashed in (([True, False] * 8)[: len(beats)], ([False, True] * 8)[: len(beats)])
     assert [changed for _, _, changed in beats] == flashed
     assert engine.hits.period == 2
+
+
+def _soft_kick_flashes(monkeypatch, sensitivity, mode):
+    """Flashes per beat once a locked clock's kicks turn soft, at this mode's Hit sensitivity."""
+    engine, clock, kicks = _pattern_engine(monkeypatch, mode=mode)
+    getattr(engine.config.color_mapping, mode).hit_sensitivity = sensitivity
+    _run(engine, clock, 6.0, lambda: None)
+    kicks["level"] = 0.5
+    _run(engine, clock, 1.0, lambda: None)
+    assert engine.hits.sensitivity == sensitivity
+    beats = _per_beat(engine, clock, 3.0, lambda: 0.0)
+    return sum(hit for _, hit, _ in beats) / len(beats)
+
+
+@pytest.mark.parametrize("mode", ["beat_sync", "beat_sync_white"])
+def test_engine_hit_sensitivity_lets_soft_kicks_flash(monkeypatch, mode):
+    assert _soft_kick_flashes(monkeypatch, 1.0, mode) == 0.0
+    assert _soft_kick_flashes(monkeypatch, 3.0, mode) == 1.0
 
 
 def test_a_dark_pulse_with_no_hit_under_it_does_not_flash(monkeypatch):

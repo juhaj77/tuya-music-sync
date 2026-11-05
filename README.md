@@ -302,8 +302,8 @@ plus a few of the selected mode's own settings, which change with the mode:
 
 | Mode | Quick settings |
 |---|---|
-| Beat Sync | Beat detector sensitivity, Sustain brightness, Brightness decay, Hue snap speed |
-| Beat Sync White | Beat detector sensitivity, Sustain brightness, Brightness decay, Temp snap speed |
+| Beat Sync | Beat detector sensitivity, Hit sensitivity, Sustain brightness, Brightness decay, Hue snap speed |
+| Beat Sync White | Beat detector sensitivity, Hit sensitivity, Sustain brightness, Brightness decay, Temp snap speed |
 | Peak Flash | Peak sensitivity, Flash decay, Whiteness amount, Color richness (hue flow), Baseline brightness min |
 | Color Steps | Bass influence, Mid influence, Treble influence, Hits per step, Hue snap speed |
 | Band Colors | Color focus, Chord turn, Range memory, Band release |
@@ -312,15 +312,17 @@ Each is the same setting as in the Color Mapping tab (*Beat clock sensitivity*: 
 Effects tab) - change it in either place and the other follows. **More ... settings in
 Color Mapping** opens the mode's page there.
 
-**Three sensitivities** - they are different things:
+**Four sensitivities** - they are different things:
 
 | Setting | What it sets | Used when |
 |---|---|---|
 | **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Global Effects -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); Color Steps; the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
 | **Beat detector sensitivity** | Beat Sync's / Beat Sync White's own beat detector | only when that mode does *not* follow the clock (greyed out otherwise) |
+| **Hit sensitivity** | which beats flash in Beat Sync / Beat Sync White | always in those modes, with either beat source |
 | **Peak sensitivity** | Peak Flash's peak detector | Peak Flash (it never uses the clock) |
 
-For all of them: **higher = fewer, clearer hits**.
+For the beat clock, beat detector and peak sensitivities, **higher = fewer, clearer hits**.
+*Hit sensitivity* goes the other way: **higher = more flashes**.
 
 ## Devices & Setup tab
 
@@ -406,6 +408,11 @@ interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shar
   recent range, so all music uses the whole hue range. The line under *Hue mode* shows the
   note, the key and how much of the colour comes from the pitch.
 
+**Hit sensitivity** (default 1.25) - how soft a hit can be and still flash. It multiplies how
+far the bass rose on each beat, so at 2 half the rise does the same, and every hit flashes
+brighter. Raise it if the lamps sit idle while the music plays on; lower it if they pulse on
+every beat. From about 2.5, even a held chord's wobble starts to flash.
+
 **Hits per change** - how many hits it takes to change the colour; there's no fixed count
 of beats. 1 = every full-strength hit gets a new colour (a half-strength hit counts a
 quarter), so a four-on-the-floor changes it on every beat and a half-time kick on every
@@ -468,6 +475,7 @@ in Beat Sync only the beats with a hit flash, as brightly as they hit.
 
 - **Temperature mode** - `random` picks a new temperature at least *Min temp jump* away;
   `alternate` ping-pongs between *Temp range min (warm)* and *max (cool)*.
+- **Hit sensitivity** - how soft a hit can be and still flash, as in Beat Sync.
 - **Hits per change** - how many hits it takes to change the temperature, as in Beat Sync:
   1 = every full-strength hit, higher = fewer changes so it doesn't flicker warm-cool on
   every hit (4 = about once a bar on a four-on-the-floor); a quiet passage never changes it.

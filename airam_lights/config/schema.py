@@ -254,6 +254,9 @@ class BeatSyncModeConfig:
     # hue_every_n_beats and hue_change_dynamic - older settings files'
     # values are ignored.)
     hue_change_hits: float = 1.0
+    # How soft a hit still flashes (dsp.hits): multiplies how far the beat
+    # band rose on each beat. Unlike `sensitivity` above, higher = more flashes.
+    hit_sensitivity: float = 1.25
     min_hue_jump_deg: float = 60.0  # used when hue_mode == "random": force a visibly different color each hit
 
     saturation: float = 1.0
@@ -408,6 +411,7 @@ class BeatSyncModeConfig:
             hue_step_max_deg=float(d.get("hue_step_max_deg", 150.0)),
             hue_step_deg=float(d.get("hue_step_deg", 137.5)),
             hue_change_hits=max(0.1, float(d.get("hue_change_hits", 1.0))),
+            hit_sensitivity=max(0.1, float(d.get("hit_sensitivity", 1.25))),
             min_hue_jump_deg=float(d.get("min_hue_jump_deg", 60.0)),
             saturation=float(d.get("saturation", 1.0)),
             flash_brightness=float(d.get("flash_brightness", 1.0)),
@@ -556,6 +560,7 @@ class BeatSyncWhiteModeConfig:
     # How many hits change the temperature, like Beat Sync's hue_change_hits
     # (replaces temp_every_n_beats).
     temp_change_hits: float = 1.0
+    hit_sensitivity: float = 1.25  # how soft a hit still flashes, like Beat Sync's
 
     flash_brightness: float = 1.0
     sustain_brightness: float = 0.25
@@ -584,6 +589,7 @@ class BeatSyncWhiteModeConfig:
             temp_max=float(d.get("temp_max", 1.0)),
             min_temp_jump=float(d.get("min_temp_jump", 0.35)),
             temp_change_hits=max(0.1, float(d.get("temp_change_hits", 1.0))),
+            hit_sensitivity=max(0.1, float(d.get("hit_sensitivity", 1.25))),
             flash_brightness=float(d.get("flash_brightness", 1.0)),
             sustain_brightness=float(d.get("sustain_brightness", 0.25)),
             temp_attack_ms=float(d.get("temp_attack_ms", 40.0)),

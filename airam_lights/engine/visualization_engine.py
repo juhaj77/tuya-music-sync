@@ -769,6 +769,7 @@ class VisualizationEngine:
 
         # The beats keep the timing; the music decides which of them flash,
         # how brightly, and when the hue changes (see dsp.hits).
+        self.hits.sensitivity = cfg.hit_sensitivity
         self.hits.update(raw_energy, dt)
         strength = self.hits.flash_strength(is_beat)
         hit = strength >= HIT_FLASH_MIN
@@ -1890,6 +1891,7 @@ class VisualizationEngine:
             raw_energy = band_energy(frame, cfg.detect_low_hz, cfg.detect_high_hz)
             is_beat = self._beat_detector_white.update(raw_energy, wall_now)
 
+        self.hits.sensitivity = cfg.hit_sensitivity
         self.hits.update(raw_energy, dt)
         strength = self.hits.flash_strength(is_beat)
         hit = strength >= HIT_FLASH_MIN

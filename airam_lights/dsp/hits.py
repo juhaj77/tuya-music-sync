@@ -21,7 +21,10 @@ absolute scale, so loud and quiet mixes alike use the whole scale.
   rises 10-15 dB, a held bass note or a pad wobbles a dB or two. Below
   _PUNCH_FLOOR it is no hit at all; it counts fully from 70 % of the
   strongest rises lately (an ordinary hit of a pounding beat), though never
-  from less than _PUNCH_FULL_MIN.
+  from less than _PUNCH_FULL_MIN. A rise out of near-silence isn't learnt as
+  a strong one (_AFTER_SILENCE_S). Hit sensitivity (BeatSyncModeConfig.
+  hit_sensitivity) multiplies the rise before any of this: real music's
+  beats typically rise 5-6 dB, right where a beat stops flashing at 1.
 - Loudness: the hit's peak against the recent hits' peaks. Quieter than the
   music just was (a verse after the chorus) counts less, down to half; about
   as loud as lately counts fully. (A level that stays put reads mid-range
@@ -64,7 +67,8 @@ _FLASH_FULL = 0.7  # a hit this hard flashes at full Flash brightness, softer on
 _TROUGH_S = 0.25  # how fast the dip before a hit is forgotten: longer than a hit's rise, shorter than a beat
 _PUNCH_FLOOR = 0.04  # a rise of the dB-scaled level (~3.6 dB) below which it's no hit: held notes, pads, noise
 _PUNCH_FULL_MIN = 0.1  # ~9 dB: a full-strength hit rises at least this much...
-_PUNCH_FULL_SHARE = 0.7  # ...and this share of the strongest rises lately
+_PUNCH_FULL_SHARE = 0.7  # ...and this share of the strongest rises lately...
+_AFTER_SILENCE_S = 1.5  # ...not counting those this soon after near-silence: music coming back "rises" ~50 dB, which would dim the next 20 s
 _MEMORY_S = 20.0  # how long the strongest rises and the hits' loudness are remembered
 _LOUD_MIN_SPAN = 0.1  # ~9 dB: hit peaks steadier than this read mid-range (see AdaptiveRange)
 _LOUD_FULL = 0.35  # the loudness reading that counts fully: about as loud as the hits lately
@@ -75,7 +79,7 @@ _PERIODS = (1, 2, 3, 4, 6, 8)  # the patterns tried, in beats
 _FIT_BEATS = 8  # a pattern is judged by how well it would have predicted this many last beats...
 _FIT_MIN = 4  # ...and needs at least this many of them
 _PERIOD_COST = 0.02  # per beat of period: a longer pattern has to predict clearly better
-_LATE_PUNCH = 0.6  # a hit no beat expected flashes as it lands when it's at least this hard
+_LATE_PUNCH = 0.35  # a hit no beat expected flashes as it lands when it's at least this hard
 _LEAK_S = 8.0
 _SLACK = 0.9  # a drive this close to Hits per change will do: nearly full hits are full hits
 _GAPS = 3  # the typical gap between colour changes is the median of this many
@@ -98,7 +102,8 @@ class _Beat:
 
 
 class HitTracker:
-    def __init__(self):
+    def __init__(self, sensitivity: float = 1.0):
+        self.sensitivity = sensitivity  # Hit sensitivity, see _punch; survives a reset
         self.reset()
 
     def reset(self) -> None:
@@ -106,6 +111,7 @@ class HitTracker:
         self._trough: Optional[float] = None
         self._samples: Deque = collections.deque()  # (time, rise, level) per tick
         self._strongest = 0.0  # the strongest rise lately, fading over _MEMORY_S
+        self._silent_at = -math.inf  # when the beat band was last near silence
         self._loudness = AdaptiveRange(_LOUD_MIN_SPAN, _MEMORY_S)
         self._scored_at: Optional[float] = None
         self._beats: Deque[_Beat] = collections.deque(maxlen=_HISTORY_BEATS)
@@ -147,6 +153,8 @@ class HitTracker:
         dt = max(dt, 0.0)
         self._now += dt
         self.drive *= math.exp(-dt / _LEAK_S)
+        if level < _SILENCE[1]:
+            self._silent_at = self._now
         if self._trough is None or level < self._trough:
             self._trough = level
         else:
@@ -184,7 +192,7 @@ class HitTracker:
         if beat.expected >= FLASH_MIN or beat.late or self._now > self._window_end(beat):
             return 0.0
         _, rise, level = self._samples[-1]
-        strength = _ramp(rise, _PUNCH_FLOOR, self._full()) * _ramp(level, *_SILENCE)
+        strength = self._punch(rise) * _ramp(level, *_SILENCE)
         if strength < _LATE_PUNCH:
             return 0.0
         beat.late = True
@@ -213,6 +221,11 @@ class HitTracker:
     def _full(self) -> float:
         return max(_PUNCH_FULL_MIN, _PUNCH_FULL_SHARE * self._strongest)
 
+    def _punch(self, rise: float) -> float:
+        """How hard a rise hits, 0..1. Sensitivity multiplies the rise, so it
+        lowers both the floor and the full mark: 2 = half the dB does the same."""
+        return _ramp(rise * self.sensitivity, _PUNCH_FLOOR, self._full())
+
     def _score(self, force: bool = False) -> None:
         """Scores the beats whose window is over (with `force`, also the one
         still open - a beat came early)."""
@@ -230,8 +243,10 @@ class HitTracker:
         peak = max((level for _, level in window), default=0.0)
         elapsed = 0.0 if self._scored_at is None else self._now - self._scored_at
         self._scored_at = self._now
-        self._strongest = max(rise, self._strongest * math.exp(-elapsed / _MEMORY_S))
-        punch = _ramp(rise, _PUNCH_FLOOR, self._full())
+        self._strongest *= math.exp(-elapsed / _MEMORY_S)
+        if self._now - self._silent_at >= _AFTER_SILENCE_S:
+            self._strongest = max(rise, self._strongest)
+        punch = self._punch(rise)
         loud = _ramp(self._loudness.update(peak, elapsed), 0.0, _LOUD_FULL)
         self.hit = punch * (0.5 + 0.5 * loud) * _ramp(peak, *_SILENCE)
         return self.hit

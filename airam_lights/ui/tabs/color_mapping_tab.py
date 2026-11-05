@@ -38,6 +38,7 @@ from ..quick_settings import (
     BAND_FOCUS_TIP,
     BAND_RANGE_MEMORY_TIP,
     BAND_RELEASE_TIP,
+    HIT_SENSITIVITY_TIP,
     STEPS_BASS_TIP,
     STEPS_HITS_TIP,
     STEPS_MID_TIP,
@@ -260,6 +261,12 @@ class ColorMappingTab(QWidget):
         self._spectrum_timer.timeout.connect(self._refresh_steps_status)
         self._spectrum_timer.timeout.connect(self._refresh_hits_status)
         self._spectrum_timer.start(200)
+
+        self.beat_hit_sensitivity_slider = FloatSlider(
+            "Hit sensitivity", 0.5, 3.0, bs.hit_sensitivity, decimals=2, tooltip=HIT_SENSITIVITY_TIP,
+        )
+        self.beat_hit_sensitivity_slider.valueChanged.connect(self._on_beat_changed)
+        beat_layout.addWidget(self.beat_hit_sensitivity_slider)
 
         self.beat_hue_hits_slider = FloatSlider(
             "Hits per change", 0.25, 8.0, bs.hue_change_hits, decimals=2,
@@ -499,6 +506,12 @@ class ColorMappingTab(QWidget):
         )
         bsw_temp_mode_note.setWordWrap(True)
         bsw_layout.addWidget(bsw_temp_mode_note)
+
+        self.bsw_hit_sensitivity_slider = FloatSlider(
+            "Hit sensitivity", 0.5, 3.0, bsw.hit_sensitivity, decimals=2, tooltip=HIT_SENSITIVITY_TIP,
+        )
+        self.bsw_hit_sensitivity_slider.valueChanged.connect(self._on_beat_white_changed)
+        bsw_layout.addWidget(self.bsw_hit_sensitivity_slider)
 
         self.bsw_temp_hits_slider = FloatSlider(
             "Hits per change", 0.25, 8.0, bsw.temp_change_hits, decimals=2,
@@ -952,10 +965,12 @@ class ColorMappingTab(QWidget):
         follows the other copies of its setting (see ui/quick_settings.py)."""
         links = {
             "color_mapping.beat_sync.sensitivity": [self.beat_sensitivity_slider],
+            "color_mapping.beat_sync.hit_sensitivity": [self.beat_hit_sensitivity_slider],
             "color_mapping.beat_sync.sustain_brightness": [self.beat_sustain_slider],
             "color_mapping.beat_sync.brightness_release_ms": [self.beat_bright_release_slider],
             "color_mapping.beat_sync.hue_attack_ms": [self.beat_hue_attack_slider],
             "color_mapping.beat_sync_white.sensitivity": [self.bsw_sensitivity_slider],
+            "color_mapping.beat_sync_white.hit_sensitivity": [self.bsw_hit_sensitivity_slider],
             "color_mapping.beat_sync_white.sustain_brightness": [self.bsw_sustain_slider],
             "color_mapping.beat_sync_white.brightness_release_ms": [self.bsw_bright_release_slider],
             "color_mapping.beat_sync_white.temp_attack_ms": [self.bsw_temp_attack_slider],
@@ -1351,6 +1366,7 @@ class ColorMappingTab(QWidget):
         bs.hue_step_min_deg = self.beat_hue_step_min_slider.value()
         bs.hue_step_max_deg = self.beat_hue_step_max_slider.value()
         bs.hue_change_hits = self.beat_hue_hits_slider.value()
+        bs.hit_sensitivity = self.beat_hit_sensitivity_slider.value()
         bs.min_hue_jump_deg = self.beat_min_jump_slider.value()
         bs.saturation = self.beat_saturation_slider.value()
         bs.flash_brightness = self.beat_flash_slider.value()
@@ -1379,6 +1395,7 @@ class ColorMappingTab(QWidget):
         bsw.temp_max = self.bsw_temp_max_slider.value()
         bsw.min_temp_jump = self.bsw_min_jump_slider.value()
         bsw.temp_change_hits = self.bsw_temp_hits_slider.value()
+        bsw.hit_sensitivity = self.bsw_hit_sensitivity_slider.value()
         bsw.flash_brightness = self.bsw_flash_slider.value()
         bsw.sustain_brightness = self.bsw_sustain_slider.value()
         bsw.temp_attack_ms = self.bsw_temp_attack_slider.value()
