@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from airam_lights.config.schema import AppConfig  # noqa: E402
 from airam_lights.ui.tabs.pulses_panel import MODE_NAMES  # noqa: E402
 
-MODES = ("beat_sync", "beat_sync_white", "peak_flash", "hsv_music", "band_colors")
+MODES = ("beat_sync", "beat_sync_white", "peak_flash", "color_steps", "band_colors")
 
 
 @pytest.fixture(scope="module")
@@ -111,7 +111,7 @@ def test_the_other_modes_use_the_sequencer_without_follow_the_shared_clock(windo
 
 
 def test_without_the_sequencer_the_other_modes_grey_the_pulse_look_out(window, qapp):
-    pulses = _effects(window, qapp, "hsv_music").pulses
+    pulses = _effects(window, qapp, "color_steps").pulses
     pulses.seq_enabled_checkbox.setChecked(False)
     for widget in (pulses.beat_dark_enabled_checkbox, pulses.beat_dark_duration_slider,
                    pulses.beat_white_pulse_enabled_checkbox, pulses.beat_white_pulse_duration_slider,
@@ -162,7 +162,7 @@ def test_beat_sync_white_uses_only_the_dark_pulses(window, qapp):
     # Another mode gets the sequencer's white settings back.
     pulses = _effects(window, qapp, "beat_sync_white").pulses
     pulses.seq_enabled_checkbox.setChecked(True)
-    pulses = _effects(window, qapp, "hsv_music").pulses
+    pulses = _effects(window, qapp, "color_steps").pulses
     assert pulses.seq_white_combo.isEnabled() and pulses.beat_white_pulse_enabled_checkbox.isEnabled()
     assert pulses.seq_dark_sweep_checkbox.isEnabled() and pulses.beat_dark_desaturate_slider.isEnabled()
 

@@ -6,17 +6,16 @@ Each is a slider that also sits in a settings tab (the beat clock's in Global
 Effects, the rest in Color Mapping); both edit the same config value and
 follow each other through AppController.linkedSettingChanged (see
 link_slider()). A path is relative to AppConfig ("rhythm.sensitivity",
-"color_mapping.smoothing.attack_ms").
+"color_mapping.band_colors.focus").
 
-The sensitivities are four different things, so they're named apart:
+The sensitivities are three different things, so they're named apart:
 - Beat clock sensitivity: the shared beat clock (Global Effects tab) - what Beat Sync
-  and Beat Sync White react to when they follow it, the pulse sequencer, and
-  Chase / Group Switch on speed source 'clock'.
+  and Beat Sync White react to when they follow it, what Color Steps lets its
+  hue steps out on, the pulse sequencer, and Chase / Group Switch on speed
+  source 'clock'.
 - Beat detector sensitivity: Beat Sync's / Beat Sync White's own detector,
   used only when they don't follow the clock.
 - Peak sensitivity: Peak Flash's peak detector (it never uses the clock).
-- Level sensitivity (gain): how strongly HSV Music turns the sound level
-  into light - a gain, not a detector.
 """
 from __future__ import annotations
 
@@ -41,15 +40,14 @@ CLOCK_SENSITIVITY = QuickSetting(
     "rhythm.sensitivity", "Beat clock sensitivity", 1.01, 2.0,
     tooltip="The shared beat clock (Global Effects -> Rhythm): how far above the recent average a kick "
     "must rise to count - higher = only the clearest kicks. Beat Sync and Beat Sync White follow it "
-    "when they use the shared clock, the Pulse sequencer always, Chase and Group Switch with speed "
-    "source 'clock'.",
+    "when they use the shared clock, Color Steps and the Pulse sequencer always, Chase and Group Switch "
+    "with speed source 'clock'.",
 )
 
 _DETECTOR_SENSITIVITY_TIP = (
     "This mode's own beat detector - used only when it doesn't follow the shared beat clock "
     "(Global Effects -> Rhythm). Higher = only sharp, obvious hits count as a beat."
 )
-_LEVEL_SENSITIVITY_TIP = "How strongly the sound level turns into light - a gain: higher = brighter, livelier."
 
 # Band Colors' settings, the same text on the Color Mapping page.
 BAND_FOCUS_TIP = (
@@ -72,13 +70,30 @@ BAND_RELEASE_TIP = (
     "How fast a band's activity falls back after its hit - longer = a band's colour lingers between hits, "
     "shorter = the colour flicks back right away."
 )
-_ATTACK = QuickSetting(
-    "color_mapping.smoothing.attack_ms", "Attack", 1.0, 1000.0, 0, " ms",
-    "How fast the colour follows the music when it gets louder - low = instant.",
+# Color Steps' settings, the same text on the Color Mapping page.
+STEPS_BASS_TIP = (
+    "How much a peak in the bass (kick, bass notes) charges the next hue step: 1 = a full-strength peak counts "
+    "as one hit, 0 = the bass doesn't move the colour at all. It also sets how much the bass shows in the "
+    "brightness."
 )
-_RELEASE = QuickSetting(
-    "color_mapping.smoothing.release_ms", "Release", 1.0, 2000.0, 0, " ms",
-    "How fast the colour falls back when the music gets quieter - high = a long tail.",
+STEPS_MID_TIP = (
+    "How much a peak in the mids (snare, chords, voices) charges the next hue step: 1 = a full-strength peak "
+    "counts as one hit, 0 = the mids don't move the colour at all. It also sets how much the mids show in the "
+    "brightness."
+)
+STEPS_TREBLE_TIP = (
+    "How much a peak in the treble (hi-hats, cymbals) charges the next hue step: 1 = a full-strength peak "
+    "counts as one hit, 0 = the treble doesn't move the colour at all. It also sets how much the treble shows "
+    "in the brightness."
+)
+STEPS_HITS_TIP = (
+    "How much charge a hue step takes, in hits: low = a step on nearly every beat, high = one every bar or so. "
+    "Each band's peaks are measured against that band's own strongest lately, so this works the same in loud "
+    "and quiet mixes. The charge leaks away slowly, and with no peaks there are no steps."
+)
+STEPS_SNAP_TIP = (
+    "How fast the colour goes to a new step's hue - low = a snap, high = a slow fade over seconds. A slow hue "
+    "still goes the way the steps went, round the wheel, however far it falls behind them."
 )
 
 QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
@@ -115,11 +130,14 @@ QUICK_SETTINGS: Dict[str, List[QuickSetting]] = {
         QuickSetting("color_mapping.peak_flash.baseline_min_brightness", "Baseline brightness min", 0.0, 1.0,
                      tooltip="How bright the lamps stay in quiet passages."),
     ],
-    "hsv_music": [
-        QuickSetting("color_mapping.hsv.sensitivity", "Level sensitivity (gain)", 0.1, 4.0,
-                     tooltip=_LEVEL_SENSITIVITY_TIP),
-        _ATTACK,
-        _RELEASE,
+    "color_steps": [
+        QuickSetting("color_mapping.color_steps.bass_influence", "Bass influence", 0.0, 2.0, tooltip=STEPS_BASS_TIP),
+        QuickSetting("color_mapping.color_steps.mid_influence", "Mid influence", 0.0, 2.0, tooltip=STEPS_MID_TIP),
+        QuickSetting("color_mapping.color_steps.treble_influence", "Treble influence", 0.0, 2.0,
+                     tooltip=STEPS_TREBLE_TIP),
+        QuickSetting("color_mapping.color_steps.hits_per_step", "Hits per step", 0.25, 16.0, tooltip=STEPS_HITS_TIP),
+        QuickSetting("color_mapping.color_steps.hue_attack_ms", "Hue snap speed", 5.0, 8000.0, 0, " ms",
+                     tooltip=STEPS_SNAP_TIP),
     ],
     "band_colors": [
         QuickSetting("color_mapping.band_colors.focus", "Color focus", 0.0, 1.0,

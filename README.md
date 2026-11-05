@@ -23,7 +23,7 @@ runtime, no phone app. Windows (ready-made build) and Linux (from source).
   - [Devices & Setup tab](#devices--setup-tab) - lamps and their place in the effects
   - [Color Mapping tab](#color-mapping-tab) - each colour mode's own settings
     - [Beat Sync](#beat-sync) - beat detection, colour, between beats, per-beat pulses
-    - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [HSV Music](#hsv-music) · [Band Colors](#band-colors)
+    - [Beat Sync White](#beat-sync-white) · [Peak Flash](#peak-flash) · [Color Steps](#color-steps) · [Band Colors](#band-colors)
     - [Global settings](#global-settings) - lamp transitions, command rate
     - [Presets and built-in looks](#presets-and-built-in-looks)
   - [Global Effects tab](#global-effects-tab) - what every colour mode shares
@@ -87,7 +87,7 @@ other colour modes start from tuned settings too.
 - **Every lamp in sync, locally** - loopback audio from the PC (or a microphone) and the
   Tuya LAN protocol; no cloud round-trip, no phone app once set up. Any number of lamps.
 - **Five colour modes** - **Beat Sync** (the main mode: a flash on every hit, timed by the
-  shared beat clock), Beat Sync White, Peak Flash, HSV Music and Band Colors.
+  shared beat clock), Beat Sync White, Peak Flash, Color Steps and Band Colors.
 - **Pulses in every mode** - the pulse sequencer places dark breaths, true-white flashes
   walking round the room, strobes and colour sweeps on the beat grid, with the same
   settings in every colour mode (Beat Sync White takes the dark ones).
@@ -305,23 +305,22 @@ plus a few of the selected mode's own settings, which change with the mode:
 | Beat Sync | Beat detector sensitivity, Sustain brightness, Brightness decay, Hue snap speed |
 | Beat Sync White | Beat detector sensitivity, Sustain brightness, Brightness decay, Temp snap speed |
 | Peak Flash | Peak sensitivity, Flash decay, Whiteness amount, Color richness (hue flow), Baseline brightness min |
-| HSV Music | Level sensitivity (gain), Attack, Release |
+| Color Steps | Bass influence, Mid influence, Treble influence, Hits per step, Hue snap speed |
 | Band Colors | Color focus, Chord turn, Range memory, Band release |
 
 Each is the same setting as in the Color Mapping tab (*Beat clock sensitivity*: the Global
 Effects tab) - change it in either place and the other follows. **More ... settings in
 Color Mapping** opens the mode's page there.
 
-**Four sensitivities** - they are different things:
+**Three sensitivities** - they are different things:
 
 | Setting | What it sets | Used when |
 |---|---|---|
-| **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Global Effects -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
+| **Beat clock sensitivity** | the [shared beat clock](#rhythm---the-shared-beat-clock) (Global Effects -> Rhythm) | Beat Sync / Beat Sync White follow the clock (the default); Color Steps; the pulse sequencer, in any mode; Chase / Group Switch with speed source `clock`. Greyed out when nothing does. |
 | **Beat detector sensitivity** | Beat Sync's / Beat Sync White's own beat detector | only when that mode does *not* follow the clock (greyed out otherwise) |
 | **Peak sensitivity** | Peak Flash's peak detector | Peak Flash (it never uses the clock) |
-| **Level sensitivity (gain)** | how strongly the sound level turns into light | HSV Music |
 
-For all of them: **higher = fewer, clearer hits**, except the gain, where higher = brighter.
+For all of them: **higher = fewer, clearer hits**.
 
 ## Devices & Setup tab
 
@@ -400,7 +399,7 @@ interval*, *Min energy floor*). Used only when Beat Sync doesn't follow the shar
   - `intensity_brightness` - both;
   - `pitch` - the tension of the note that stands out in the song's key; it glides over
     to `intensity_brightness` when no note stands out.
-- `spectrum` - the music picks the colour, spread over HSV Music's hue range. *Spectrum
+- `spectrum` - the music picks the colour, spread over the *Hue range* (from .. to). *Spectrum
   from* `pitch` (default) follows the standing-out note on the circle of fifths, so related
   notes and chords get neighbouring colours; during drums, noise or a droning note it
   glides over to `intensity_brightness`. Every source is measured against the song's own
@@ -482,23 +481,66 @@ A softer, continuous cousin of Beat Sync:
 - Brightness **tracks the overall loudness** between *Baseline brightness min/max*, with a
   *Flash brightness* boost on each peak that decays (*Flash attack*, *Flash decay*).
 - The hue never snaps: it **flows** - a slow rotation (`drift`, *Drift speed*) or following
-  the spectral centroid (`centroid`). **Color richness (hue flow)** (up to ~15 s) sets how
+  the spectral centroid over the *Hue range* (`centroid`). **Color richness (hue flow)** (up to ~15 s) sets how
   slowly: high values unfold a slow, rich colour story over a song section.
 
 With the [pulse sequencer](#pulse-sequencer) on, its pulses play on top - as in the
-continuous modes below.
+modes below.
 
-### HSV Music
+### Color Steps
 
-A continuous mode - the light follows the sound rather than beats: hue from the spectral
-centroid, the sound's energy-weighted centre frequency on a log scale (*Hue @ low freq* ..
-*Hue @ high freq*: bass-heavy toward the first, bright hi-hats and cymbals toward the
-second), brightness from the overall energy (*Brightness min/max*, *Level sensitivity
-(gain)*), saturation from spectral contrast (*Saturation base* + contrast x *Saturation
-from contrast*: a clear tone or kick vivid, noise and distortion paler). **Attack** /
-**Release** - how fast the light follows rising / falling sound. With the
-[pulse sequencer](#pulse-sequencer) on, its dark and white pulses, strobes and sweeps play
-on top of the colour.
+The colour walks around the wheel, pushed along by what the music plays, and each new colour
+rolls across the room. No colour belongs to anything here: the bass, the mids and the treble
+all push the same hue, so where it goes depends on what has been playing
+(`effects/color_steps.py`).
+
+- **Band peaks** charge the next step. A peak is a band's level rising from the dip before it,
+  against that band's own strongest rises lately, so an ordinary hit counts in full in a loud
+  and a quiet mix alike.
+  - **Bass / Mid / Treble influence** - how much a full-strength peak in the band counts, in
+    hits. 0 = that band doesn't move the colour at all (nor show in the brightness). With
+    only *Treble influence* up, the hi-hats walk the colour; with only *Bass influence*, the
+    kick and the bass line.
+  - **Hits per step** - how much charge a step takes: low = a step on nearly every beat, high =
+    one every bar or so. The charge leaks away slowly. No peaks, no steps.
+  - **Bass / mid split**, **Mid / treble split** - the bands, as in Band Colors.
+- **The step** goes out on the [shared beat clock](#rhythm---the-shared-beat-clock):
+  - **Step on** - once charged, a step waits for the next `16th`, `8th`, `beat`, `2 beats` or
+    `bar` line; a hit that fills the charge just behind the line still makes it. `peak` = at
+    once, wherever the clock is. Until the clock has locked onto the tempo (or with *Lock to
+    tempo* off) the steps go out on the peaks anyway. The clock alone never moves the colour.
+  - **Step min / max** - how far: mostly short steps between neighbouring colours, the long ones
+    when the peaks are denser and more bass-heavy than the song has been lately, and a kick
+    further than a hi-hat. Steps aren't exactly equal, so a steady beat doesn't settle on a
+    loop of the same few colours.
+  - **Bar line boost** - added to a step on a bar's first beat: the colour jumps where the bar
+    turns.
+  - **Direction** - `bands`: forward until the peaks' balance shifts clearly toward the treble
+    compared with the last while, then back until it shifts toward the bass, so one section
+    of a song can turn back what the last one did. `forward`: always the same way.
+  - **Hue snap speed** - how fast the colour gets to the step's hue: low = a snap, high = a slow
+    fade over seconds, which still goes the way the steps went, round the wheel, however far it
+    falls behind them.
+  - **Glide** - between the steps the hue keeps moving the same way, in degrees per beat, while
+    the music plays.
+- **Across the lamps** - along the lamps' *Chase order* (Devices & Setup tab; without one every
+  lamp shows the same colour, and lamps outside it go with the first):
+  - **Wave length** - how many beats a new colour takes from the first lamp to the last, running
+    the way the hue stepped. 0 = every lamp at once.
+  - **Hue spread** - fans the lamps out over this many degrees, so the room shows neighbouring
+    colours.
+- **Brightness** - *Saturation*, *Brightness min / max*.
+  - **Crest** - the share of the brightness range that belongs to the lift a step gives each lamp
+    as it passes (*Crest decay*: how fast it falls back). The rest follows the bands let in by
+    their influence, each against its own recent range (*Band attack / release*, through the
+    Global *Response curve*). Silence fades to Brightness min.
+
+The line at the bottom of the page shows the charge, whether a step is waiting for the clock,
+and the last step. Everything on the Global Effects tab plays on top: Chase and Group Switch
+take each lamp's own hue, and the [pulse sequencer](#pulse-sequencer)'s dark and white pulses,
+strobes and sweeps run as in the other modes. Color Steps replaced HSV Music, whose hue followed
+the spectral centroid and hardly moved on real music: a config or preset saved in it loads into
+Color Steps, and its hue range stays as the *Hue range* of Beat Sync and Peak Flash.
 
 ### Band Colors
 
@@ -552,7 +594,7 @@ preset saved in either loads into it.
   With `direct` every command shows as a step, so smooth fades and glides want a high rate.
 - **Min change threshold** - skips sends that would barely change the colour.
 - **Response curve** (`linear` / `log` / `exp2`) - reshapes the level before it becomes light,
-  in HSV Music and Band Colors only: `log` brings out quiet detail, `exp2` the opposite.
+  in Color Steps and Band Colors only: `log` brings out quiet detail, `exp2` the opposite.
 - **Invert brightness** - quiet parts bright, loud parts dark, in every mode.
 
 Colours go out at the datapoint's own resolution (hue in degrees, saturation and
@@ -582,7 +624,7 @@ brightness in 0.1 % steps), not rounded through 8-bit RGB.
   groups, what the white walk steps through, beat detection band and sensitivity, lead time,
   true-white brightness and cool ratio, the strobe's brightness and max rate, Beat Sync's
   *Between hits* (fade, hue glide) and the Band Colors palette are left as they are. *Melody*
-  sets HSV Music's hue range to the full circle (its `spectrum` hue spreads over it). The
+  sets the *Hue range* to the full circle (its `spectrum` hue spreads over it). The
   strobes and flash strobes need *Lamp transitions* `direct` or `smooth`.
 - **Save As...** / **Saved** + **Load** - your own presets: the whole look, including Rhythm, Chase,
   Group Switch and the lamps' Chase order. Loading one updates every setting at once.
@@ -711,7 +753,7 @@ pulses a mode gets:
 | Mode | Pulses |
 |---|---|
 | Beat Sync | its [per-beat pulses](#beat-sync), or the sequencer's while it runs |
-| Peak Flash, HSV Music, Band Colors | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
+| Peak Flash, Color Steps, Band Colors | the sequencer's: dark and white pulses, strobe, flash strobe, color sweep, dark sweep |
 | Beat Sync White | the sequencer's dark pulses and dark sweeps only (it's white already); without the sequencer its own per-beat dark pulses |
 
 What the active mode doesn't use is greyed out, with the reason in the tooltip.
@@ -960,8 +1002,8 @@ small setup see the box in [Quick start](#quick-start).
 
 Hover it: a greyed-out setting says in its tooltip why it's unused (e.g. Beat Sync's own
 detection while it follows the shared clock). For the sensitivities, see
-[Four sensitivities](#visualizer-tab). Some settings only show in certain modes: the
-continuous modes' Attack/Release, for instance, don't affect Beat Sync at all. The pulse
+[Three sensitivities](#visualizer-tab). Some settings only show in certain modes: Color
+Steps' band influences, for instance, don't affect Beat Sync at all. The pulse
 sections on the Global Effects tab are greyed out where the active mode doesn't use them -
 white pulses in Beat Sync White, say, or every pulse while the sequencer can't run (it needs
 *Lock to tempo*, and in Beat Sync / Beat Sync White *follow the shared clock*).

@@ -13,9 +13,9 @@ than the "step" mode); its step settings stay tuned for anyone switching
 back to "step".
 
 Section names: "color_mapping" is its top-level settings (mode, brightness,
-...); "beat_sync", "beat_sync_white", "peak_flash", "hsv", "band_colors"
-and "smoothing" live under color_mapping; the rest are AppConfig fields. A
-nested dict sets that object's fields.
+...); "beat_sync", "beat_sync_white", "peak_flash", "hue_range",
+"band_colors", "color_steps" and "smoothing" live under color_mapping; the
+rest are AppConfig fields. A nested dict sets that object's fields.
 
 Chase and Group Switch need lamps with a Chase order / Effect group (Devices
 & Setup tab) - see README.
@@ -75,13 +75,8 @@ DEFAULT_LOOK: Dict[str, dict] = {   'beat_sync': {   'detect_low_hz': 30.0,
                       'flash_attack_ms': 19.0,
                       'flash_release_ms': 71.0,
                       'loudness_smoothing_ms': 112.0},
-    'hsv': {   'hue_min_deg': 0.0,
-               'hue_max_deg': 360.0,
-               'brightness_min': 0.5,
-               'saturation_base': 1.0,
-               'saturation_contrast_gain': 1.0,
-               'sensitivity': 0.1},
-    'smoothing': {'attack_ms': 7.993, 'release_ms': 106.947, 'min_change_threshold': 0.0088},
+    'hue_range': {'hue_min_deg': 0.0, 'hue_max_deg': 360.0},
+    'smoothing': {'min_change_threshold': 0.0088},
     'rhythm': {   'shared_clock': True,
                   'detect_high_hz': 399.0,
                   'sensitivity': 1.01,

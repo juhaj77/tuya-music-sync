@@ -1,8 +1,8 @@
 """Frequency-band energy extraction and spectral feature helpers.
 
 Pure numpy functions operating on a SpectrumFrame - no state, easy to test
-and to reuse for both the coarse "N configurable bands" mode and the finer
-features (spectral centroid/contrast) used by HSV mode.
+and to reuse for the band levels every mode reads and the spectral centroid
+behind the music-driven hues (dsp.hue_step, Peak Flash's "centroid" hue).
 """
 from __future__ import annotations
 
@@ -39,8 +39,7 @@ def band_energies(frame: SpectrumFrame, bands: Sequence, floor_db: float = -90.0
 
 
 def spectral_centroid_hz(frame: SpectrumFrame, low_hz: float = 20.0, high_hz: float = 16000.0) -> float:
-    """Energy-weighted average frequency within [low_hz, high_hz] - used to
-    drive hue in HSV mode ("frequency distribution controls hue")."""
+    """Energy-weighted average frequency within [low_hz, high_hz]."""
     mask = (frame.freqs >= low_hz) & (frame.freqs <= high_hz)
     if not np.any(mask):
         return low_hz
@@ -50,28 +49,3 @@ def spectral_centroid_hz(frame: SpectrumFrame, low_hz: float = 20.0, high_hz: fl
     if total < _EPS:
         return low_hz
     return float(np.sum(freqs * weights) / total)
-
-
-def spectral_contrast(frame: SpectrumFrame, low_hz: float = 20.0, high_hz: float = 16000.0) -> float:
-    """0..1 measure of how "peaky" vs. "flat" the spectrum is, used to drive
-    saturation in HSV mode ("spectral contrast controls saturation").
-
-    Computed as (peak - mean) / (peak + eps) over magnitude in dB, so silence
-    and pure white noise both read as low contrast, while a strong isolated
-    tone/kick reads as high contrast.
-    """
-    mask = (frame.freqs >= low_hz) & (frame.freqs <= high_hz)
-    if not np.any(mask):
-        return 0.0
-    db = frame.magnitude_db[mask]
-    peak = float(np.max(db))
-    mean = float(np.mean(db))
-    span = peak - frame_floor(frame)
-    if span <= _EPS:
-        return 0.0
-    contrast = (peak - mean) / span
-    return float(np.clip(contrast * 2.0, 0.0, 1.0))
-
-
-def frame_floor(frame: SpectrumFrame) -> float:
-    return float(np.min(frame.magnitude_db))

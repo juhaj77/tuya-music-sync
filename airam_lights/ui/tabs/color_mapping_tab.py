@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
-from ...config.schema import LAMP_TRANSITIONS
+from ...config.schema import LAMP_TRANSITIONS, STEP_DIRECTIONS, STEP_TIMINGS
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import inactive_note, labeled_combo, set_active, show_note
@@ -38,13 +38,22 @@ from ..quick_settings import (
     BAND_FOCUS_TIP,
     BAND_RANGE_MEMORY_TIP,
     BAND_RELEASE_TIP,
-    QUICK_SETTINGS,
-    get_value,
+    STEPS_BASS_TIP,
+    STEPS_HITS_TIP,
+    STEPS_MID_TIP,
+    STEPS_SNAP_TIP,
+    STEPS_TREBLE_TIP,
     link_slider,
 )
 from ..widgets.param_slider import FloatSlider
 from ..widgets.section import CollapsibleSection
 from .pulses_panel import sequencer_state
+
+
+_HUE_RANGE_TIP = (
+    "The hues Beat Sync's 'spectrum' hue and Peak Flash's 'centroid' hue spread over, from the low end (bass-heavy "
+    "sound, low notes) to the high end. One setting: it's on both pages. 0 to 360 is the whole colour wheel."
+)
 
 
 class _ModeTabs(QTabWidget):
@@ -117,39 +126,9 @@ class ColorMappingTab(QWidget):
         root.addWidget(sub_tabs)
         self.sub_tabs = sub_tabs
 
-        # -- HSV mode -------------------------------------------------------------------
-        hsv_widget = QWidget()
-        hsv_layout = QVBoxLayout(hsv_widget)
-        hsv = cm.hsv
-        self.hue_min_slider = HueSlider("Hue @ low freq", hsv.hue_min_deg)
-        self.hue_max_slider = HueSlider("Hue @ high freq", hsv.hue_max_deg)
-        self.bright_min_slider = FloatSlider("Brightness min", 0.0, 1.0, hsv.brightness_min)
-        self.bright_max_slider = FloatSlider("Brightness max", 0.0, 1.0, hsv.brightness_max)
-        self.sat_base_slider = FloatSlider("Saturation base", 0.0, 1.0, hsv.saturation_base)
-        self.sat_contrast_slider = FloatSlider("Saturation from contrast", 0.0, 1.0, hsv.saturation_contrast_gain)
-        self.hsv_sensitivity_slider = FloatSlider(
-            "Level sensitivity (gain)", 0.1, 4.0, hsv.sensitivity,
-            tooltip="How strongly the sound level turns into light - a gain: higher = brighter, livelier.",
-        )
-        for w in (
-            self.hue_min_slider,
-            self.hue_max_slider,
-            self.bright_min_slider,
-            self.bright_max_slider,
-            self.sat_base_slider,
-            self.sat_contrast_slider,
-            self.hsv_sensitivity_slider,
-        ):
-            w.valueChanged.connect(self._on_hsv_changed)
-            hsv_layout.addWidget(w)
-        self.hsv_attack_slider, self.hsv_release_slider = self._add_smoothing_sliders(hsv_layout)
-        hsv_desc_label = QLabel(
-            "Hue follows the spectral centroid (frequency distribution), brightness "
-            "follows overall energy, saturation follows spectral contrast (peaky vs. flat)."
-        )
-        hsv_desc_label.setWordWrap(True)
-        hsv_layout.addWidget(hsv_desc_label)
-        sub_tabs.addTab(hsv_widget, "HSV Music")
+        # -- Color Steps mode -----------------------------------------------------------
+        steps_widget = self._build_color_steps_page(cm.color_steps)
+        sub_tabs.addTab(steps_widget, "Color Steps")
 
         # -- Band Colors mode -----------------------------------------------------------
         band_widget = self._build_band_colors_page(cm.band_colors)
@@ -249,7 +228,7 @@ class ColorMappingTab(QWidget):
         self.beat_spectrum_source_combo.addItems(["pitch", "intensity_brightness", "brightness", "intensity"])
         self.beat_spectrum_source_combo.setCurrentText(bs.spectrum_source)
         self.beat_spectrum_source_combo.setToolTip(
-            "What places each beat's color in the hue range (HSV Music's Hue min/max) in 'spectrum' "
+            "What places each beat's color in the Hue range below in 'spectrum' "
             "mode. pitch: the note that stands out, around the circle of fifths (related notes and keys "
             "get neighbouring colors) - while a note stands out clearly and the notes move; when they "
             "don't (drums, noise, atonal passages, one note droning on) it glides over to "
@@ -264,16 +243,21 @@ class ColorMappingTab(QWidget):
         beat_hue_mode_note = QLabel(
             "random: a fresh, sufficiently-different color every hit. step: cycles through the color "
             "wheel by a fixed angle each hit (never repeats for a long time). spectrum: the music picks "
-            "the color (see Spectrum from), spread over HSV Music's Hue min..max."
+            "the color (see Spectrum from), spread over the Hue range."
         )
         beat_hue_mode_note.setWordWrap(True)
         beat_layout.addWidget(beat_hue_mode_note)
+        self.hue_min_slider = self._hue_range_slider("Hue range from", "hue_min_deg")
+        self.hue_max_slider = self._hue_range_slider("Hue range to", "hue_max_deg")
+        beat_layout.addWidget(self.hue_min_slider)
+        beat_layout.addWidget(self.hue_max_slider)
         self.beat_spectrum_status_label = QLabel()
         self.beat_spectrum_status_label.setWordWrap(True)
         beat_layout.addWidget(self.beat_spectrum_status_label)
         self._spectrum_timer = QTimer(self)
         self._spectrum_timer.timeout.connect(self._refresh_spectrum_status)
         self._spectrum_timer.timeout.connect(self._refresh_band_status)
+        self._spectrum_timer.timeout.connect(self._refresh_steps_status)
         self._spectrum_timer.timeout.connect(self._refresh_hits_status)
         self._spectrum_timer.start(200)
 
@@ -624,6 +608,10 @@ class ColorMappingTab(QWidget):
         hue_source_row.addWidget(self.peak_hue_source_combo)
         hue_source_row.addStretch(1)
         peak_layout.addLayout(hue_source_row)
+        self.peak_hue_min_slider = self._hue_range_slider("Hue range from", "hue_min_deg")
+        self.peak_hue_max_slider = self._hue_range_slider("Hue range to", "hue_max_deg")
+        peak_layout.addWidget(self.peak_hue_min_slider)
+        peak_layout.addWidget(self.peak_hue_max_slider)
 
         self.peak_hue_flow_slider = FloatSlider(
             "Color richness (hue flow)", 200.0, 15000.0, pf.hue_flow_ms, decimals=0, suffix=" ms"
@@ -676,7 +664,7 @@ class ColorMappingTab(QWidget):
             "beat_sync": beat_widget,
             "beat_sync_white": bsw_widget,
             "peak_flash": peak_widget,
-            "hsv_music": hsv_widget,
+            "color_steps": steps_widget,
             "band_colors": band_widget,
         }
         self._link_quick_settings()
@@ -705,7 +693,7 @@ class ColorMappingTab(QWidget):
         self.curve_combo.addItems(["linear", "log", "exp2"])
         self.curve_combo.setCurrentText(cm.response_curve)
         self.curve_combo.setToolTip(
-            "Reshapes the raw 0..1 audio level BEFORE it becomes brightness, in HSV Music and Band Colors "
+            "Reshapes the raw 0..1 audio level BEFORE it becomes brightness, in Color Steps and Band Colors "
             "only (Beat Sync, Peak Flash, and Beat Sync White don't use this at all - they react to "
             "individual detected hits instead of a continuous level). linear: unchanged. log: boosts quiet detail, so quieter passages still "
             "show visible variation instead of looking flat/dark. exp2: the opposite - suppresses quiet "
@@ -859,8 +847,11 @@ class ColorMappingTab(QWidget):
         )
         set_active([self.beat_hue_glide_slider, self.beat_glide_timing_combo], bs.glide_hue, "Glide hue is off.")
         set_active([self.beat_min_jump_slider], bs.hue_mode == "random", f"Hue mode is '{bs.hue_mode}'.")
+        set_active([self.hue_min_slider, self.hue_max_slider], bs.hue_mode == "spectrum", f"Hue mode is '{bs.hue_mode}'.")
 
         self._update_bsw_states()
+        self._update_peak_states()
+        self._update_steps_states()
 
     def _update_bsw_states(self) -> None:
         """Beat Sync White's own settings: its detector while it doesn't follow
@@ -887,19 +878,38 @@ class ColorMappingTab(QWidget):
             "locked yet."
         ) if sequencing else "")
 
-    def _add_smoothing_sliders(self, layout) -> "tuple[FloatSlider, FloatSlider]":
-        """HSV Music's Attack/Release (the level smoothing), as on the Quick
-        Controls."""
-        sliders = []
-        for setting in (s for s in QUICK_SETTINGS["hsv_music"] if ".smoothing." in s.path):
-            slider = FloatSlider(
-                setting.label, setting.minimum, setting.maximum, get_value(self.controller.config, setting.path),
-                decimals=setting.decimals, suffix=setting.suffix, tooltip=setting.tooltip,
-            )
-            slider.valueChanged.connect(lambda v, name=setting.path.split(".")[-1]: self._on_smoothing_changed(name, v))
-            layout.addWidget(slider)
-            sliders.append(slider)
-        return sliders[0], sliders[1]
+    def _update_peak_states(self) -> None:
+        """Peak Flash's own settings: the hue range only matters with hue source 'centroid'."""
+        pf = self.controller.config.color_mapping.peak_flash
+        set_active(
+            [self.peak_hue_min_slider, self.peak_hue_max_slider], pf.hue_source == "centroid",
+            f"Hue source is '{pf.hue_source}'.",
+        )
+
+    def _update_steps_states(self) -> None:
+        """Color Steps' own settings: what goes by the clock while there's a
+        grid, and what travels along the lamps while they have an order."""
+        cfg = self.controller.config
+        cs = cfg.color_mapping.color_steps
+        on_grid = cs.step_on != "peak"
+        no_grid = on_grid and not cfg.rhythm.tempo_lock
+        set_active([self.steps_bar_boost_slider], on_grid and not no_grid, (
+            "Lock to tempo is off (Global Effects tab, Rhythm box)." if no_grid else "Step on is 'peak'."
+        ))
+        show_note(self.steps_clock_note, (
+            "Lock to tempo is off (Global Effects tab, Rhythm box), so there's no beat grid to wait for: the "
+            "steps go out on the peaks, as with Step on 'peak'."
+        ) if no_grid else "")
+        positions = {e.chase_order for e in cfg.per_lamp_effects.values() if e.chase_order is not None}
+        ordered = len(positions) >= 2
+        set_active(
+            [self.steps_wave_slider, self.steps_spread_slider], ordered,
+            "It needs at least two lamps with different Chase orders (Devices & Setup tab).",
+        )
+        show_note(self.steps_lamps_note, "" if ordered else (
+            "The wave and the spread go along the Chase order: give at least two lamps different Chase orders "
+            "on the Devices & Setup tab. Until then every lamp shows the same colour."
+        ))
 
     def _link_quick_settings(self) -> None:
         """The sliders the Visualizer tab's Quick Controls also show: each
@@ -918,9 +928,13 @@ class ColorMappingTab(QWidget):
             "color_mapping.peak_flash.treble_white_amount": [self.peak_white_amount_slider],
             "color_mapping.peak_flash.hue_flow_ms": [self.peak_hue_flow_slider],
             "color_mapping.peak_flash.baseline_min_brightness": [self.peak_baseline_min_slider],
-            "color_mapping.hsv.sensitivity": [self.hsv_sensitivity_slider],
-            "color_mapping.smoothing.attack_ms": [self.hsv_attack_slider],
-            "color_mapping.smoothing.release_ms": [self.hsv_release_slider],
+            "color_mapping.hue_range.hue_min_deg": [self.hue_min_slider, self.peak_hue_min_slider],
+            "color_mapping.hue_range.hue_max_deg": [self.hue_max_slider, self.peak_hue_max_slider],
+            "color_mapping.color_steps.bass_influence": [self.steps_bass_slider],
+            "color_mapping.color_steps.mid_influence": [self.steps_mid_slider],
+            "color_mapping.color_steps.treble_influence": [self.steps_treble_slider],
+            "color_mapping.color_steps.hits_per_step": [self.steps_hits_slider],
+            "color_mapping.color_steps.hue_attack_ms": [self.steps_snap_slider],
             "color_mapping.band_colors.focus": [self.band_focus_slider],
             "color_mapping.band_colors.chord_turn_deg": [self.band_chord_turn_slider],
             "color_mapping.band_colors.range_memory_s": [self.band_range_memory_slider],
@@ -951,9 +965,246 @@ class ColorMappingTab(QWidget):
 
     # -- handlers -----------------------------------------------------------------------
 
-    def _on_smoothing_changed(self, name: str, value: float) -> None:
-        setattr(self.controller.config.color_mapping.smoothing, name, value)
+    def _hue_range_slider(self, label: str, name: str) -> HueSlider:
+        """One end of the hue range (HueRangeConfig `name`): a slider on the Beat
+        Sync page and one on Peak Flash's, kept in step by _link_quick_settings."""
+        hue_range = self.controller.config.color_mapping.hue_range
+        slider = HueSlider(label, getattr(hue_range, name), tooltip=_HUE_RANGE_TIP)
+        slider.valueChanged.connect(lambda value: self._on_hue_range_changed(name, value))
+        return slider
+
+    def _on_hue_range_changed(self, name: str, value: float) -> None:
+        setattr(self.controller.config.color_mapping.hue_range, name, value)
         self.controller.apply_config_changes()
+
+    def _add_band_splits(self, layout, bass_mid_hz: float, mid_treble_hz: float) -> "tuple[QSpinBox, QSpinBox]":
+        """The row of the two crossover frequencies, for a mode with bass, mid and treble bands."""
+        split_row = QHBoxLayout()
+        split_row.addWidget(QLabel("Bass / mid split:"))
+        bass_mid = QSpinBox()
+        bass_mid.setRange(60, 1000)
+        bass_mid.setSuffix(" Hz")
+        bass_mid.setValue(int(bass_mid_hz))
+        bass_mid.setToolTip(
+            "Where the bass band ends and the mids begin (the bass starts at 30 Hz). Around 150-250 Hz keeps the "
+            "kick drum and the bass line in the bass band."
+        )
+        split_row.addWidget(bass_mid)
+        split_row.addSpacing(16)
+        split_row.addWidget(QLabel("Mid / treble split:"))
+        mid_treble = QSpinBox()
+        mid_treble.setRange(500, 10000)
+        mid_treble.setSingleStep(100)
+        mid_treble.setSuffix(" Hz")
+        mid_treble.setValue(int(mid_treble_hz))
+        mid_treble.setToolTip(
+            "Where the mids end and the treble begins (the treble goes up to 12 kHz). Around 3-5 kHz leaves the "
+            "voices and chords in the mids and the hi-hats and cymbals in the treble."
+        )
+        split_row.addWidget(mid_treble)
+        split_row.addStretch(1)
+        layout.addLayout(split_row)
+        return bass_mid, mid_treble
+
+    def _build_color_steps_page(self, cs) -> QWidget:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        intro = QLabel(
+            "Intensity peaks in the bass, mids and treble charge up a hue step, and the beat clock lets it go: "
+            "the colour walks around the wheel with the music, and each new colour rolls across the lamps. No "
+            "peaks, no steps - the clock alone never moves the colour."
+        )
+        intro.setWordWrap(True)
+        page_layout.addWidget(intro)
+
+        def section(title: str, key: str, tooltip: str) -> QVBoxLayout:
+            box = CollapsibleSection(title, key=f"steps/{key}", tooltip=tooltip)
+            page_layout.addWidget(box)
+            return box.content_layout()
+
+        layout = section(
+            "Band peaks", "peaks",
+            "Which bands move the colour and how much - each band's peaks are measured against that band's own "
+            "strongest lately.",
+        )
+        self.steps_bass_mid_spin, self.steps_mid_treble_spin = self._add_band_splits(
+            layout, cs.bass_mid_hz, cs.mid_treble_hz
+        )
+        self.steps_bass_slider = FloatSlider("Bass influence", 0.0, 2.0, cs.bass_influence, tooltip=STEPS_BASS_TIP)
+        self.steps_mid_slider = FloatSlider("Mid influence", 0.0, 2.0, cs.mid_influence, tooltip=STEPS_MID_TIP)
+        self.steps_treble_slider = FloatSlider("Treble influence", 0.0, 2.0, cs.treble_influence, tooltip=STEPS_TREBLE_TIP)
+        self.steps_hits_slider = FloatSlider("Hits per step", 0.25, 16.0, cs.hits_per_step, tooltip=STEPS_HITS_TIP)
+        sliders = [self.steps_bass_slider, self.steps_mid_slider, self.steps_treble_slider, self.steps_hits_slider]
+        for w in sliders:
+            layout.addWidget(w)
+
+        layout = section(
+            "The step", "step",
+            "When a step goes out on the beat clock, how far it takes the colour, which way, and how fast the "
+            "colour gets there.",
+        )
+        self.steps_on_combo = labeled_combo(
+            layout, "Step on:", STEP_TIMINGS, cs.step_on,
+            "Where a charged step goes out on the shared beat clock: on the next 16th, 8th, beat, every other "
+            "beat or bar line. A hit that fills the charge just behind the line still makes it. peak: at once, "
+            "as soon as the charge is there, wherever the clock is. Until the clock has locked onto the tempo the "
+            "steps go out on the peaks anyway.",
+        )
+        self.steps_clock_note = inactive_note()
+        layout.addWidget(self.steps_clock_note)
+        self.steps_min_slider = FloatSlider(
+            "Step min", 0.0, 180.0, cs.step_min_deg, decimals=0, suffix=" deg",
+            tooltip="The shortest step: sparse peaks, mostly from the treble. Most steps stay near this end, "
+            "between neighbouring colours.",
+        )
+        self.steps_max_slider = FloatSlider(
+            "Step max", 0.0, 180.0, cs.step_max_deg, decimals=0, suffix=" deg",
+            tooltip="The longest step: dense peaks, mostly from the bass, compared with how the song has been "
+            "lately - the strong moments jump to a clearly different colour.",
+        )
+        self.steps_bar_boost_slider = FloatSlider(
+            "Bar line boost", 0.0, 180.0, cs.bar_boost_deg, decimals=0, suffix=" deg",
+            tooltip="Added to a step that goes out on a bar's first beat, so the colour jumps where the bar turns.",
+        )
+        for w in (self.steps_min_slider, self.steps_max_slider, self.steps_bar_boost_slider):
+            layout.addWidget(w)
+        sliders += [self.steps_min_slider, self.steps_max_slider, self.steps_bar_boost_slider]
+        self.steps_direction_combo = labeled_combo(
+            layout, "Direction:", STEP_DIRECTIONS, cs.direction,
+            "Which way round the wheel the steps go. bands: forward until the peaks' balance shifts clearly toward "
+            "the treble compared with the last while, then back until it shifts toward the bass again - so one "
+            "section of a song can turn back what the last one did. forward: always the same way.",
+        )
+        self.steps_snap_slider = FloatSlider(
+            "Hue snap speed", 5.0, 8000.0, cs.hue_attack_ms, decimals=0, suffix=" ms", tooltip=STEPS_SNAP_TIP,
+        )
+        self.steps_glide_slider = FloatSlider(
+            "Glide", 0.0, 60.0, cs.glide_deg_per_beat, decimals=1, suffix=" deg/beat",
+            tooltip="Between the steps the hue keeps moving the same way, at this pace on the clock's tempo - the "
+            "colour is never quite still while the music plays. 0 = it holds still until the next step.",
+        )
+        for w in (self.steps_snap_slider, self.steps_glide_slider):
+            layout.addWidget(w)
+        sliders += [self.steps_snap_slider, self.steps_glide_slider]
+
+        layout = section(
+            "Across the lamps", "lamps",
+            "How a new colour travels along the lamps' Chase order, and how far apart their colours are.",
+        )
+        self.steps_wave_slider = FloatSlider(
+            "Wave length", 0.0, 8.0, cs.wave_beats, decimals=2, suffix=" beats",
+            tooltip="How long a new colour takes from the first lamp in the Chase order to the last, running the "
+            "way the hue stepped. 0 = every lamp changes at once.",
+        )
+        self.steps_spread_slider = FloatSlider(
+            "Hue spread", 0.0, 180.0, cs.spread_deg, decimals=0, suffix=" deg",
+            tooltip="Fans the lamps out over this many degrees along the Chase order, so the room shows neighbouring "
+            "colours instead of one. 0 = the same colour on every lamp.",
+        )
+        for w in (self.steps_wave_slider, self.steps_spread_slider):
+            layout.addWidget(w)
+        sliders += [self.steps_wave_slider, self.steps_spread_slider]
+        self.steps_lamps_note = inactive_note()
+        layout.addWidget(self.steps_lamps_note)
+
+        layout = section(
+            "Brightness", "brightness",
+            "How bright the colour is: following the bands, and lifted by each step's crest as it passes a lamp.",
+        )
+        self.steps_saturation_slider = FloatSlider("Saturation", 0.0, 1.0, cs.saturation, decimals=2)
+        self.steps_bright_min_slider = FloatSlider(
+            "Brightness min", 0.0, 1.0, cs.brightness_min, decimals=2,
+            tooltip="How bright the lamps stay when nothing lifts them, and in silence.",
+        )
+        self.steps_bright_max_slider = FloatSlider(
+            "Brightness max", 0.0, 1.0, cs.brightness_max, decimals=2,
+            tooltip="How bright the bands and a step's crest together can make them (the Global box's Response "
+            "curve shapes it).",
+        )
+        self.steps_crest_slider = FloatSlider(
+            "Crest", 0.0, 1.0, cs.crest, decimals=2,
+            tooltip="How much of the brightness range belongs to the crest a step lifts each lamp by as it passes; "
+            "the rest follows the bands. 0 = the brightness follows the bands alone, 1 = it only moves with the "
+            "steps.",
+        )
+        self.steps_crest_release_slider = FloatSlider(
+            "Crest decay", 20.0, 2000.0, cs.crest_release_ms, decimals=0, suffix=" ms",
+            tooltip="How fast the crest falls back after passing a lamp.",
+        )
+        self.steps_attack_slider = FloatSlider(
+            "Band attack", 1.0, 500.0, cs.attack_ms, decimals=0, suffix=" ms",
+            tooltip="How fast the bands' part of the brightness rises at a hit.",
+        )
+        self.steps_release_slider = FloatSlider(
+            "Band release", 10.0, 2000.0, cs.release_ms, decimals=0, suffix=" ms",
+            tooltip="How fast the bands' part of the brightness falls back after a hit.",
+        )
+        for w in (
+            self.steps_saturation_slider, self.steps_bright_min_slider, self.steps_bright_max_slider,
+            self.steps_crest_slider, self.steps_crest_release_slider, self.steps_attack_slider,
+            self.steps_release_slider,
+        ):
+            layout.addWidget(w)
+            sliders.append(w)
+
+        for w in sliders:
+            w.valueChanged.connect(self._on_color_steps_changed)
+        for spin in (self.steps_bass_mid_spin, self.steps_mid_treble_spin):
+            spin.valueChanged.connect(self._on_color_steps_changed)
+        for combo in (self.steps_on_combo, self.steps_direction_combo):
+            combo.currentTextChanged.connect(self._on_color_steps_changed)
+
+        self.steps_status_label = QLabel()
+        self.steps_status_label.setWordWrap(True)
+        page_layout.addWidget(self.steps_status_label)
+        return page
+
+    def _on_color_steps_changed(self, *_args) -> None:
+        cs = self.controller.config.color_mapping.color_steps
+        cs.bass_mid_hz = float(self.steps_bass_mid_spin.value())
+        cs.mid_treble_hz = float(self.steps_mid_treble_spin.value())
+        cs.bass_influence = self.steps_bass_slider.value()
+        cs.mid_influence = self.steps_mid_slider.value()
+        cs.treble_influence = self.steps_treble_slider.value()
+        cs.hits_per_step = self.steps_hits_slider.value()
+        cs.step_on = self.steps_on_combo.currentText()
+        cs.step_min_deg = self.steps_min_slider.value()
+        cs.step_max_deg = self.steps_max_slider.value()
+        cs.bar_boost_deg = self.steps_bar_boost_slider.value()
+        cs.direction = self.steps_direction_combo.currentText()
+        cs.hue_attack_ms = self.steps_snap_slider.value()
+        cs.glide_deg_per_beat = self.steps_glide_slider.value()
+        cs.wave_beats = self.steps_wave_slider.value()
+        cs.spread_deg = self.steps_spread_slider.value()
+        cs.saturation = self.steps_saturation_slider.value()
+        cs.brightness_min = self.steps_bright_min_slider.value()
+        cs.brightness_max = self.steps_bright_max_slider.value()
+        cs.crest = self.steps_crest_slider.value()
+        cs.crest_release_ms = self.steps_crest_release_slider.value()
+        cs.attack_ms = self.steps_attack_slider.value()
+        cs.release_ms = self.steps_release_slider.value()
+        self._update_steps_states()
+        self.controller.apply_config_changes()
+
+    def _refresh_steps_status(self) -> None:
+        """The line at the bottom of the Color Steps page: the charge, and the last step."""
+        engine = self.controller.engine
+        config = self.controller.config
+        if config.color_mapping.mode != "color_steps":
+            self.steps_status_label.setText("")
+            return
+        if not engine.running:
+            self.steps_status_label.setText("Now: - (runs while the visualizer is on)")
+            return
+        state = engine.latest_color_steps
+        cs = config.color_mapping.color_steps
+        bands = ", ".join(f"{band} {value:.1f}" for band, value in state.charges.items())
+        text = f"Now: charge {state.charge:.1f} of {cs.hits_per_step:g} hits ({bands})"
+        if state.waiting:
+            text += f", waiting for the next {cs.step_on}"
+        if state.steps:
+            text += f"  |  last step {state.last_step:+.0f} deg, mostly {state.last_band}"
+        self.steps_status_label.setText(text)
 
     def _build_band_colors_page(self, bc) -> QWidget:
         page = QWidget()
@@ -968,31 +1219,9 @@ class ColorMappingTab(QWidget):
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
-        split_row = QHBoxLayout()
-        split_row.addWidget(QLabel("Bass / mid split:"))
-        self.band_bass_mid_spin = QSpinBox()
-        self.band_bass_mid_spin.setRange(60, 1000)
-        self.band_bass_mid_spin.setSuffix(" Hz")
-        self.band_bass_mid_spin.setValue(int(bc.bass_mid_hz))
-        self.band_bass_mid_spin.setToolTip(
-            "Where the bass band ends and the mids begin (the bass starts at 30 Hz). Around 150-250 Hz keeps the "
-            "kick drum and the bass line in the bass band."
+        self.band_bass_mid_spin, self.band_mid_treble_spin = self._add_band_splits(
+            layout, bc.bass_mid_hz, bc.mid_treble_hz
         )
-        split_row.addWidget(self.band_bass_mid_spin)
-        split_row.addSpacing(16)
-        split_row.addWidget(QLabel("Mid / treble split:"))
-        self.band_mid_treble_spin = QSpinBox()
-        self.band_mid_treble_spin.setRange(500, 10000)
-        self.band_mid_treble_spin.setSingleStep(100)
-        self.band_mid_treble_spin.setSuffix(" Hz")
-        self.band_mid_treble_spin.setValue(int(bc.mid_treble_hz))
-        self.band_mid_treble_spin.setToolTip(
-            "Where the mids end and the treble begins (the treble goes up to 12 kHz). Around 3-5 kHz leaves the "
-            "voices and chords in the mids and the hi-hats and cymbals in the treble."
-        )
-        split_row.addWidget(self.band_mid_treble_spin)
-        split_row.addStretch(1)
-        layout.addLayout(split_row)
         for spin in (self.band_bass_mid_spin, self.band_mid_treble_spin):
             spin.valueChanged.connect(self._on_band_colors_changed)
 
@@ -1072,17 +1301,6 @@ class ColorMappingTab(QWidget):
                 text += f" (note {pitch.note_name} in {pitch.key_name}, pitch share {engine.pitch_weight:.0%})"
         self.band_status_label.setText(text)
 
-    def _on_hsv_changed(self, *_args) -> None:
-        hsv = self.controller.config.color_mapping.hsv
-        hsv.hue_min_deg = self.hue_min_slider.value()
-        hsv.hue_max_deg = self.hue_max_slider.value()
-        hsv.brightness_min = self.bright_min_slider.value()
-        hsv.brightness_max = self.bright_max_slider.value()
-        hsv.saturation_base = self.sat_base_slider.value()
-        hsv.saturation_contrast_gain = self.sat_contrast_slider.value()
-        hsv.sensitivity = self.hsv_sensitivity_slider.value()
-        self.controller.apply_config_changes()
-
     def _on_beat_changed(self, *_args) -> None:
         bs = self.controller.config.color_mapping.beat_sync
         bs.detect_low_hz = self.beat_low_spin.value()
@@ -1158,6 +1376,7 @@ class ColorMappingTab(QWidget):
         pf.flash_attack_ms = self.peak_flash_attack_slider.value()
         pf.flash_release_ms = self.peak_flash_release_slider.value()
         pf.loudness_smoothing_ms = self.peak_loudness_smoothing_slider.value()
+        self._update_peak_states()
         self.controller.apply_config_changes()
 
     def _on_curve_changed(self, text: str) -> None:

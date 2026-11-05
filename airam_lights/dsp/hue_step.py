@@ -4,7 +4,7 @@ Instead of a fixed `hue_shift_step_deg`, Chase's step can follow the music
 (ChaseEffectConfig.hue_step_source), and so can each beat's color in Beat
 Sync's "spectrum" hue mode (BeatSyncModeConfig.spectrum_source). Every
 source is a 0..1 value that the user maps onto a range - the step's
-[hue_step_min_deg, hue_step_max_deg], the hue's HSV Music Hue min..max:
+[hue_step_min_deg, hue_step_max_deg], the hue's Hue range:
 
 - "intensity": how loud the music is right now, against its own recent
   range - the colors open up in a chorus and calm down in a quiet verse.

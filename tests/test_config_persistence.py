@@ -21,7 +21,8 @@ from airam_lights.config.schema import (
     ColorMappingConfig,
     DeviceConfig,
     GroupSwitchEffectConfig,
-    HSVModeConfig,
+    ColorStepsModeConfig,
+    HueRangeConfig,
     NetworkConfig,
     PeakFlashModeConfig,
     PerLampEffect,
@@ -44,9 +45,10 @@ def _build_fully_populated_config() -> AppConfig:
         focus=0.33, range_memory_s=7.5, chord_turn_deg=45.0, saturation=0.8, brightness_min=0.2,
         brightness_max=0.9, attack_ms=12.0, release_ms=420.0,
     )
-    hsv = HSVModeConfig(
-        hue_min_deg=11.0, hue_max_deg=222.0, brightness_min=0.11, brightness_max=0.88,
-        saturation_base=0.44, saturation_contrast_gain=0.33, sensitivity=1.11,
+    hue_range = HueRangeConfig(hue_min_deg=11.0, hue_max_deg=222.0)
+    color_steps = ColorStepsModeConfig(
+        bass_influence=1.25, mid_influence=0.25, treble_influence=1.75, hits_per_step=5.0, step_on="8th",
+        direction="forward", hue_attack_ms=1234.0, wave_beats=2.5, spread_deg=99.0, crest=0.75,
     )
     beat_sync = BeatSyncModeConfig(
         detect_low_hz=41.0, detect_high_hz=201.0, sensitivity=1.7, min_interval_ms=121.0,
@@ -74,10 +76,10 @@ def _build_fully_populated_config() -> AppConfig:
         brightness_attack_ms=17.0, brightness_release_ms=352.0, dark_pulse_probability=0.32,
         dark_pulse_duration_ms=72.0, dark_pulse_depth=0.82,
     )
-    smoothing = SmoothingConfig(attack_ms=61.0, release_ms=301.0, min_change_threshold=0.016)
+    smoothing = SmoothingConfig(min_change_threshold=0.016)
 
     color_mapping = ColorMappingConfig(
-        mode="beat_sync_white", band_colors=band_colors, hsv=hsv,
+        mode="beat_sync_white", band_colors=band_colors, color_steps=color_steps, hue_range=hue_range,
         beat_sync=beat_sync, peak_flash=peak_flash, beat_sync_white=beat_sync_white,
         smoothing=smoothing, brightness=0.87, saturation=0.86, response_curve="log",
         invert_brightness=True,
@@ -212,7 +214,7 @@ def test_fresh_install_starts_with_the_default_look():
     assert cfg.rhythm.shared_clock is True and cfg.sequencer.enabled is True
     assert cfg.sequencer.color_sweep_enabled is True and cfg.sequencer.flash_strobe_enabled is True
     assert cfg.network.lamp_command_rate_hz == 50.0
-    assert cfg.color_mapping.hsv.hue_max_deg == 360.0  # a mode's settings apply too
+    assert cfg.color_mapping.hue_range.hue_max_deg == 360.0  # a mode's settings apply too
     assert cfg.color_mapping.beat_sync.white_pulse_hybrid_chance == 0.5
     # The neutral dataclass defaults underneath are untouched.
     assert AppConfig().sequencer.enabled is False

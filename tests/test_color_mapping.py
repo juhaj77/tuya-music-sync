@@ -26,13 +26,16 @@ def test_band_colors_keeps_the_hue_and_saturation():
     assert hue == pytest.approx(240.0, abs=1.0) and saturation == pytest.approx(1.0, abs=0.01)
 
 
-def test_hsv_mode_low_freq_vs_high_freq_hue_differs():
-    engine = ColorMappingEngine(ColorMappingConfig())
-    low = engine.compute_hsv(centroid_hz=100.0, overall_energy=0.5, contrast=0.5)
-    high = engine.compute_hsv(centroid_hz=8000.0, overall_energy=0.5, contrast=0.5)
-    h_low, _, _ = low.to_hsv()
-    h_high, _, _ = high.to_hsv()
-    assert h_low != h_high
+def test_color_steps_maps_its_level_through_the_response_curve_onto_its_brightness():
+    config = ColorMappingConfig()
+    config.color_steps.brightness_min = 0.2
+    config.color_steps.brightness_max = 0.8
+    engine = ColorMappingEngine(config)
+    assert engine.compute_color_steps(120.0, 0.0).to_hsv()[2] == pytest.approx(0.2, abs=0.01)
+    assert engine.compute_color_steps(120.0, 1.0).to_hsv()[2] == pytest.approx(0.8, abs=0.01)
+    assert engine.compute_color_steps(120.0, 0.5).to_hsv()[0] == pytest.approx(120.0, abs=1.0)
+    config.response_curve = "exp2"
+    assert engine.compute_color_steps(120.0, 0.5).to_hsv()[2] == pytest.approx(0.2 + 0.6 * 0.25, abs=0.01)
 
 
 def test_color_rgb255_roundtrip():

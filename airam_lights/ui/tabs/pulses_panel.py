@@ -55,7 +55,7 @@ MODE_NAMES = {
     "beat_sync": "Beat Sync",
     "beat_sync_white": "Beat Sync White",
     "peak_flash": "Peak Flash",
-    "hsv_music": "HSV Music",
+    "color_steps": "Color Steps",
     "band_colors": "Band Colors",
 }
 
@@ -155,7 +155,7 @@ class PulsesPanel(QWidget):
             "White pulses", "white", checkable=True, checked=bs.white_pulse_enabled,
             tooltip="A brief flash of the lamp's own white LEDs - e.g. a hi-hat/cymbal accent. In Beat Sync on "
             "a subset of beats (probability and trigger below), or wherever the Pulse sequencer puts them; "
-            "in Peak Flash, HSV Music and Band Colors only from the Pulse sequencer; never in "
+            "in Peak Flash, Color Steps and Band Colors only from the Pulse sequencer; never in "
             "Beat Sync White, which is white already. Always the real white LEDs, never white mixed from "
             "RGB, so the colored LEDs keep all their output for color. The look below is the same in every "
             "mode. Independent of dark pulses - both, either, or neither can happen on a hit.",

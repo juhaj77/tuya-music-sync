@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import math
 
-from ..config.schema import BandColorsModeConfig, ColorMappingConfig, HSVModeConfig
+from ..config.schema import BandColorsModeConfig, ColorMappingConfig, ColorStepsModeConfig
 from .models import Color, clip, lerp
 
 
@@ -54,32 +54,15 @@ class ColorMappingEngine:
         value = lerp(cfg.brightness_min, cfg.brightness_max, apply_response_curve(level, self.config.response_curve))
         return self.apply_global(Color.from_hsv(hue_deg, clip(cfg.saturation), value))
 
-    # -- HSV Music mode -------------------------------------------------------
+    # -- Color Steps mode ------------------------------------------------------
 
-    def compute_hsv(
-        self,
-        centroid_hz: float,
-        overall_energy: float,
-        contrast: float,
-        low_hz: float = 20.0,
-        high_hz: float = 16000.0,
-        cfg: "HSVModeConfig | None" = None,
-    ) -> Color:
-        cfg = cfg or self.config.hsv
-        curve = self.config.response_curve
-
-        # log-scale position of the centroid within [low_hz, high_hz] -> hue
-        low = max(low_hz, 1.0)
-        high = max(high_hz, low * 2)
-        t = (math.log(clip(centroid_hz, low, high)) - math.log(low)) / (math.log(high) - math.log(low))
-        hue = lerp(cfg.hue_min_deg, cfg.hue_max_deg, t)
-
-        energy = apply_response_curve(clip(overall_energy) * cfg.sensitivity, curve)
-        value = lerp(cfg.brightness_min, cfg.brightness_max, energy)
-
-        sat = clip(cfg.saturation_base + clip(contrast) * cfg.saturation_contrast_gain)
-
-        return self.apply_global(Color.from_hsv(hue, sat, value))
+    def compute_color_steps(self, hue_deg: float, level: float, cfg: "ColorStepsModeConfig | None" = None) -> Color:
+        """The engine's ColorStepTracker (effects/color_steps.py) works out each
+        position's hue and 0..1 level; this maps the level through the response
+        curve onto Brightness min..max."""
+        cfg = cfg or self.config.color_steps
+        value = lerp(cfg.brightness_min, cfg.brightness_max, apply_response_curve(level, self.config.response_curve))
+        return self.apply_global(Color.from_hsv(hue_deg, clip(cfg.saturation), value))
 
     # -- Beat Sync mode ---------------------------------------------------------
 
@@ -102,7 +85,7 @@ class ColorMappingEngine:
 
     def apply_global(self, color: Color) -> Color:
         """Called as the last step by every single mode's compute_*() method
-        (Band Colors, HSV, Beat Sync, Peak Flash) - so global settings here
+        (Band Colors, Color Steps, Beat Sync, Peak Flash) - so global settings here
         apply uniformly across all of them without each mode needing its own
         copy of this logic."""
         h, s, v = color.to_hsv()

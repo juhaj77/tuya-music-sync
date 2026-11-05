@@ -192,7 +192,7 @@ def test_every_preset_value_fits_the_settings_tabs(window, qapp, name):
     before = controller.config.to_dict()
     color_tab, effects = window.tabs.widget(2), window.tabs.widget(3)
     color_tab._on_beat_changed()
-    color_tab._on_hsv_changed()
+    color_tab._on_color_steps_changed()
     effects.rhythm._on_rhythm_changed()
     effects.overlays._on_chase_changed()
     effects.overlays._on_group_switch_changed()

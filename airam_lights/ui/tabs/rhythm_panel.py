@@ -44,7 +44,8 @@ class RhythmPanel(QWidget):
             "Group Switch all move on the same beats instead of each reacting to different hits. It "
             "locks onto the tempo, ignores off-beat hits (hi-hats, vocals), fills in a missed kick, and "
             "counts bars so slower layers can change on bar starts. The Pulse sequencer follows it in every "
-            "colour mode; Chase / Group Switch with Speed source 'clock'."
+            "colour mode, Color Steps lets its hue steps out on it; Chase / Group Switch with Speed source "
+            "'clock'."
         )
         intro.setWordWrap(True)
         layout.addWidget(intro)

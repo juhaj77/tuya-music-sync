@@ -74,18 +74,9 @@ def default_3band() -> List[BandDefinition]:
 
 @dataclass
 class SmoothingConfig:
-    """Attack/release exponential smoothing, in milliseconds.
-
-    A rising signal is smoothed with `attack_ms`, a falling one with
-    `release_ms`, so e.g. bass hits can snap up quickly but decay gently
-    instead of both directions blending abruptly like the stock Airam
-    Music Sync.
-    """
-
-    attack_ms: float = 60.0
-    release_ms: float = 300.0
     # Ignore changes smaller than this (0..1 normalized channel units) to
-    # avoid sending imperceptible network updates.
+    # avoid sending imperceptible network updates. (Its attack_ms/release_ms
+    # were HSV Music's - older settings files' values are ignored.)
     min_change_threshold: float = 0.015
 
     def to_dict(self) -> dict:
@@ -93,11 +84,7 @@ class SmoothingConfig:
 
     @classmethod
     def from_dict(cls, d: dict) -> "SmoothingConfig":
-        return cls(
-            attack_ms=float(d.get("attack_ms", 60.0)),
-            release_ms=float(d.get("release_ms", 300.0)),
-            min_change_threshold=float(d.get("min_change_threshold", 0.015)),
-        )
+        return cls(min_change_threshold=float(d.get("min_change_threshold", 0.015)))
 
 
 # ---------------------------------------------------------------------------
@@ -105,31 +92,22 @@ class SmoothingConfig:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class HSVModeConfig:
-    """'HSV Music' mode: hue from spectral centroid, value from overall
-    energy, saturation from spectral contrast."""
+class HueRangeConfig:
+    """The hues Beat Sync's "spectrum" hue and Peak Flash's "centroid" hue
+    spread over. (Used to be part of HSV Music's settings: a config or preset
+    saved with its "hsv" section still loads its range from there.)"""
 
-    hue_min_deg: float = 240.0  # hue at the lowest centroid (low freq -> blue by default)
-    hue_max_deg: float = 0.0  # hue at the highest centroid (high freq -> red)
-    brightness_min: float = 0.05
-    brightness_max: float = 1.0
-    saturation_base: float = 0.6
-    saturation_contrast_gain: float = 0.5
-    sensitivity: float = 1.0
+    hue_min_deg: float = 240.0  # hue at the low end (bass-heavy, low notes -> blue by default)
+    hue_max_deg: float = 0.0  # hue at the high end (bright, high notes -> red)
 
     def to_dict(self) -> dict:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "HSVModeConfig":
+    def from_dict(cls, d: dict) -> "HueRangeConfig":
         return cls(
             hue_min_deg=float(d.get("hue_min_deg", 240.0)),
             hue_max_deg=float(d.get("hue_max_deg", 0.0)),
-            brightness_min=float(d.get("brightness_min", 0.05)),
-            brightness_max=float(d.get("brightness_max", 1.0)),
-            saturation_base=float(d.get("saturation_base", 0.6)),
-            saturation_contrast_gain=float(d.get("saturation_contrast_gain", 0.5)),
-            sensitivity=float(d.get("sensitivity", 1.0)),
         )
 
 
@@ -169,6 +147,60 @@ class BandColorsModeConfig:
         return cls(**kwargs)
 
 
+# ColorStepsModeConfig.step_on: where the steps go out - "peak" as soon as the
+# charge is there, the rest on that line of the beat clock's grid.
+STEP_TIMINGS = ("peak", "16th", "8th", "beat", "2 beats", "bar")
+STEP_DIRECTIONS = ("bands", "forward")
+
+
+@dataclass
+class ColorStepsModeConfig:
+    """'Color Steps' mode (effects/color_steps.py): intensity peaks in the bass,
+    mids and treble charge up a hue step, the beat clock releases it, and the
+    new colour rolls across the lamps. Replaced HSV Music (old configs in that
+    mode load into this one)."""
+
+    bass_mid_hz: float = 250.0  # crossover between the bass and mid bands
+    mid_treble_hz: float = 4000.0  # crossover between the mid and treble bands
+    # How much a full-strength peak in each band charges the next step, in hits.
+    bass_influence: float = 1.0
+    mid_influence: float = 0.7
+    treble_influence: float = 0.5
+    hits_per_step: float = 3.0  # the charge a step takes
+    step_on: str = "beat"  # see STEP_TIMINGS
+    step_min_deg: float = 25.0  # a step's size: sparse peaks, mostly from the treble...
+    step_max_deg: float = 150.0  # ...dense peaks, mostly from the bass
+    bar_boost_deg: float = 60.0  # added to a step on a bar's first beat
+    direction: str = "bands"  # see STEP_DIRECTIONS: "bands" = turns with the bass/treble balance
+    hue_attack_ms: float = 200.0  # Hue snap speed: how fast the hue goes to a new step's
+    glide_deg_per_beat: float = 6.0  # the hue's glide between the steps, the walk's way
+    wave_beats: float = 1.0  # how long a step takes across the Chase order (0 = every lamp at once)
+    spread_deg: float = 40.0  # the lamps fanned out over this many degrees along the Chase order
+    saturation: float = 1.0
+    brightness_min: float = 0.3
+    brightness_max: float = 1.0
+    crest: float = 0.5  # the share of the brightness range the step's crest has; the rest follows the bands
+    crest_release_ms: float = 350.0  # how fast a crest falls back after passing a lamp
+    attack_ms: float = 30.0  # how fast the bands' part of the brightness rises
+    release_ms: float = 400.0  # ...and falls back
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ColorStepsModeConfig":
+        defaults = cls()
+        kwargs = {}
+        for name, default in asdict(defaults).items():
+            value = d.get(name, default)
+            kwargs[name] = type(default)(value) if value is not None else default
+        if kwargs["step_on"] not in STEP_TIMINGS:
+            kwargs["step_on"] = defaults.step_on
+        if kwargs["direction"] not in STEP_DIRECTIONS:
+            kwargs["direction"] = defaults.direction
+        return cls(**kwargs)
+
+
 PULSE_TRIGGERS = ("random", "accent", "downbeat")
 WHITE_TEMP_MODES = ("random", "bar", "alternate", "loudness", "phrase")
 # How a white flash fades out over its release - see pulse_sequencer.release_level.
@@ -199,7 +231,7 @@ class BeatSyncModeConfig:
 
     hue_mode: str = "random"  # "random" | "step" | "spectrum"
     # hue_mode "spectrum": what places each beat's color in the hue range
-    # (HSVModeConfig.hue_min_deg..hue_max_deg), always against the music's own
+    # (HueRangeConfig.hue_min_deg..hue_max_deg), always against the music's own
     # recent range - see dsp.hue_step: "brightness" (bass-heavy vs bright
     # sound) | "intensity" | "intensity_brightness" | "pitch" (the dominant
     # note on the circle of fifths while a note stands out and the notes
@@ -555,9 +587,9 @@ class BeatSyncWhiteModeConfig:
         )
 
 
-COLOR_MODES = ("band_colors", "hsv_music", "beat_sync", "peak_flash", "beat_sync_white")
+COLOR_MODES = ("band_colors", "color_steps", "beat_sync", "peak_flash", "beat_sync_white")
 # Modes that are gone, and the one a config saved in them loads into.
-_OLD_MODES = {"rgb_freq": "band_colors", "custom": "band_colors"}
+_OLD_MODES = {"rgb_freq": "band_colors", "custom": "band_colors", "hsv_music": "color_steps"}
 
 
 @dataclass
@@ -567,7 +599,8 @@ class ColorMappingConfig:
     # continuous blending the other modes do - see README.md.
     mode: str = "beat_sync"  # see COLOR_MODES
     band_colors: BandColorsModeConfig = field(default_factory=BandColorsModeConfig)
-    hsv: HSVModeConfig = field(default_factory=HSVModeConfig)
+    color_steps: ColorStepsModeConfig = field(default_factory=ColorStepsModeConfig)
+    hue_range: HueRangeConfig = field(default_factory=HueRangeConfig)
     beat_sync: BeatSyncModeConfig = field(default_factory=BeatSyncModeConfig)
     peak_flash: PeakFlashModeConfig = field(default_factory=PeakFlashModeConfig)
     beat_sync_white: BeatSyncWhiteModeConfig = field(default_factory=BeatSyncWhiteModeConfig)
@@ -581,7 +614,8 @@ class ColorMappingConfig:
         return {
             "mode": self.mode,
             "band_colors": self.band_colors.to_dict(),
-            "hsv": self.hsv.to_dict(),
+            "color_steps": self.color_steps.to_dict(),
+            "hue_range": self.hue_range.to_dict(),
             "beat_sync": self.beat_sync.to_dict(),
             "peak_flash": self.peak_flash.to_dict(),
             "beat_sync_white": self.beat_sync_white.to_dict(),
@@ -600,7 +634,8 @@ class ColorMappingConfig:
             # A mode that's gone without a successor (the old "8band_spectrum") falls back to the default.
             mode=mode if mode in COLOR_MODES else "beat_sync",
             band_colors=BandColorsModeConfig.from_dict(d.get("band_colors", {})),
-            hsv=HSVModeConfig.from_dict(d.get("hsv", {})),
+            color_steps=ColorStepsModeConfig.from_dict(d.get("color_steps", {})),
+            hue_range=HueRangeConfig.from_dict(d.get("hue_range", d.get("hsv", {}))),
             beat_sync=BeatSyncModeConfig.from_dict(d.get("beat_sync", {})),
             peak_flash=PeakFlashModeConfig.from_dict(d.get("peak_flash", {})),
             beat_sync_white=BeatSyncWhiteModeConfig.from_dict(d.get("beat_sync_white", {})),
@@ -672,8 +707,8 @@ class ChaseEffectConfig:
     """A moving highlight rotates through a chosen, ordered subset of lamps
     (each lamp's position comes from its PerLampEffect.chase_order), creating
     a spinning/chasing light effect - independent of, and layered on top of,
-    whichever color mode is currently active (Beat Sync, Peak Flash, HSV
-    Music and Band Colors all get this overlay the same way).
+    whichever color mode is currently active (Beat Sync, Peak Flash, Color
+    Steps and Band Colors all get this overlay the same way).
 
     Speed is either a constant number of full rotations per second
     (`speed_rotations_per_s` - e.g. 0.5 means one full lap around the chase
@@ -1482,8 +1517,9 @@ class AppConfig:
             "beat_sync": cm.beat_sync,
             "beat_sync_white": cm.beat_sync_white,
             "peak_flash": cm.peak_flash,
-            "hsv": cm.hsv,
+            "hue_range": cm.hue_range,
             "band_colors": cm.band_colors,
+            "color_steps": cm.color_steps,
             "smoothing": cm.smoothing,
             "rhythm": cfg.rhythm,
             "sequencer": cfg.sequencer,

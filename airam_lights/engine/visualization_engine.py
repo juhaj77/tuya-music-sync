@@ -36,7 +36,7 @@ from ..color.mapping import ColorMappingEngine
 from ..color.models import Color, StrobeBurst, WhiteTarget, clip, lerp
 from ..config.schema import INSTANT_TRANSITIONS, AppConfig
 from ..diagnostics.metrics import RateCounter
-from ..dsp.bands import band_energy, spectral_centroid_hz, spectral_contrast
+from ..dsp.bands import band_energy, spectral_centroid_hz
 from ..dsp.beat_clock import BeatClock, ClockBeat
 from ..dsp.beat_detector import BeatDetector
 from ..effects.chase import (
@@ -49,6 +49,7 @@ from ..effects.chase import (
 )
 from ..dsp.fft_engine import FFTEngine, SpectrumFrame
 from ..effects.band_colors import BandColorsState, BandColorTracker, band_edges
+from ..effects.color_steps import ColorStepsState, ColorStepTracker
 from ..effects.pulse_sequencer import (
     STEPS_PER_BEAT,
     LoudnessTracker,
@@ -146,12 +147,10 @@ class VisualizationEngine:
         self.fft = FFTEngine(audio.samplerate, config.audio.fft_size)
         self.color_engine = ColorMappingEngine(config.color_mapping)
 
-        sm = config.color_mapping.smoothing
         self._band_colors = BandColorTracker()
         self.latest_band_colors = BandColorsState()  # for display: the bands' activity, the chord turn
-        self._smoother_log_centroid = AttackReleaseSmoother(sm.attack_ms, sm.release_ms, initial=math.log(200))
-        self._smoother_value = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
-        self._smoother_contrast = AttackReleaseSmoother(sm.attack_ms, sm.release_ms)
+        self._color_steps = ColorStepTracker()
+        self.latest_color_steps = ColorStepsState()  # for display: the charge, the last step
 
         bs = config.color_mapping.beat_sync
         self._beat_detector = BeatDetector(
@@ -379,14 +378,6 @@ class VisualizationEngine:
 
     def _apply_smoothing_settings(self) -> None:
         sm = self.config.color_mapping.smoothing
-        for s in (
-            self._smoother_log_centroid,
-            self._smoother_value,
-            self._smoother_contrast,
-        ):
-            s.attack_ms = sm.attack_ms
-            s.release_ms = sm.release_ms
-
         bs = self.config.color_mapping.beat_sync
         self._beat_detector.sensitivity = bs.sensitivity
         self._beat_detector.min_interval_ms = bs.min_interval_ms
@@ -554,8 +545,8 @@ class VisualizationEngine:
 
         if mode == "band_colors":
             colors = self._tick_band_colors_mode(frame, dt, wall_now, selected_ids)
-        elif mode == "hsv_music":
-            colors = self._tick_hsv_mode(frame, dt, wall_now, selected_ids)
+        elif mode == "color_steps":
+            colors = self._tick_color_steps_mode(frame, dt, wall_now, selected_ids)
         elif mode == "beat_sync":
             colors = self._tick_beat_sync_mode(frame, dt, wall_now, selected_ids)
         elif mode == "peak_flash":
@@ -691,20 +682,30 @@ class VisualizationEngine:
         color = self.color_engine.compute_band_colors(state.hue, state.level, cfg)
         return {device_id: color for device_id in selected_ids}
 
-    def _tick_hsv_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
-        centroid = spectral_centroid_hz(frame)
-        log_c = self._smoother_log_centroid.update(math.log(max(centroid, 1.0)), dt)
-        centroid_s = math.exp(log_c)
-
-        overall = band_energy(frame, 20, 16000)
-        value_s = self._smoother_value.update(overall, dt)
-
-        contrast = spectral_contrast(frame)
-        contrast_s = self._smoother_contrast.update(contrast, dt)
-
-        self.latest_band3_levels = {"centroid_hz": centroid_s, "value": value_s, "contrast": contrast_s}
-        color = self.color_engine.compute_hsv(centroid_s, value_s, contrast_s)
-        return {device_id: color for device_id in selected_ids}
+    def _tick_color_steps_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
+        """Peaks in the bands charge a hue step, the beat clock releases it and
+        it rolls across the lamps along the Chase order - see
+        effects/color_steps.py. Lamps outside the Chase order go with its first
+        position (without one, every lamp shows the same)."""
+        cfg = self.config.color_mapping.color_steps
+        levels = [band_energy(frame, low, high) for low, high in band_edges(cfg.bass_mid_hz, cfg.mid_treble_hz)]
+        groups = get_chase_groups(self.config.per_lamp_effects, selected_ids)
+        state = self._color_steps.update(
+            levels, cfg, dt, wall_now,
+            position=self._beat_clock.position(wall_now),
+            period_s=self._beat_clock.period_s,
+            beats_per_bar=self.config.rhythm.beats_per_bar,
+            positions=len(groups),
+        )
+        self.latest_color_steps = state
+        self.latest_band3_levels = dict(state.charges)
+        first = self.color_engine.compute_color_steps(state.hues[0], state.levels[0], cfg)
+        colors = {device_id: first for device_id in selected_ids}
+        for i, group in enumerate(groups):
+            color = self.color_engine.compute_color_steps(state.hues[i], state.levels[i], cfg)
+            for device_id in group:
+                colors[device_id] = color
+        return colors
 
     def _tick_beat_sync_mode(self, frame: SpectrumFrame, dt: float, wall_now: float, selected_ids) -> Dict[str, Color]:
         """On every hit: flash a fully-saturated hue, as bright as the hit is
@@ -847,14 +848,14 @@ class VisualizationEngine:
             # as the music's color right now barely moves at all while a note
             # holds.
             progress = self._hue_glide_progress(cfg, glide, wall_now)
-            hsv_cfg = self.config.color_mapping.hsv
-            span = abs(hsv_cfg.hue_max_deg - hsv_cfg.hue_min_deg)
+            hue_range = self.config.color_mapping.hue_range
+            span = abs(hue_range.hue_max_deg - hue_range.hue_min_deg)
             x = self._beat_target_x
             if span > 1e-6:
                 x += self._spectrum_glide_dir * (cfg.hue_glide_deg / span) * progress
                 if span < 359.0:
                     x = max(0.0, min(1.0, x))
-            target_hue = lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, x) % 360.0
+            target_hue = lerp(hue_range.hue_min_deg, hue_range.hue_max_deg, x) % 360.0
         elif cfg.glide_hue:
             progress = self._hue_glide_progress(cfg, glide, wall_now)
             toward = self._upcoming_beat_hue(cfg)
@@ -1057,7 +1058,7 @@ class VisualizationEngine:
 
     def _apply_pulses(self, colors: Dict[str, Color], dt: float, wall_now: float) -> None:
         """The sequencer's pulses on a colour mode with no beat flash of its
-        own (Peak Flash, HSV Music, Band Colors), in place: a dark
+        own (Peak Flash, Color Steps, Band Colors), in place: a dark
         pulse dips the mode's colour toward black - by Beat Sync's dark pulse
         depth, on its dark pulse attack/release, washing the colour out along
         the way by its desaturate - and a white flash lights
@@ -1106,8 +1107,8 @@ class VisualizationEngine:
     @staticmethod
     def _clear_hue(colors: Dict[str, Color]) -> Optional[float]:
         """The hue the lamps show (the first one's - before the overlays
-        every lamp has the same colour), or None when it's too pale or dark
-        to have a clear one."""
+        every lamp has the same colour, or in Color Steps a neighbouring
+        one), or None when it's too pale or dark to have a clear one."""
         for color in colors.values():
             hue, saturation, value = color.to_hsv()
             return hue if saturation >= 0.25 and value >= 0.05 else None
@@ -1127,6 +1128,8 @@ class VisualizationEngine:
             self._beat_white_dark_until = None
         if new == "band_colors":
             self._band_colors.reset()  # its bands' ranges start over from the music playing now
+        elif new == "color_steps":
+            self._color_steps.reset()  # likewise its peaks' and the charge
         elif new in ("beat_sync", "beat_sync_white"):
             self.hits.reset()  # likewise the hits' ranges and pattern
         if sequencer_dark_only(new):  # no colour to sweep over in Beat Sync White (a dark sweep dims its white)
@@ -1720,21 +1723,21 @@ class VisualizationEngine:
             # Spread over the whole hue range by the music's own recent range
             # (dsp.hue_step) - an absolute 20 Hz..16 kHz scale put almost all
             # music in the same narrow slice of it.
-            hsv_cfg = self.config.color_mapping.hsv
+            hue_range = self.config.color_mapping.hue_range
             previous = self._beat_target_x
             x = self._spectrum_x(cfg)
             # The glide carries on the way the music's color last moved...
             if previous is not None and abs(x - previous) > 0.02:
                 self._spectrum_glide_dir = 1.0 if x > previous else -1.0
             # ...unless that runs out of the hue range (a full circle has no ends).
-            span = abs(hsv_cfg.hue_max_deg - hsv_cfg.hue_min_deg)
+            span = abs(hue_range.hue_max_deg - hue_range.hue_min_deg)
             if 1e-6 < span < 359.0:
                 reach = cfg.hue_glide_deg / span
                 end = x + self._spectrum_glide_dir * reach
                 if end > 1.0 or end < 0.0:
                     self._spectrum_glide_dir = 1.0 if 1.0 - x >= x else -1.0
             self._beat_target_x = x
-            return lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, x)
+            return lerp(hue_range.hue_min_deg, hue_range.hue_max_deg, x)
 
         # "random" (default): pick a hue that's visibly different from the
         # last one, so every beat gives a clearly new color instead of
@@ -1942,10 +1945,10 @@ class VisualizationEngine:
         # Continuous, slowly-flowing hue - the "storytelling" color arc.
         if cfg.hue_source == "centroid":
             centroid = spectral_centroid_hz(frame)
-            hsv_cfg = self.config.color_mapping.hsv
+            hue_range = self.config.color_mapping.hue_range
             high = 16000.0
             t = (math.log(clip(centroid, 20.0, high)) - math.log(20.0)) / (math.log(high) - math.log(20.0))
-            hue_target = lerp(hsv_cfg.hue_min_deg, hsv_cfg.hue_max_deg, t)
+            hue_target = lerp(hue_range.hue_min_deg, hue_range.hue_max_deg, t)
         else:  # "drift": a constant slow autonomous rotation, independent of content
             self._hue_drift_deg = (self._hue_drift_deg + cfg.drift_speed_deg_per_s * dt) % 360.0
             hue_target = self._hue_drift_deg

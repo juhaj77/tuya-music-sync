@@ -64,23 +64,15 @@ def test_quick_slider_and_color_mapping_slider_follow_each_other(window):
     assert bs.hue_attack_ms == pytest.approx(222.0)
 
 
-def test_hsv_smoothing_and_band_colors_settings_follow_each_other(window):
+def test_band_colors_settings_follow_each_other(window):
     vis, cmt = window.tabs.widget(0), window.tabs.widget(2)
     cm = window.controller.config.color_mapping
-
-    cmt.hsv_attack_slider._spin.setValue(150.0)
-    assert cm.smoothing.attack_ms == pytest.approx(150.0)
-    assert vis.quick_sliders[("hsv_music", "color_mapping.smoothing.attack_ms")].value() == pytest.approx(150.0)
-    vis.quick_sliders[("hsv_music", "color_mapping.smoothing.release_ms")]._spin.setValue(700.0)
-    assert cm.smoothing.release_ms == pytest.approx(700.0)
-    assert cmt.hsv_release_slider.value() == pytest.approx(700.0)
 
     vis.quick_sliders[("band_colors", "color_mapping.band_colors.focus")]._spin.setValue(0.9)
     assert cm.band_colors.focus == pytest.approx(0.9) and cmt.band_focus_slider.value() == pytest.approx(0.9)
     cmt.band_chord_turn_slider._spin.setValue(200.0)
     assert cm.band_colors.chord_turn_deg == pytest.approx(200.0)
     assert vis.quick_sliders[("band_colors", "color_mapping.band_colors.chord_turn_deg")].value() == pytest.approx(200.0)
-    assert cm.band_colors.release_ms != cm.smoothing.release_ms  # Band Colors has its own smoothing
 
 
 def test_more_settings_link_opens_the_mode_page(window):

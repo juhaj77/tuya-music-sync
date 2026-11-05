@@ -36,11 +36,12 @@ def sequencer_dark_only(mode: str) -> bool:
 def clock_in_use(config: AppConfig, mode: Optional[str] = None) -> bool:
     """Whether anything follows the shared beat clock in `mode` (default: the
     current one), i.e. whether the engine runs it: Beat Sync / Beat Sync
-    White following it, the pulse sequencer, Chase / Group Switch on speed
-    source 'clock'."""
+    White following it, Color Steps (its steps, wave and glide go by the
+    clock), the pulse sequencer, Chase / Group Switch on speed source 'clock'."""
     mode = mode or config.color_mapping.mode
     return (
-        (config.rhythm.shared_clock and mode in BEAT_MODES)
+        mode == "color_steps"
+        or (config.rhythm.shared_clock and mode in BEAT_MODES)
         or sequencer_enabled_for(config, mode)
         or (config.chase.enabled and config.chase.sync_mode == "clock")
         or (config.group_switch.enabled and config.group_switch.sync_mode == "clock")

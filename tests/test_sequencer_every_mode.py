@@ -1,4 +1,4 @@
-"""The pulse sequencer in every colour mode: Peak Flash, HSV Music and Band
+"""The pulse sequencer in every colour mode: Peak Flash, Color Steps and Band
 Colors get its white flashes, dark pulses, strobes and color sweeps as Beat
 Sync does, Beat Sync White only its dark pulses and dark sweeps - plus Beat
 Sync White's temperature changing every N beats, on the bar (fake clock and
@@ -20,7 +20,7 @@ from airam_lights.engine.visualization_engine import VisualizationEngine
 PERIOD = 0.5  # 120 BPM
 TICK = 1.0 / 30.0
 DEVICES = ["a", "b", "c", "d"]
-OTHER_MODES = ("peak_flash", "hsv_music", "band_colors")
+OTHER_MODES = ("peak_flash", "color_steps", "band_colors")
 
 
 class _FakeClock:
@@ -67,9 +67,8 @@ def _make_engine(monkeypatch, mode, shared_clock=False, **seq):
         return 0.9 if min(phase, 1.0 - phase) * PERIOD < TICK / 2 else 0.4
 
     monkeypatch.setattr(ve_module, "band_energy", kick_energy)
-    # HSV Music reads the spectrum itself (the fake frame has none).
+    # Band Colors' chord turn reads the spectrum itself (the fake frame has none).
     monkeypatch.setattr(ve_module, "spectral_centroid_hz", lambda frame, *a: 800.0)
-    monkeypatch.setattr(ve_module, "spectral_contrast", lambda frame, *a: 0.5)
 
     config = AppConfig()
     config.color_mapping.mode = mode
@@ -227,7 +226,7 @@ def test_switching_modes_keeps_the_sequencer_going(monkeypatch):
     engine, clock, lamps = _make_engine(monkeypatch, "band_colors", shared_clock=True)
     _run(engine, clock, 8.0)
     phrase_bar = engine.sequencer_status["phrase_bar"]
-    for mode in ("peak_flash", "beat_sync", "hsv_music", "beat_sync_white", "band_colors"):
+    for mode in ("peak_flash", "beat_sync", "color_steps", "beat_sync_white", "band_colors"):
         engine.config.color_mapping.mode = mode
         _run(engine, clock, 2.0)  # one bar
         assert engine.sequencer_status is not None, mode
@@ -470,7 +469,7 @@ def test_every_mode_plays_the_same_pulses_on_real_spectra(monkeypatch):
     assert {"white", "dark"} <= {kind for kind, _ in logs["beat_sync"]}
     assert {"white", "dark"} <= {kind for kind, _ in logs["peak_flash"]}
     # One set of settings: the same pulses on the same beats in every mode without beats of its own.
-    assert logs["peak_flash"] == logs["hsv_music"] == logs["band_colors"]
+    assert logs["peak_flash"] == logs["color_steps"] == logs["band_colors"]
 
 
 # -- switching modes -------------------------------------------------------------------------------

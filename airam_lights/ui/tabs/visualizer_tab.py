@@ -33,7 +33,7 @@ _MODES = [
     ("beat_sync", "Beat Sync"),
     ("beat_sync_white", "Beat Sync White"),
     ("peak_flash", "Peak Flash"),
-    ("hsv_music", "HSV Music"),
+    ("color_steps", "Color Steps"),
     ("band_colors", "Band Colors"),
 ]
 

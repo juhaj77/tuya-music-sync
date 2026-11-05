@@ -646,12 +646,12 @@ BUILTIN_PRESETS: Dict[str, dict] = {
             "notes and chords get neighboring colors (drums and noise glide over to the loudness and "
             "brightness). Unhurried white on the beats, a washed-out breath before each bar and a "
             "slow dark sweep into some phrases; Chase and Group Switch turn the hues a little with "
-            "the music. Also for music without a steady beat. Sets HSV Music's hue range to the full "
+            "the music. Also for music without a steady beat. Sets the spectrum hue range to the full "
             "circle."
         ),
         "rhythm": _CLOCK_FOLLOWS_NOTES,
         "color_mapping": {"mode": "beat_sync"},
-        "hsv": {"hue_min_deg": 0.0, "hue_max_deg": 360.0},
+        "hue_range": {"hue_min_deg": 0.0, "hue_max_deg": 360.0},
         "beat_sync": {
             "hue_mode": "spectrum",
             "spectrum_source": "pitch",
@@ -832,7 +832,7 @@ def _targets(config: AppConfig) -> dict:
         "sequencer": config.sequencer,
         "color_mapping": config.color_mapping,
         "beat_sync": config.color_mapping.beat_sync,
-        "hsv": config.color_mapping.hsv,
+        "hue_range": config.color_mapping.hue_range,
         "chase": config.chase,
         "group_switch": config.group_switch,
     }

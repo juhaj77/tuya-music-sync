@@ -88,11 +88,10 @@ def test_sequencer_status_in_every_mode_and_dark_only_in_beat_sync_white(monkeyp
     import airam_lights.engine.visualization_engine as ve_module
 
     engine, clock = _busy_engine(monkeypatch)
-    monkeypatch.setattr(ve_module, "spectral_centroid_hz", lambda frame, *a: 800.0)  # HSV Music (fake frame)
-    monkeypatch.setattr(ve_module, "spectral_contrast", lambda frame, *a: 0.5)
+    monkeypatch.setattr(ve_module, "spectral_centroid_hz", lambda frame, *a: 800.0)  # Band Colors' chord turn (fake frame)
     _run(engine, clock, 4.0)
     assert engine.sequencer_status is not None
-    for mode in ("band_colors", "peak_flash", "hsv_music"):
+    for mode in ("band_colors", "peak_flash", "color_steps"):
         engine.config.color_mapping.mode = mode
         _run(engine, clock, 1.0)
         status = engine.sequencer_status

@@ -138,7 +138,7 @@ def _chord_audio(samplerate, n):
 @pytest.mark.parametrize("source", ["intensity", "pitch"])
 def test_engine_drives_the_chase_step_from_the_music(monkeypatch, source):
     config = AppConfig()
-    config.color_mapping.mode = "hsv_music"
+    config.color_mapping.mode = "color_steps"
     config.group_switch.enabled = False
     config.chase.enabled = True
     config.chase.color_mode = "hue_shift_relative"
@@ -227,8 +227,8 @@ def _beat_sync_engine(monkeypatch, glide=False):
     bs.glide_hue = glide
     bs.hue_glide_deg = 60.0
     bs.hue_glide_timing = "decay"
-    config.color_mapping.hsv.hue_min_deg = 0.0
-    config.color_mapping.hsv.hue_max_deg = 240.0
+    config.color_mapping.hue_range.hue_min_deg = 0.0
+    config.color_mapping.hue_range.hue_max_deg = 240.0
     config.chase.enabled = False
     config.group_switch.enabled = False
     audio = AudioCapture()
@@ -341,7 +341,7 @@ def test_beat_sync_step_settings_survive_a_save():
 
 def test_engine_drives_the_group_switch_step_from_the_music(monkeypatch):
     config = AppConfig()
-    config.color_mapping.mode = "hsv_music"
+    config.color_mapping.mode = "color_steps"
     config.chase.enabled = False
     config.group_switch.enabled = True
     config.group_switch.color_mode = "hue_shift_relative"
