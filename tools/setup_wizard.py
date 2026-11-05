@@ -40,8 +40,9 @@ def main() -> None:
     if getattr(sys, "frozen", False):
         # Packaged .exe build: there's no separate Python interpreter to run
         # `-m tinytuya` with (sys.executable is this exe itself), so run the
-        # wizard in-process instead.
-        from tinytuya import wizard
+        # wizard in-process instead. The wizard calls tinytuya.scanner without
+        # importing it (only tinytuya's `-m` entry does), so it's imported here.
+        from tinytuya import scanner, wizard  # noqa: F401
         try:
             wizard.wizard()
         except Exception as e:
