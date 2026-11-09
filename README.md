@@ -5,6 +5,11 @@ A real-time music light show for **Airam SmartHome Smart PAR16 RGB GU10** Wi-Fi 
 every lamp at once and in sync, controlled over your **local network** - no cloud at
 runtime, no phone app. Windows (ready-made build) and Linux (from source).
 
+In a dark room **eight spots are already enough for a stunning show** - the
+[demo videos](#demo-videos) were filmed with that many. One or two lamps are taken into
+account as well: the show adapts so that the beat still pulses and the white flashes don't
+take over ([Quick start, step 4](#quick-start)).
+
 **[Download for Windows](https://github.com/juhaj77/tuya-music-sync/releases/latest)** ·
 [Quick start](#quick-start) · [Suomeksi](#suomeksi) · [Demo videos](#demo-videos) ·
 [Troubleshooting](#troubleshooting)
@@ -113,8 +118,11 @@ joka synkronoi **Airam SmartHome -älylamput** (Smart PAR16 RGB GU10 -kohdevalot
 musiikkiin reaaliajassa: valot vaihtavat väriä ja välähtävät musiikin tahdissa. Sovellus
 ohjaa lamppuja suoraan kotiverkon kautta ilman pilvipalvelua, ja kaikkia lamppuja yhtä
 aikaa ja synkronoidusti - toisin kuin Airam SmartHome -sovelluksen oma musiikkitila, joka
-toimii vain yhdellä lampulla kerrallaan. Mukana on myös erillinen sovellus valojen
-käsiohjaukseen (värit, valkoinen valo, kiertävä valo, tunnelmavalaistus) ilman musiikkia.
+toimii vain yhdellä lampulla kerrallaan. Pimeässä jo kahdeksan kohdevaloa saa aikaan
+päräyttävän näköisen valoesityksen, mutta myös yhden ja kahden lampun käyttö on huomioitu:
+esitys mukautuu niin, että biitti sykkii yhä eivätkä valkoiset välähdykset jyrää kaikkea
+alleen. Mukana on myös erillinen sovellus valojen käsiohjaukseen (värit, valkoinen valo,
+kiertävä valo, tunnelmavalaistus) ilman musiikkia.
 Muiden Tuya-pohjaisten RGB-lamppujen (esim. Airamin E27-älylamput) pitäisi toimia myös,
 mutta niitä ei ole vielä testattu. Valmis Windows-versio löytyy
 [Releases-sivulta](https://github.com/juhaj77/tuya-music-sync/releases/latest), ja
