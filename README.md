@@ -375,8 +375,11 @@ Each colour mode's own settings: a page per mode, then the **Global** section an
 pulses and the pulse sequencer - is on the [Global Effects tab](#global-effects-tab).
 
 The page shown doesn't have to be the running mode: a **green dot** beside a mode's name
-marks the running one, and the info panel at the bottom names it too. Changes on another
-mode's page don't show on the lamps until you pick that mode on the Visualizer tab.
+marks the running one, and the info panel at the bottom names it too. The other modes have
+a **grey dot**: click it to turn that mode on, and the green dot moves there and its page
+opens. It's the same as picking the mode on the Visualizer tab. Clicking a mode's name only
+opens its page, and changes on another mode's page don't show on the lamps until you turn
+that mode on.
 
 ### Beat Sync
 

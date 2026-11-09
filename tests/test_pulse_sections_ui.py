@@ -9,6 +9,8 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest  # noqa: E402
+from PySide6.QtCore import QPoint, Qt  # noqa: E402
+from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from airam_lights.config.schema import AppConfig  # noqa: E402
@@ -57,8 +59,12 @@ def _color_mapping(window, qapp, mode=None):
 
 
 def _dotted_modes(tab):
-    """The modes whose name on the Color Mapping tab has the dot beside it."""
-    return [m for m, page in tab._mode_pages.items() if not tab.sub_tabs.tabIcon(tab.sub_tabs.indexOf(page)).isNull()]
+    """The modes whose name on the Color Mapping tab has the green dot beside it."""
+    return [m for m, dot in tab._mode_dots.items() if dot.isChecked()]
+
+
+def _dot_color(dot):
+    return dot.grab().toImage().pixelColor(dot.rect().center()).name()
 
 
 def test_the_green_dot_marks_the_running_mode_whichever_page_is_shown(window, qapp):
@@ -67,10 +73,57 @@ def test_the_green_dot_marks_the_running_mode_whichever_page_is_shown(window, qa
         tab = _color_mapping(window, qapp, shown)  # and opens another mode's page
         assert tab.sub_tabs.currentWidget() is tab._mode_pages[shown]
         assert _dotted_modes(tab) == [mode]
+        assert {m: _dot_color(tab._mode_dots[m]) for m in MODES} == {
+            m: theme.OK if m == mode else theme.DIM for m in MODES
+        }
         index = tab.sub_tabs.indexOf(tab._mode_pages[mode])
-        assert tab.sub_tabs.tabIcon(index).pixmap(10, 10).toImage().pixelColor(5, 5).name() == theme.OK
         assert "active colour mode: this" in tab.sub_tabs.tabToolTip(index)
         assert "Not the active" in tab.sub_tabs.tabToolTip(tab.sub_tabs.indexOf(tab._mode_pages[shown]))
+        assert "Click to make" in tab._mode_dots[shown].toolTip()
+
+
+def test_clicking_a_grey_dot_turns_that_mode_on_and_brings_up_its_page(window, qapp):
+    _effects(window, qapp, "beat_sync")
+    tab = _color_mapping(window, qapp, "peak_flash")  # the dot clicked isn't on the page shown
+    QTest.mouseClick(tab._mode_dots["color_steps"], Qt.LeftButton)
+    qapp.processEvents()
+    assert window.controller.config.color_mapping.mode == "color_steps"
+    assert _dotted_modes(tab) == ["color_steps"]
+    assert tab.sub_tabs.currentWidget() is tab._mode_pages["color_steps"]
+    assert "active colour mode: this" in tab._mode_dots["color_steps"].toolTip()
+    assert "Click to make" in tab._mode_dots["beat_sync"].toolTip()
+    # The Visualizer tab went along: its radio and its Quick Controls.
+    visualizer = window.tabs.widget(0)
+    assert visualizer._mode_buttons["color_steps"].isChecked()
+    assert visualizer.mode_settings_stack.currentWidget() is visualizer._mode_settings_pages["color_steps"]
+
+
+def test_clicking_the_green_dot_only_brings_up_its_page(window, qapp):
+    _effects(window, qapp, "beat_sync")
+    tab = _color_mapping(window, qapp, "band_colors")
+    QTest.mouseClick(tab._mode_dots["beat_sync"], Qt.LeftButton)
+    qapp.processEvents()
+    assert window.controller.config.color_mapping.mode == "beat_sync"
+    assert _dotted_modes(tab) == ["beat_sync"]
+    assert tab.sub_tabs.currentWidget() is tab._mode_pages["beat_sync"]
+
+
+def test_clicking_a_modes_name_only_opens_its_page(window, qapp):
+    _effects(window, qapp, "beat_sync")
+    tab = _color_mapping(window, qapp, "beat_sync")
+    bar = tab.sub_tabs.tabBar()
+    rect = bar.tabRect(tab.sub_tabs.indexOf(tab._mode_pages["peak_flash"]))
+    QTest.mouseClick(bar, Qt.LeftButton, pos=QPoint(rect.right() - 20, rect.center().y()))  # on the name, not the dot
+    qapp.processEvents()
+    assert tab.sub_tabs.currentWidget() is tab._mode_pages["peak_flash"]
+    assert window.controller.config.color_mapping.mode == "beat_sync"
+    assert _dotted_modes(tab) == ["beat_sync"]
+
+
+def test_the_dots_take_no_keyboard_focus(window, qapp):
+    # With the focus, an arrow key would click the next dot and change the running mode.
+    tab = _color_mapping(window, qapp)
+    assert all(dot.focusPolicy() == Qt.NoFocus for dot in tab._mode_dots.values())
 
 
 def test_the_green_dot_moves_when_a_preset_changes_the_mode(window, qapp):

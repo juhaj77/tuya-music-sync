@@ -146,6 +146,7 @@ class VisualizerTab(QWidget):
             self._mode_buttons[key] = rb
             rb.toggled.connect(self._make_mode_handler(key))
         self._mode_buttons[controller.config.color_mapping.mode].setChecked(True)
+        controller.selectMode.connect(self._select_mode)
         root.addWidget(mode_box)
 
         # -- quick controls ------------------------------------------------------------
@@ -276,6 +277,10 @@ class VisualizerTab(QWidget):
                 self._show_mode_settings(key)
 
         return handler
+
+    def _select_mode(self, mode: str) -> None:
+        """A dot on the Color Mapping tab turned `mode` on: the same as picking its radio."""
+        self._mode_buttons[mode].setChecked(True)
 
     # -- quick controls -------------------------------------------------------------------
 

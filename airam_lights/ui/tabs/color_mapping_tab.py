@@ -6,10 +6,10 @@ Switch, the Dark and White pulses and the Pulse sequencer - is on the Global
 Effects tab."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
+from PySide6.QtCore import QSize, QTimer
 from PySide6.QtWidgets import (
     QBoxLayout,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QHBoxLayout,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QStyle,
     QStyleOptionTabWidgetFrame,
+    QTabBar,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -31,9 +32,9 @@ from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...config.schema import LAMP_TRANSITIONS, STEP_DIRECTIONS, STEP_TIMINGS
-from .. import theme
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
+from ..widgets.mode_dot import ModeDot
 from ..widgets.musical import inactive_note, labeled_combo, set_active, show_note
 from ..quick_settings import (
     BAND_CHORD_TURN_TIP,
@@ -58,20 +59,8 @@ _HUE_RANGE_TIP = (
     "sound, low notes) to the high end. One setting: it's on both pages. 0 to 360 is the whole colour wheel."
 )
 _ACTIVE_MODE_TIP = "The active colour mode: this is what the lamps are showing."
-_INACTIVE_MODE_TIP = "Not the active colour mode: changes here don't show on the lamps until you pick it on the Visualizer tab."
-
-
-def _dot_icon(color: str) -> QIcon:
-    """A filled circle, drawn large: Qt scales it down to the icon size asked for, smooth on any screen."""
-    pixmap = QPixmap(64, 64)
-    pixmap.fill(Qt.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.Antialiasing)
-    painter.setPen(Qt.NoPen)
-    painter.setBrush(QColor(color))
-    painter.drawEllipse(pixmap.rect())
-    painter.end()
-    return QIcon(pixmap)
+_INACTIVE_MODE_TIP = "Not the active colour mode: changes here don't show on the lamps until you turn it on with its grey dot."
+_TURN_ON_MODE_TIP = "Click to make this the active colour mode."
 
 
 class _ModeTabs(QTabWidget):
@@ -141,7 +130,6 @@ class ColorMappingTab(QWidget):
         root.addWidget(shared_note)
 
         sub_tabs = _ModeTabs()
-        sub_tabs.setIconSize(QSize(10, 10))  # the active mode's dot (_mark_active_mode)
         root.addWidget(sub_tabs)
         self.sub_tabs = sub_tabs
 
@@ -721,6 +709,7 @@ class ColorMappingTab(QWidget):
             "color_steps": steps_widget,
             "band_colors": band_widget,
         }
+        self._add_mode_dots()
         self._link_quick_settings()
         # A stretch at the end of each page, so its rows stay together at the
         # top whatever height the tab widget gives it.
@@ -1027,15 +1016,37 @@ class ColorMappingTab(QWidget):
             self.sub_tabs.widget(i).setSizePolicy(policy, policy)
         self.sub_tabs.updateGeometry()
 
-    def _mark_active_mode(self) -> None:
-        """A green dot beside the running mode's name, so nobody tunes another
-        mode's page and wonders why the lamps don't change."""
-        active = self.controller.config.color_mapping.mode
-        dot = _dot_icon(theme.OK)
+    def _add_mode_dots(self) -> None:
+        """A dot on each mode's tab (_mark_active_mode), one green at a time."""
+        self._mode_dots = {}
+        group = QButtonGroup(self)
+        self.sub_tabs.tabBar().setObjectName("modeTabBar")  # the theme tightens its tabs for the dot
         for mode, page in self._mode_pages.items():
-            index = self.sub_tabs.indexOf(page)
-            self.sub_tabs.setTabIcon(index, dot if mode == active else QIcon())
-            self.sub_tabs.setTabToolTip(index, _ACTIVE_MODE_TIP if mode == active else _INACTIVE_MODE_TIP)
+            dot = ModeDot()
+            dot.clicked.connect(lambda _checked=False, mode=mode: self._turn_on_mode(mode))
+            group.addButton(dot)
+            self.sub_tabs.tabBar().setTabButton(self.sub_tabs.indexOf(page), QTabBar.LeftSide, dot)
+            self._mode_dots[mode] = dot
+
+    def _turn_on_mode(self, mode: str) -> None:
+        """A dot was clicked: `mode` runs and its page comes up, so what's
+        tuned next is what the lamps are showing."""
+        self.controller.selectMode.emit(mode)
+        self.show_mode(mode)
+        self._mark_active_mode()
+
+    def _mark_active_mode(self) -> None:
+        """A green dot beside the running mode's name and grey ones beside the
+        others, so nobody tunes another mode's page and wonders why the lamps
+        don't change."""
+        active = self.controller.config.color_mapping.mode
+        for mode, page in self._mode_pages.items():
+            is_active = mode == active
+            self._mode_dots[mode].setChecked(is_active)
+            self._mode_dots[mode].setToolTip(_ACTIVE_MODE_TIP if is_active else _TURN_ON_MODE_TIP)
+            self.sub_tabs.setTabToolTip(
+                self.sub_tabs.indexOf(page), _ACTIVE_MODE_TIP if is_active else _INACTIVE_MODE_TIP
+            )
 
     def showEvent(self, event) -> None:
         # The beat clock and the sequencer are set on the Global Effects tab,

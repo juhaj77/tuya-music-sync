@@ -47,6 +47,7 @@ class AppController(QObject):
     # changed: (path under color_mapping, the slider that changed it) - see ui/quick_settings.py
     linkedSettingChanged = Signal(str, object)
     showModeSettings = Signal(str)  # open the Color Mapping page of this mode
+    selectMode = Signal(str)  # run this colour mode (the Color Mapping tab's dots; the Visualizer tab's radios do it)
 
     def __init__(self):
         super().__init__()

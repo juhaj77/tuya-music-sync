@@ -164,6 +164,8 @@ QTabBar::tab {{
 QTabBar::tab:hover {{ color: {TEXT}; }}
 QTabBar::tab:selected {{ color: {TEXT}; border-bottom: 2px solid {ACCENT}; }}
 QTabBar::tab:disabled {{ color: {DIM}; }}
+/* the colour modes' tabs: the name close to the dot before it (widgets/mode_dot.py) */
+QTabBar#modeTabBar::tab {{ padding-left: 2px; }}
 
 /* -- buttons -- */
 QPushButton {{
