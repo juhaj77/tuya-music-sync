@@ -6,7 +6,8 @@ Switch, the Dark and White pulses and the Pulse sequencer - is on the Global
 Effects tab."""
 from __future__ import annotations
 
-from PySide6.QtCore import QSize, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
+from PySide6.QtGui import QColor, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -30,6 +31,7 @@ from ...config.builtin_presets import BUILTIN_PRESETS, apply_builtin_preset
 from ...dsp.hue_step import SOURCES as HUE_STEP_SOURCES
 from ...config.user_presets import apply_preset, snapshot_preset
 from ...config.schema import LAMP_TRANSITIONS, STEP_DIRECTIONS, STEP_TIMINGS
+from .. import theme
 from ..controller import AppController
 from ..widgets.hue_slider import HueSlider
 from ..widgets.musical import inactive_note, labeled_combo, set_active, show_note
@@ -55,6 +57,21 @@ _HUE_RANGE_TIP = (
     "The hues Beat Sync's 'spectrum' hue and Peak Flash's 'centroid' hue spread over, from the low end (bass-heavy "
     "sound, low notes) to the high end. One setting: it's on both pages. 0 to 360 is the whole colour wheel."
 )
+_ACTIVE_MODE_TIP = "The active colour mode: this is what the lamps are showing."
+_INACTIVE_MODE_TIP = "Not the active colour mode: changes here don't show on the lamps until you pick it on the Visualizer tab."
+
+
+def _dot_icon(color: str) -> QIcon:
+    """A filled circle, drawn large: Qt scales it down to the icon size asked for, smooth on any screen."""
+    pixmap = QPixmap(64, 64)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    painter.setPen(Qt.NoPen)
+    painter.setBrush(QColor(color))
+    painter.drawEllipse(pixmap.rect())
+    painter.end()
+    return QIcon(pixmap)
 
 
 class _ModeTabs(QTabWidget):
@@ -124,6 +141,7 @@ class ColorMappingTab(QWidget):
         root.addWidget(shared_note)
 
         sub_tabs = _ModeTabs()
+        sub_tabs.setIconSize(QSize(10, 10))  # the active mode's dot (_mark_active_mode)
         root.addWidget(sub_tabs)
         self.sub_tabs = sub_tabs
 
@@ -1009,10 +1027,22 @@ class ColorMappingTab(QWidget):
             self.sub_tabs.widget(i).setSizePolicy(policy, policy)
         self.sub_tabs.updateGeometry()
 
+    def _mark_active_mode(self) -> None:
+        """A green dot beside the running mode's name, so nobody tunes another
+        mode's page and wonders why the lamps don't change."""
+        active = self.controller.config.color_mapping.mode
+        dot = _dot_icon(theme.OK)
+        for mode, page in self._mode_pages.items():
+            index = self.sub_tabs.indexOf(page)
+            self.sub_tabs.setTabIcon(index, dot if mode == active else QIcon())
+            self.sub_tabs.setTabToolTip(index, _ACTIVE_MODE_TIP if mode == active else _INACTIVE_MODE_TIP)
+
     def showEvent(self, event) -> None:
-        # The beat clock and the sequencer are set on the Global Effects tab - catch up with them here.
+        # The beat clock and the sequencer are set on the Global Effects tab,
+        # the mode on the Visualizer tab - catch up with them here.
         super().showEvent(event)
         self._update_beat_states()
+        self._mark_active_mode()
 
     # -- handlers -----------------------------------------------------------------------
 

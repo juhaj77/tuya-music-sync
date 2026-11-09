@@ -366,8 +366,9 @@ Each colour mode's own settings: a page per mode, then the **Global** section an
 **Presets**. What every mode shares - the shared beat clock, Chase and Group Switch, the
 pulses and the pulse sequencer - is on the [Global Effects tab](#global-effects-tab).
 
-The page shown doesn't have to be the running mode - the info panel at the bottom names the
-running one.
+The page shown doesn't have to be the running mode: a **green dot** beside a mode's name
+marks the running one, and the info panel at the bottom names it too. Changes on another
+mode's page don't show on the lamps until you pick that mode on the Visualizer tab.
 
 ### Beat Sync
 

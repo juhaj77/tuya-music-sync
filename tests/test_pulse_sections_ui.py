@@ -12,6 +12,7 @@ import pytest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from airam_lights.config.schema import AppConfig  # noqa: E402
+from airam_lights.ui import theme  # noqa: E402
 from airam_lights.ui.tabs.pulses_panel import MODE_NAMES  # noqa: E402
 
 MODES = ("beat_sync", "beat_sync_white", "peak_flash", "color_steps", "band_colors")
@@ -53,6 +54,31 @@ def _color_mapping(window, qapp, mode=None):
         window.tabs.setCurrentIndex(2)
     qapp.processEvents()
     return window.tabs.widget(2)
+
+
+def _dotted_modes(tab):
+    """The modes whose name on the Color Mapping tab has the dot beside it."""
+    return [m for m, page in tab._mode_pages.items() if not tab.sub_tabs.tabIcon(tab.sub_tabs.indexOf(page)).isNull()]
+
+
+def test_the_green_dot_marks_the_running_mode_whichever_page_is_shown(window, qapp):
+    for mode, shown in zip(MODES, MODES[1:] + MODES[:1]):
+        _effects(window, qapp, mode)  # picks it on the Visualizer tab
+        tab = _color_mapping(window, qapp, shown)  # and opens another mode's page
+        assert tab.sub_tabs.currentWidget() is tab._mode_pages[shown]
+        assert _dotted_modes(tab) == [mode]
+        index = tab.sub_tabs.indexOf(tab._mode_pages[mode])
+        assert tab.sub_tabs.tabIcon(index).pixmap(10, 10).toImage().pixelColor(5, 5).name() == theme.OK
+        assert "active colour mode: this" in tab.sub_tabs.tabToolTip(index)
+        assert "Not the active" in tab.sub_tabs.tabToolTip(tab.sub_tabs.indexOf(tab._mode_pages[shown]))
+
+
+def test_the_green_dot_moves_when_a_preset_changes_the_mode(window, qapp):
+    _color_mapping(window, qapp)
+    window.controller.config.color_mapping.mode = "peak_flash"
+    window.controller.configReplaced.emit()  # as a preset does: the settings tabs are rebuilt
+    qapp.processEvents()
+    assert _dotted_modes(window.tabs.widget(2)) == ["peak_flash"]
 
 
 def test_the_pulses_follow_the_active_mode_not_the_page_shown(window, qapp):
