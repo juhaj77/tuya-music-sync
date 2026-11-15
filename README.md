@@ -954,6 +954,8 @@ darkens dims with it (with `direct`, `smooth` or `gradient` lamp transitions).
 
 ## Real Time tab
 
+![Real Time tab: the stage with eight lamps arranged as in the room, each glowing in its current colour, the brush circle over them; the tool chips above, the Look and Brush & look settings on the right, the Hold and Tap pads below](RealTime.png)
+
 The other tabs are settings: together they describe a show that then runs by itself. This
 tab is the opposite - an **instrument**. Nothing on it is a setting of the show; what you
 do here is laid over the running show as the very last step, lasts as long as you play it,
