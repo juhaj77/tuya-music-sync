@@ -78,6 +78,13 @@ class AppController(QObject):
         self._visual_timer = QTimer(self)
         self._visual_timer.timeout.connect(self.engine.tick_visual)
 
+        # The Real Time tab can be played with the show stopped too: then
+        # this ticks its layer alone (it returns at once while the show runs
+        # or nothing is being played).
+        self._realtime_timer = QTimer(self)
+        self._realtime_timer.timeout.connect(self.engine.tick_realtime_idle)
+        self._realtime_timer.start(33)
+
         self._ui_timer = QTimer(self)
         self._ui_timer.timeout.connect(self._on_ui_refresh)
         self._ui_timer.start(66)  # ~15 Hz UI refresh, independent of engine rate
@@ -256,6 +263,8 @@ class AppController(QObject):
 
     def shutdown(self) -> None:
         try:
+            self._realtime_timer.stop()
+            self.engine.realtime_strobe(False)
             self.stop_visualization()
             self.stop_audio()
             self.lamp_manager.shutdown()

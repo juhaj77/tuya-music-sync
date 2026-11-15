@@ -51,6 +51,7 @@ from ..dsp.fft_engine import FFTEngine, SpectrumFrame
 from ..effects.band_colors import BandColorsState, BandColorTracker, band_edges
 from ..effects.color_steps import ColorStepsState, ColorStepTracker
 from ..effects.hit_wave import HitWave, WaveColor
+from ..effects.realtime import RealtimeFrame, RealtimeLayer
 from ..effects.pulse_sequencer import (
     STEPS_PER_BEAT,
     LoudnessTracker,
@@ -126,6 +127,10 @@ _SMALL_SETUP_LAMPS = 2
 # bin, and a harmonic/percussive split over the last 5 ticks (~170 ms at 30 Hz).
 _PITCH_FFT_SIZE = 8192
 _PITCH_HARMONIC_FRAMES = 5
+
+# The Real Time tab's Strobe pad plays for as long as it's held - but never
+# longer than this in one go (a pad left latched by mistake).
+_REALTIME_STROBE_MAX_S = 20.0
 
 
 def _dip(color: Color, keep: float, desaturate: float) -> Color:
@@ -239,6 +244,17 @@ class VisualizationEngine:
 
         self._chase_animator = ChaseAnimator(config.chase)
         self._group_switch_animator = GroupSwitchAnimator(config.group_switch)
+
+        # The Real Time tab's layer (effects/realtime.py): what the operator
+        # plays by hand, laid over the finished show as the last step of
+        # every tick (_apply_realtime) - and by itself while the show is
+        # stopped (tick_realtime_idle). It reads no setting of the show and
+        # changes none.
+        self.realtime = RealtimeLayer(config.realtime)
+        self._realtime_strobe: Optional[StrobeBurst] = None  # the Strobe pad's burst while it's held
+        self._realtime_strobe_lamps: list = []
+        self._realtime_lit: Set[str] = set()  # the lamps the layer lit while the show is stopped
+        self._realtime_idle_at: Optional[float] = None
 
         # Shared beat clock (see config.schema.RhythmConfig): ticked once per
         # visual tick, only while something actually follows it, and read by
@@ -376,6 +392,7 @@ class VisualizationEngine:
     def apply_config(self, config: AppConfig) -> None:
         self.config = config
         self.color_engine.update_config(config.color_mapping)
+        self.realtime.config = config.realtime
         self._apply_smoothing_settings()
 
     def _apply_smoothing_settings(self) -> None:
@@ -537,8 +554,11 @@ class VisualizationEngine:
                     target = white_targets[lamp]
                     white_targets[lamp] = WhiteTarget(target.brightness * keep, target.temp, target.under)
                     preview_colors[lamp] = white_targets[lamp].to_preview_color()
+            rgb_colors = self._apply_realtime_on_white(white_targets, preview_colors, now, dt)
             self.latest_lamp_white_targets = white_targets
             self.latest_lamp_colors = preview_colors  # UI-swatch approximation only
+            if rgb_colors:
+                self.lamp_manager.push_colors(rgb_colors)
             if white_targets:
                 self.lamp_manager.push_white_targets(white_targets)
             return
@@ -576,6 +596,8 @@ class VisualizationEngine:
         ):
             self._recolor_under_white(colors, swept, darkened)
         self._restrict_white_targets_to_moving_lamps(selected_ids)
+        if colors:
+            self._apply_realtime(colors, now, dt)  # the operator's hands, over everything
 
         if self._beat_sync_white_targets:
             # Some lamps are mid true-white flash this tick (Beat Sync mode
@@ -597,6 +619,224 @@ class VisualizationEngine:
             if colors:
                 self.lamp_manager.push_colors(colors)
         self._preview_strobe(now)
+
+    # -- Real Time: the operator's layer over the finished show ------------------------------
+    #
+    # The tools, looks and pads are in effects/realtime.py (RealtimeLayer);
+    # here it's laid over the tick's colours and fitted to the lamps' white
+    # LEDs, which the layer only knows as a level per lamp.
+
+    def realtime_beat_period(self) -> Optional[float]:
+        """The tempo the Real Time layer goes by - None while the beat clock
+        isn't running or locked (then it plays as if at 120 BPM)."""
+        if self.running and self.clock_active and self._beat_clock.locked:
+            return self._beat_clock.period_s
+        return None
+
+    def _realtime_clock(self) -> "Tuple[Optional[float], Optional[float]]":
+        """(tempo, position in beats) for the Real Time layer - (None, None) without a locked clock."""
+        period = self.realtime_beat_period()
+        return period, (self._beat_clock.position(time.time()) if period else None)
+
+    def _realtime_idle(self, now: float) -> bool:
+        """True while nothing is being played on the Real Time tab - the
+        layer is only told where the beat is, for the first pad pressed."""
+        layer = self.realtime
+        if layer.active:
+            return False
+        layer.sync_clock(now, *self._realtime_clock())
+        return True
+
+    def _realtime_frame(
+        self, colors: Dict[str, Color], now: float, dt: float, show_running: bool = True
+    ) -> RealtimeFrame:
+        layer = self.realtime
+        effects = self.config.per_lamp_effects
+        layer.ensure_positions(
+            list(colors), {lamp: effects[lamp].chase_order for lamp in colors if lamp in effects}
+        )
+        period, beats = self._realtime_clock()
+        return layer.apply(
+            colors, now, dt, beat_period=period, beats=beats,
+            master=self.config.color_mapping.brightness, show_running=show_running,
+        )
+
+    def _realtime_white(self, lamp: str, level: float, temp: float, under: Optional[Color]) -> WhiteTarget:
+        """The layer's white on a lamp (the White look, the Blinder pad), with
+        the lamp's true-white multiplier; `under`: the colour to keep showing
+        with it (dropped with "legacy" lamp transitions, which can't)."""
+        effect = self.config.per_lamp_effects.get(lamp)
+        mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+        if self.config.network.lamp_transitions == "legacy":
+            under = None
+        return WhiteTarget(level * mult, temp, under).clamped()
+
+    def _apply_realtime(self, colors: Dict[str, Color], now: float, dt: float) -> None:
+        """Lays the Real Time layer over the tick's finished `colors`, in
+        place - after the mode, the overlays and the sweeps, so what the
+        operator does always shows. Where the layer covers a lamp mid white
+        flash, the flash dims by as much and the colour under it becomes the
+        layer's (a lamp blacked out stays dark through a flash); the layer's
+        own white (the White look, the Blinder) takes the white LEDs unless a
+        strobe has them."""
+        if self._realtime_idle(now):
+            return
+        frame = self._realtime_frame(colors, now, dt)
+        targets = self._beat_sync_white_targets
+        for lamp, covered in frame.coverage.items():
+            target = targets.get(lamp)
+            if target is None:
+                continue
+            if target.under is None:
+                # "legacy" transitions: a bulb shows white or colour, never both.
+                if covered >= 0.5:
+                    del targets[lamp]
+                continue
+            brightness = target.brightness * (1.0 - covered)
+            if brightness <= 0.01:
+                del targets[lamp]
+            else:
+                targets[lamp] = WhiteTarget(brightness, target.temp, target.under.blend(colors[lamp], covered))
+        if frame.whites and not self._strobe_running():
+            for lamp, (level, temp) in frame.whites.items():
+                white = self._realtime_white(lamp, level, temp, colors.get(lamp))
+                existing = targets.get(lamp)
+                if existing is None or existing.brightness < white.brightness:
+                    targets[lamp] = white
+
+    def _apply_realtime_on_white(
+        self, white_targets: Dict[str, WhiteTarget], preview_colors: Dict[str, Color], now: float, dt: float
+    ) -> Dict[str, Color]:
+        """The Real Time layer in Beat Sync White, where the show is the
+        lamps' white LEDs: where the layer covers a lamp, its white dims by
+        as much and the layer's colour lights the RGB LEDs under it. Changes
+        `white_targets` and `preview_colors` in place and returns the lamps to
+        send as plain colours instead (fully covered ones - and with "legacy"
+        transitions, where a bulb can't show both, the ones mostly covered)."""
+        if self._realtime_idle(now):
+            return {}
+        shown = dict(preview_colors)
+        frame = self._realtime_frame(shown, now, dt)
+        legacy = self.config.network.lamp_transitions == "legacy"
+        rgb_colors: Dict[str, Color] = {}
+        for lamp, covered in frame.coverage.items():
+            target = white_targets.get(lamp)
+            if target is None:
+                continue
+            keep = 1.0 - covered
+            show, final = preview_colors[lamp], shown[lamp]
+            # The layer's own light: the result less what's left of the show's.
+            own = Color(final.r - show.r * keep, final.g - show.g * keep, final.b - show.b * keep).clamped()
+            if legacy:
+                if covered >= 0.5:
+                    del white_targets[lamp]
+                    rgb_colors[lamp] = final
+            elif target.brightness * keep <= 0.01:
+                del white_targets[lamp]
+                rgb_colors[lamp] = own
+            else:
+                white_targets[lamp] = WhiteTarget(target.brightness * keep, target.temp, own)
+            preview_colors[lamp] = final
+        for lamp, (level, temp) in frame.whites.items():
+            if lamp not in preview_colors:
+                continue
+            white = self._realtime_white(lamp, level, temp, rgb_colors.get(lamp))
+            existing = white_targets.get(lamp)
+            if existing is None or existing.brightness < white.brightness:
+                under = existing.under if existing is not None else white.under
+                white_targets[lamp] = WhiteTarget(white.brightness, temp, under)
+                rgb_colors.pop(lamp, None)
+                preview_colors[lamp] = white_targets[lamp].to_preview_color()
+        return rgb_colors
+
+    def tick_realtime_idle(self) -> None:
+        """While the show is stopped: the Real Time layer by itself, over
+        darkness - so the tab can be played without music, and a lamp being
+        moved on the stage lights up to show which one it is. Only the lamps
+        the layer touches are sent anything, and one black when it lets go of
+        them; the others keep whatever they show."""
+        layer = self.realtime
+        if self.running:
+            self._realtime_idle_at = None
+            return
+        now = time.perf_counter()
+        if not (layer.active or self._realtime_lit):
+            self._realtime_idle_at = None
+            layer.sync_clock(now, None, None)  # no show, no beat to snap to
+            return
+        selected_ids = self.lamp_manager.selected_device_ids()
+        dt = now - self._realtime_idle_at if self._realtime_idle_at is not None else 1.0 / 30.0
+        self._realtime_idle_at = now
+        colors = {device_id: Color.black() for device_id in selected_ids}
+        frame = self._realtime_frame(colors, now, dt, show_running=False)
+        whites = {
+            lamp: self._realtime_white(lamp, level, temp, colors[lamp])
+            for lamp, (level, temp) in frame.whites.items() if lamp in colors
+        }
+        touched = set(frame.coverage) | set(whites)
+        rgb_colors = {
+            lamp: colors[lamp] for lamp in touched | self._realtime_lit if lamp in colors and lamp not in whites
+        }
+        self._realtime_lit = touched
+        if rgb_colors:
+            self.lamp_manager.push_colors(rgb_colors)
+        if whites:
+            self.lamp_manager.push_white_targets(whites)
+
+    def realtime_strobe(self, on: bool) -> str:
+        """The Real Time tab's Strobe pad, pressed (`on`) or let go: cool-white
+        flashes on every selected lamp for as long as it's held, played by the
+        lamps' workers at the burst's own times like the sequencer's strobe
+        (see _start_strobe) - on a subdivision of the beat while the clock is
+        locked, at the pad's own rate otherwise, never faster than the lamp
+        command rate allows. Works with the show stopped too. Returns a line
+        saying what happened ("" when let go)."""
+        if not on:
+            burst, self._realtime_strobe = self._realtime_strobe, None
+            if burst is not None:
+                # An empty burst takes over from the one playing, before its next flash.
+                stop = StrobeBurst(time.perf_counter(), burst.period_s, burst.on_s, 0, 0.0)
+                self.lamp_manager.start_strobe(dict.fromkeys(self._realtime_strobe_lamps, stop))
+                if self._strobe_burst is burst:
+                    self._strobe_burst = None
+            return ""
+        net, rt = self.config.network, self.config.realtime
+        if net.lamp_transitions not in INSTANT_TRANSITIONS:
+            return (
+                "Strobe not played: it needs Lamp transitions 'direct' or 'smooth' (Color Mapping tab, Global "
+                "box). Color strobe works with any."
+            )
+        selected_ids = self.lamp_manager.selected_device_ids()
+        if not selected_ids:
+            return "Strobe not played: no lamps are selected."
+        period = self.realtime_beat_period()
+        plan = strobe_plan(period, 1.0, rt.strobe_hz, 0.5, net.lamp_command_rate_hz) if period else None
+        delay = 0.03
+        if plan is not None and period:
+            _, flash_period, on_s = plan
+            position = self._beat_clock.position(time.time())
+            if position is not None:  # the first flash on the strobe's own grid
+                step = flash_period / period
+                delay = max(0.0, (math.ceil(position / step) * step - position) * period)
+            note = f" - {round(period / flash_period)} to the beat"
+        else:
+            rate = max(1.0, min(rt.strobe_hz, 0.5 * net.lamp_command_rate_hz))
+            flash_period, on_s = 1.0 / rate, 0.5 / rate
+            note = ""
+        flashes = max(2, int(_REALTIME_STROBE_MAX_S / flash_period))
+        start = time.perf_counter() + delay
+        bursts: Dict[str, StrobeBurst] = {}
+        for device_id in selected_ids:
+            effect = self.config.per_lamp_effects.get(device_id)
+            mult = effect.white_pulse_brightness_mult if effect is not None else 1.0
+            bursts[device_id] = StrobeBurst(start, flash_period, on_s, flashes, clip(rt.strobe_brightness * mult))
+        self.lamp_manager.start_strobe(bursts)
+        self._lamp_strobes.clear()  # the workers drop a flash strobe for this one
+        self._realtime_strobe_lamps = list(selected_ids)
+        self._strobe_burst = self._realtime_strobe = StrobeBurst(
+            start, flash_period, on_s, flashes, clip(rt.strobe_brightness)
+        )
+        return f"Strobe: {1.0 / flash_period:.1f} flashes a second{note}."
 
     def _tick_beat_clock(self, frame: SpectrumFrame, wall_now: float, mode: str) -> None:
         rh = self.config.rhythm

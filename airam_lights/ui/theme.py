@@ -33,6 +33,11 @@ TITLE = "#57b5ff"  # section and card titles
 OK = "#3ecf5e"
 WARN = "#e0a84a"
 ERR = "#e05a4f"
+# The Real Time tab's own accent: what's played by hand, apart from the
+# blue of the settings (its pads, chips, brush and the stage's LIVE badge).
+LIVE = "#ff4d8d"
+LIVE_DIM = "#5c2340"
+STAGE = "#07090d"  # the Real Time tab's stage: darker than the page, so the lamps glow on it
 
 # The tinted blocks a page groups its sections in (widgets/block.py) - the
 # Global Effects tab's three: name -> (background, border, title, the cards
@@ -177,6 +182,11 @@ QPushButton:pressed {{ background-color: {ACCENT_DIM}; }}
 QPushButton:checked {{ background-color: {ACCENT_DIM}; border-color: {ACCENT}; color: #ffffff; }}
 QPushButton:disabled {{ color: {DIM}; border-color: {BORDER_SOFT}; background-color: {CARD}; }}
 QPushButton:focus {{ border-color: {ACCENT}; }}
+/* the Real Time tab's tool and look chips */
+QPushButton[role="chip"] {{ padding: 4px 6px; border-radius: 12px; }}
+QPushButton[role="chip"]:hover {{ border-color: {LIVE}; }}
+QPushButton[role="chip"]:checked {{ background-color: {LIVE_DIM}; border-color: {LIVE}; color: #ffffff; }}
+QPushButton[role="chip"]:focus {{ border-color: {LIVE}; }}
 
 /* -- inputs -- */
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QTextEdit, QPlainTextEdit {{

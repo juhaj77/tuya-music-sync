@@ -1369,6 +1369,71 @@ class PulseSequencerConfig:
         return cls(**kwargs)
 
 
+# ---------------------------------------------------------------------------
+# Real Time tab - the operator's own layer on top of the show
+# ---------------------------------------------------------------------------
+
+REALTIME_LOOKS = (
+    "palette", "plasma", "rainbow", "flicker", "sparkle", "strobe", "hue_shift", "freeze", "white", "blackout"
+)
+REALTIME_TOOLS = ("brush", "curtain", "ripple", "spot")
+
+
+@dataclass
+class RealtimeConfig:
+    """The Real Time tab (effects/realtime.py): where each lamp stands on its
+    stage, and the tools' settings. Unlike everything else here these don't
+    shape the show - they're what the operator plays over it by hand, and
+    what's played is never saved. Not part of a preset either: the stage is
+    the room, the same whatever look is loaded."""
+
+    # device id -> [x, y] on the stage, 0..1 from the left / from the top.
+    positions: Dict[str, List[float]] = field(default_factory=dict)
+    tool: str = "brush"  # REALTIME_TOOLS
+    look: str = "palette"  # REALTIME_LOOKS
+    palette: List[str] = field(default_factory=lambda: ["#ff2d95", "#7a2bff", "#00e5ff"])  # "#rrggbb", 1..6
+    radius: float = 0.28  # the brush's and the spot's, in stage heights
+    softness: float = 0.6  # 0 = a hard edge .. 1 = fading from the centre out
+    trail_s: float = 0.6  # how long a lamp keeps the look after the pointer has left it
+    latch: bool = False  # Hold paint: strokes stay until cleared
+    throw: bool = True  # the brush let go of while moving keeps gliding
+    speed: float = 1.0  # the look's animation, x
+    music: float = 0.3  # 0 = the look at its own brightness .. 1 = as bright as the show has the lamp
+    brightness: float = 1.0
+    hue_shift_deg: float = 180.0  # the "hue_shift" look: 180 = the complementary colour
+    white_temp: float = 1.0  # the "white" look and the blinder: 0 = warmest .. 1 = coolest
+    wave_beats: float = 1.0  # how long a sweep, burst or ripple takes to cross the stage
+    snap_to_beat: bool = False  # one-shots start on the next half beat
+    strobe_hz: float = 9.0  # the Strobe pad's ceiling, flashes a second
+    strobe_brightness: float = 1.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RealtimeConfig":
+        defaults = cls()
+        kwargs = {}
+        for name, default in asdict(defaults).items():
+            value = d.get(name, default)
+            if name == "positions":
+                kwargs[name] = {
+                    str(k): [min(1.0, max(0.0, float(v[0]))), min(1.0, max(0.0, float(v[1])))]
+                    for k, v in (value or {}).items()
+                    if isinstance(v, (list, tuple)) and len(v) >= 2
+                }
+            elif name == "palette":
+                colors = [str(c) for c in (value or []) if isinstance(c, str)][:6]
+                kwargs[name] = colors or default
+            else:
+                kwargs[name] = type(default)(value) if value is not None else default
+        if kwargs["tool"] not in REALTIME_TOOLS:
+            kwargs["tool"] = defaults.tool
+        if kwargs["look"] not in REALTIME_LOOKS:
+            kwargs["look"] = defaults.look
+        return cls(**kwargs)
+
+
 @dataclass
 class AudioConfig:
     device_index: Optional[int] = None  # PyAudioWPatch loopback device index; None = default
@@ -1473,6 +1538,7 @@ class AppConfig:
     white_chase: "WhiteChaseEffectConfig" = field(default_factory=lambda: WhiteChaseEffectConfig())
     ambient_scene: "AmbientSceneConfig" = field(default_factory=lambda: AmbientSceneConfig())
     manual_state: "ManualStateConfig" = field(default_factory=lambda: ManualStateConfig())
+    realtime: RealtimeConfig = field(default_factory=RealtimeConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
     presets: Dict[str, dict] = field(default_factory=dict)  # saved full color_mapping snapshots
@@ -1491,6 +1557,7 @@ class AppConfig:
             "white_chase": self.white_chase.to_dict(),
             "ambient_scene": self.ambient_scene.to_dict(),
             "manual_state": self.manual_state.to_dict(),
+            "realtime": self.realtime.to_dict(),
             "audio": self.audio.to_dict(),
             "network": self.network.to_dict(),
             "presets": self.presets,
@@ -1513,6 +1580,7 @@ class AppConfig:
             white_chase=WhiteChaseEffectConfig.from_dict(d.get("white_chase", {})),
             ambient_scene=AmbientSceneConfig.from_dict(d.get("ambient_scene", {})),
             manual_state=ManualStateConfig.from_dict(d.get("manual_state", {})),
+            realtime=RealtimeConfig.from_dict(d.get("realtime", {})),
             audio=AudioConfig.from_dict(d.get("audio", {})),
             network=NetworkConfig.from_dict(d.get("network", {})),
             presets=dict(d.get("presets", {})),

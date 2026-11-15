@@ -12,6 +12,7 @@ from .tabs.color_mapping_tab import ColorMappingTab
 from .tabs.devices_tab import DevicesTab
 from .tabs.diagnostics_tab import DiagnosticsTab
 from .tabs.global_effects_tab import GlobalEffectsTab
+from .tabs.realtime_tab import RealtimeTab
 from .tabs.visualizer_tab import VisualizerTab
 from .widgets.info_panel import InfoPanel
 
@@ -41,6 +42,9 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(DevicesTab(self.controller), "Devices && Setup")
         self.tabs.addTab(ColorMappingTab(self.controller), "Color Mapping")
         self.tabs.addTab(GlobalEffectsTab(self.controller), "Global Effects")
+        # After the settings tabs (rebuilt by index on a preset load): not a
+        # settings page but the instrument played over the show they set up.
+        self.tabs.addTab(RealtimeTab(self.controller), "Real Time")
         self.tabs.addTab(DiagnosticsTab(self.controller), "Diagnostics")
 
         self.controller.audioError.connect(self._on_audio_error)

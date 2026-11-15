@@ -36,6 +36,7 @@ take over ([Quick start, step 4](#quick-start)).
     - [Chase & Group Switch](#chase--group-switch) - [Chase](#chase) · [Group Switch](#group-switch)
     - [Dark and white pulses](#dark-and-white-pulses) - the same in every mode
     - [Pulse sequencer](#pulse-sequencer) - patterns, group walk, [strobe](#strobe), [flash strobe](#flash-strobe), [color sweep](#color-sweep), [dark sweep](#dark-sweep)
+  - [Real Time tab](#real-time-tab) - the show played by hand: [the stage](#the-stage), [tools](#tools), [looks](#looks-and-the-palette), [pads](#pads)
   - [Info panel](#info-panel) · [Diagnostics tab](#diagnostics-tab)
   - [Manual control app](#manual-control-app) - colours, white, chase and ambient scenes without music
   - [Settings and log files](#settings-and-log-files)
@@ -99,6 +100,10 @@ other colour modes start from tuned settings too.
 - **Real white flashes** - the bulbs' own white LEDs, warm, cool or gliding between.
 - **Chase and Group Switch overlays** - a highlight travelling round the room, or lamp
   groups taking turns, on top of any colour mode.
+- **Play it by hand** - the Real Time tab is an instrument on top of the running show:
+  swipe a brush of animated colour over the lamps where they stand in the room, pull a
+  curtain of the complementary colour across them, and play strobes, sweeps, bursts and
+  blackouts from pads or the keyboard.
 - **Info panel** - tempo, beat, phrase, loudness, note and key, and a live timeline of
   the sequencer's pulses.
 - **Manual control app** - colours, white balance, chase and synchronized ambient scenes
@@ -275,8 +280,10 @@ red -> green -> blue -> white.
 
 ## The window
 
-Five tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Global Effects**,
-**Diagnostics** - and the [info panel](#info-panel) under them, which stays put on every tab.
+Six tabs - **Visualizer**, **Devices & Setup**, **Color Mapping**, **Global Effects**,
+**Real Time**, **Diagnostics** - and the [info panel](#info-panel) under them, which stays
+put on every tab. Four of them set up a show that runs by itself; **Real Time** is the one
+you play by hand, on top of it.
 
 - **Sections.** Features are collapsible sections: a header with the feature's name and,
   if it can be switched on or off, its switch. Click the name (or the chevron) to open it.
@@ -945,6 +952,119 @@ darkens dims with it (with `direct`, `smooth` or `gradient` lamp transitions).
   (*Desaturate* is greyed out there - white has no saturation).
 - **Test dark sweep now** plays it 4 times in a row on the selected lamps.
 
+## Real Time tab
+
+The other tabs are settings: together they describe a show that then runs by itself. This
+tab is the opposite - an **instrument**. Nothing on it is a setting of the show; what you
+do here is laid over the running show as the very last step, lasts as long as you play it,
+and is never saved. Let go, and the show is exactly what it would have been. (Only the
+stage layout and the tools' settings are remembered. They aren't part of a preset: the
+stage is your room, whatever look is loaded.)
+
+It works with the show stopped too - then the looks play over darkness, on just the lamps
+you touch - so it can be tried without music.
+
+Everything played here is in pink; the settings' blue is for the show.
+
+### The stage
+
+The dark area is the room seen from above (or the wall, if that's how the lamps hang):
+every lamp is a dot glowing in the colour it shows right now.
+
+- **Arrange lamps** (once): drag each lamp to where it stands. The lamp you hold lights up
+  white in the room, so you can tell which is which; Shift snaps to a grid. **Circle**,
+  **Line** and **Grid** place them all in the Chase order to start from. New lamps appear
+  along the bottom edge.
+- **LIVE** in the corner lights up while anything is being played; the other corner shows
+  the tempo the pads go by (as if 120 BPM while the beat clock isn't locked).
+- A pink ring round a lamp is paint: a thick arc for a stroke's fading trail, a thin whole
+  ring for held paint.
+
+### Tools
+
+Pick one above the stage (or with its key) and use the pointer on the lamps:
+
+| Tool | Key | What the pointer does |
+|---|---|---|
+| **Brush** | Z | Drag over the lamps: they take the [look](#looks-and-the-palette) under the circle and keep it for the *Trail* time - a comet's tail behind the pointer. However fast you swipe, every lamp on the way is caught. Let go **while moving** and the brush is *thrown*: it glides on by itself, bounces off the stage's edges and slows to a stop (throw several; switch off with **Throw**). |
+| **Curtain** | X | Press and pull: an edge follows the pointer, square to the direction you pull, and everything behind it takes the look - like drawing a curtain from where you pressed, in any direction. Pull back to open it. With the *Complement* look this is a line with the opposite colours on its other side. |
+| **Ripple** | C | Click: a ring of the look spreads from that point. Drag to leave a row of them. |
+| **Spot** | V | Press: only the lamps under the pointer keep the show, all the others take the look - with *Blackout* a spotlight you point with. |
+
+- **Mouse wheel** over the stage: the brush's radius. **Shift + wheel**: the trail.
+- **Right-click** anywhere on the stage: a ripple, whatever the tool.
+- **Hold paint**: strokes stay on the lamps until **Clear** (Esc) instead of fading - and
+  each stroke keeps the look it was made with, so one corner can burn in *Fire* while
+  another shimmers in *Ocean*. **Ctrl + drag** with the brush erases.
+- **Radius**, **Softness** (0 = everything inside the circle in full, 1 = fading from the
+  middle out; also the softness of the curtain's edge) and **Trail** are on the right.
+
+### Looks and the palette
+
+The look is what the tools and the pads paint with - picked on the right:
+
+| Look | What it shows |
+|---|---|
+| **Palette** | The palette as a gradient: under the brush from its middle to its rim, behind the curtain from its edge back, through a wave from front to back - drifting round at *Speed*. |
+| **Plasma** | The palette's colours flowing over the stage in slow swirls, each lamp where it stands. |
+| **Rainbow** | Every hue, turning round the pointer. |
+| **Flicker** | Each lamp flickers on its own between the palette's colours - fire with the *Fire* palette. |
+| **Sparkle** | The show stays, and lamps twinkle in the palette's colours on top of it. |
+| **Strobe** | Flashes through the palette's colours - on the 16ths at Speed 1, in time with the beat clock when it's locked. |
+| **Complement** | The show's own colour turned round the colour wheel by *Hue turn* (180 = the complementary colour). The music's flashes and fades stay. |
+| **Freeze** | The lamp keeps the colour it had when it was touched, while the show goes on around it. |
+| **White** | The lamps' own white LEDs, warm or cool, over the show's colour. |
+| **Blackout** | Dark. |
+
+- **The palette**: the bar is the gradient; under it one swatch per colour - click to
+  change it, right-click to take it out, **+** to add one (up to six). The small chips are
+  ready-made palettes (Neon, Sunset, Ocean, Fire, Ice, Forest, Candy, Gold, RGB, Snow).
+- **Speed** - how fast the look moves. **Brightness** - the look's own (the Visualizer
+  tab's Brightness applies on top).
+- **Music pulse** - how much the look's brightness follows the show under it: at 0 the look
+  is steady; at 1 it's as bright as the show has that lamp at that moment, so it flashes
+  and fades with the music, in the look's colours.
+
+### Pads
+
+Two rows under the stage, played with the mouse or the keyboard key in each pad's corner.
+The keys work wherever the focus is on this tab (except while typing in a number box).
+
+**Hold** pads (pink) are on for as long as they're held. **Shift + click** or a
+**right-click** latches one on; a click lets it go. Several can be held at once.
+
+| Key | Pad | |
+|---|---|---|
+| 1 | **Strobe** | Cool-white flashes on every lamp, timed by the lamps themselves like the sequencer's [strobe](#strobe): the fastest subdivision of the beat under *Strobe rate* while the beat clock is locked, at *Strobe rate* otherwise (never faster than the Lamp command rate allows). Needs Lamp transitions `direct` or `smooth`. At most 20 seconds in one go. |
+| 2 | **Blinder** | Every lamp's white LEDs at full. |
+| 3 | **Blackout** | Every lamp dark; the show keeps running underneath. |
+| 4 | **Freeze** | The lamps hold what they show this instant. |
+| 5 | **Flood** | The look on every lamp, the gradient running across the stage. |
+| 6 | **Invert** | The whole show in its complementary colours. |
+| 7 | **Color strobe** | Every lamp flashing through the palette's colours - works with any Lamp transitions. |
+| 8 | **Storm** | Lamps popping at random in the look. |
+| 9 | **Orbit** | A comet of the look circling the lamps. |
+
+**Tap** pads (blue) fire once per press:
+
+| Key | Pad | |
+|---|---|---|
+| Q / W | **Sweep ← / →** | A band of the look crossing the stage. |
+| E / R | **Burst / Implode** | A ring spreading from the middle, or closing in on it. |
+| T / Y | **Close / Open** | Two bands closing in from both sides, or opening from the middle. |
+| U, Space | **Flash** | Every lamp flashes the look and fades. |
+| I | **Chase sweep** | The sequencer's [color sweep](#color-sweep), once round the Chase order, with its own settings. |
+| O | **Dark sweep** | The sequencer's [dark sweep](#dark-sweep), likewise. |
+
+- **Wave length** - how long a sweep, burst, ripple or flash takes, in beats of the beat
+  clock, and how many bars the Orbit takes to go round.
+- **Snap to beat** - the tap pads and ripples wait for the next half beat, so a press a
+  little early still lands on the music (one only just late goes at once).
+- **Esc** / **Clear** wipes everything played: held paint, latched pads, waves in flight.
+
+Flashing light can trigger seizures in people with photosensitive epilepsy - the two
+strobe pads and the Strobe look are yours to use with that in mind.
+
 ## Info panel
 
 Along the bottom of the window, on every tab (see the bottom of each picture above, e.g.
@@ -1130,7 +1250,9 @@ from other tools ([Getting the lamps' local keys](#getting-the-lamps-local-keys)
   pitch, attack/release smoothing. Pure numpy.
 - **color/** - colour mapping as pure functions on floats.
 - **effects/** - Chase and Group Switch (shared with the manual app), the pulse sequencer,
-  ambient scenes.
+  ambient scenes, and the Real Time layer (`realtime.py`): what the operator plays by hand,
+  laid over the finished colours as the engine's last step - it reads no setting of the
+  show and changes none.
 - **engine/** - ties it together on independent update loops.
 - **lamps/** - local Tuya control (tinytuya), discovery, one worker thread per lamp with its
   own rate limit, change threshold and recovery.
@@ -1189,7 +1311,7 @@ pytest tests/
 ```
 
 Several hundred tests: DSP, beat clock, colour mapping, the pulse sequencer, Chase / Group
-Switch / ambient overlays, lamp workers and recovery, config round-trips (every setting
+Switch / ambient overlays, the Real Time layer and its tab, lamp workers and recovery, config round-trips (every setting
 survives a save and reload, old config files included), and offscreen Qt tests that build
 the real windows. No audio hardware or bulbs needed.
 
