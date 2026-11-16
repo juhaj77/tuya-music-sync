@@ -656,6 +656,9 @@ class VisualizationEngine:
             list(colors), {lamp: effects[lamp].chase_order for lamp in colors if lamp in effects}
         )
         period, beats = self._realtime_clock()
+        # (With the other transitions a white flash is a slow switch of the bulb's work mode
+        # and back - not something to do several times a second for a glint.)
+        layer.instant_white = self.config.network.lamp_transitions in INSTANT_TRANSITIONS
         return layer.apply(
             colors, now, dt, beat_period=period, beats=beats,
             master=self.config.color_mapping.brightness, show_running=show_running,

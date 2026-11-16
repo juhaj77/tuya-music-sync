@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...effects.realtime import CURTAIN_WIDTH_RANGE, WAVE_BEATS_RANGE
 from ...effects.realtime import layout as stage_layout
 from .. import theme
 from ..controller import AppController
@@ -65,8 +66,9 @@ _TOOLS = [
      "Brush - drag over the lamps: they take the look and keep it for the Trail time. Let go while moving and "
      "it glides on. Wheel: radius · Shift+wheel: trail · Ctrl+drag: erase held paint · right-click: a ripple."),
     (Qt.Key_X, "curtain", "Curtain",
-     "Curtain - press and pull: the look follows the pointer like a curtain drawn from where you pressed, in any "
-     "direction; pull back to open it. Softness is how soft its edge is."),
+     "Curtain - press and pull, in any direction: a band of the look follows the pointer, its back edge trailing "
+     "behind - the faster you pull, the wider it stretches. Let go while moving and it flies on. Wheel: width "
+     "(all the way up: no back edge, everything behind the front is covered)."),
     (Qt.Key_C, "ripple", "Ripple",
      "Ripple - click: a ring of the look spreads from that point, as fast as Wave length. Drag to leave a row "
      "of them."),
@@ -84,7 +86,12 @@ _LOOKS = [
     ("rainbow", "Rainbow", "Every hue, turning round the pointer (the palette isn't used)."),
     ("flicker", "Flicker", "Each lamp flickers on its own between the palette's colours - fire with the Fire "
      "palette, northern lights with Ocean."),
-    ("sparkle", "Sparkle", "The show stays, and lamps twinkle in the palette's colours on top of it."),
+    ("sparkle", "Sparkle",
+     "The show stays, and the lamps glint on top of it: short, crisp flashes at full brightness, about three a "
+     "second on each lamp at Speed 1 (more with Speed), in the palette's colours - of two picked at random the "
+     "one that stands out more from what the lamp shows. The pale colours of the palette also flash the lamp's "
+     "white LEDs: with a white in it (Snow, Ice) the glints are real white, much brighter than any colour "
+     "(needs Lamp transitions 'direct' or 'smooth')."),
     ("strobe", "Strobe", "Flashes through the palette's colours, on and off - on the 16ths at Speed 1, in time "
      "with the beat clock when it's locked."),
     ("hue_shift", "Complement", "The show's own colour turned round the colour wheel by Hue turn - 180 is the "
@@ -168,7 +175,8 @@ class RealtimeTab(QWidget):
         self.throw_checkbox.setChecked(cfg.throw)
         self.throw_checkbox.setToolTip(
             "The brush let go of while moving keeps gliding the way it was going, bounces off the stage's "
-            "edges and slows to a stop. Throw several."
+            "edges and slows to a stop. Throw several. The curtain let go of while moving flies on across "
+            "the stage at the speed it left your hand (not with Hold paint, which keeps it where it is)."
         )
         self.throw_checkbox.toggled.connect(lambda on: self._set("throw", on))
         bar.addWidget(self.throw_checkbox)
@@ -236,9 +244,12 @@ class RealtimeTab(QWidget):
         self.snap_checkbox.toggled.connect(lambda on: self._set("snap_to_beat", on))
         pad_settings.addWidget(self.snap_checkbox)
         self.wave_slider = self._slider(
-            "Wave length", 0.25, 4.0, "wave_beats", suffix=" beats", label_width=80,
-            tooltip="How long a sweep, burst, ripple or flash takes, in beats of the beat clock (at 120 BPM while "
-            "it has no tempo) - and how many bars the Orbit takes to go round.",
+            "Wave length", WAVE_BEATS_RANGE[0], WAVE_BEATS_RANGE[1], "wave_beats", suffix=" beats", label_width=80,
+            logarithmic=True,
+            tooltip="How long the tap pads' effects last: the time a sweep, burst, implode, close, open or ripple "
+            "takes to cross the stage and a flash to fade, in beats of the beat clock (at 120 BPM while it has "
+            "no tempo) - from a quarter of a beat to 32 beats (8 bars); the middle of the slider is about 3 "
+            "beats. Also how many bars the Orbit takes to go round.",
         )
         self.wave_slider._spin.setFixedWidth(96)
         pad_settings.addWidget(self.wave_slider, stretch=1)
@@ -266,7 +277,7 @@ class RealtimeTab(QWidget):
         scroll.setWidget(panel)
         side = QVBoxLayout(panel)
         side.setContentsMargins(0, 0, 6, 0)
-        side.setSpacing(8)
+        side.setSpacing(4)
         root.addWidget(scroll)
 
         look_box = QGroupBox("Look")
@@ -289,7 +300,7 @@ class RealtimeTab(QWidget):
 
         feel_box = QGroupBox("Brush && look")
         feel_layout = QVBoxLayout(feel_box)
-        feel_layout.setSpacing(4)
+        feel_layout.setSpacing(1)  # (the curtain has a row more: it still fits without scrolling)
         self.radius_slider = self._slider(
             "Radius", RADIUS_RANGE[0], RADIUS_RANGE[1], "radius",
             tooltip="How far the brush (and the spot) reaches, in stage heights. The mouse wheel over the stage "
@@ -298,7 +309,21 @@ class RealtimeTab(QWidget):
         self.softness_slider = self._slider(
             "Softness", 0.0, 1.0, "softness",
             tooltip="0: every lamp inside the radius gets the look in full. 1: it fades from the middle out. "
-            "Also how soft the curtain's edge is.",
+            "Also how soft the curtain's edges are.",
+        )
+        self.curtain_slider = self._slider(
+            "Curtain width", CURTAIN_WIDTH_RANGE[0], CURTAIN_WIDTH_RANGE[1], "curtain_width",
+            tooltip="How thick the curtain is behind its front edge, in stage heights: the back edge follows this "
+            "far behind the pointer. All the way up (3.00) there's no back edge - everything behind the front "
+            "is covered, e.g. a line with the complementary colour on its other side. The mouse wheel over the "
+            "stage changes it, also while pulling.",
+        )
+        self.stretch_slider = self._slider(
+            "Curtain stretch", 0.0, 1.0, "curtain_stretch_s", suffix=" s",
+            tooltip="How much a fast pull stretches the curtain: the back edge follows the front this far behind "
+            "in time, so the band is its width plus the distance you pull in that time - a slow pull keeps it "
+            "thin, a fast swipe draws it out, and when you stop it gathers up to Curtain width. 0 = always "
+            "exactly Curtain width.",
         )
         self.trail_slider = self._slider(
             "Trail", TRAIL_RANGE[0], TRAIL_RANGE[1], "trail_s", suffix=" s",
@@ -307,8 +332,8 @@ class RealtimeTab(QWidget):
         )
         self.speed_slider = self._slider(
             "Speed", 0.25, 4.0, "speed", suffix=" x",
-            tooltip="How fast the look moves: the palette's drift, the plasma, the flicker, the sparkle and the "
-            "strobe (16ths at 1, 8ths at 0.5), and how often the Storm pops.",
+            tooltip="How fast the look moves: the palette's drift, the plasma, the flicker, how often the sparkle "
+            "glints, the strobe (16ths at 1, 8ths at 0.5), and how often the Storm pops.",
         )
         self.music_slider = self._slider(
             "Music pulse", 0.0, 1.0, "music",
@@ -330,7 +355,8 @@ class RealtimeTab(QWidget):
             "White warm/cool", 0.0, 1.0, "white_temp",
             tooltip="The White look's and the Blinder pad's colour temperature: 0 = warmest, 1 = coolest.",
         )
-        for slider in (self.radius_slider, self.softness_slider, self.trail_slider, self.speed_slider,
+        for slider in (self.radius_slider, self.curtain_slider, self.stretch_slider, self.softness_slider,
+                       self.trail_slider, self.speed_slider,
                        self.music_slider, self.brightness_slider, self.hue_slider, self.temp_slider):
             feel_layout.addWidget(slider)
         side.addWidget(feel_box)
@@ -356,11 +382,11 @@ class RealtimeTab(QWidget):
 
     def _slider(
         self, label: str, minimum: float, maximum: float, attr: str, decimals: int = 2, suffix: str = "",
-        tooltip: str = "", label_width: int = 104,
+        tooltip: str = "", label_width: int = 104, logarithmic: bool = False,
     ) -> FloatSlider:
         slider = FloatSlider(
             label, minimum, maximum, getattr(self.controller.config.realtime, attr), decimals=decimals,
-            suffix=suffix, tooltip=tooltip,
+            suffix=suffix, tooltip=tooltip, logarithmic=logarithmic,
         )
         slider._label.setMinimumWidth(label_width)
         slider._spin.setFixedWidth(78)
@@ -384,9 +410,10 @@ class RealtimeTab(QWidget):
         self._update_states()
 
     def _sync_nudged(self) -> None:
-        """The mouse wheel over the stage changed the radius or the trail."""
+        """The mouse wheel over the stage changed the radius, the curtain's width or the trail."""
         cfg = self.controller.config.realtime
         self.radius_slider.set_value(cfg.radius)
+        self.curtain_slider.set_value(cfg.curtain_width)
         self.trail_slider.set_value(cfg.trail_s)
 
     def _update_states(self) -> None:
@@ -410,7 +437,12 @@ class RealtimeTab(QWidget):
         self.trail_slider.setEnabled(not cfg.latch)
         self.softness_slider.setEnabled(cfg.tool != "ripple")
         self.radius_slider.setEnabled(cfg.tool in ("brush", "spot"))
-        self.throw_checkbox.setEnabled(cfg.tool == "brush")
+        # The curtain has its width and stretch where the others have the radius.
+        self.radius_slider.setVisible(cfg.tool != "curtain")
+        self.curtain_slider.setVisible(cfg.tool == "curtain")
+        self.stretch_slider.setVisible(cfg.tool == "curtain")
+        self.stretch_slider.setEnabled(cfg.curtain_width < CURTAIN_WIDTH_RANGE[1] - 1e-6)
+        self.throw_checkbox.setEnabled(cfg.tool == "brush" or (cfg.tool == "curtain" and not cfg.latch))
 
     # -- the stage's layout -----------------------------------------------------------------------
 

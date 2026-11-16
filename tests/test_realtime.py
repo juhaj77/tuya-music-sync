@@ -52,9 +52,13 @@ def clock(monkeypatch):
     return c
 
 
+WHOLE = rt.CURTAIN_WIDTH_RANGE[1]  # the curtain with no back edge
+
+
 def _layer(**settings) -> RealtimeLayer:
     """Four lamps in a row across a stage twice as wide as it's high: 0.54 stage
-    heights apart, so the default brush (radius 0.28) reaches one at a time."""
+    heights apart (at 0.2, 0.74, 1.28 and 1.82 from the left edge), so the
+    default brush (radius 0.28) reaches one at a time."""
     base = dict(speed=0.0, music=0.0, throw=False)
     base.update(settings)
     config = RealtimeConfig(**base)
@@ -201,7 +205,7 @@ def test_a_slow_release_throws_nothing(clock):
 
 
 def test_curtain_covers_what_is_behind_its_edge(clock):
-    layer = _layer(softness=0.0)
+    layer = _layer(softness=0.0, curtain_width=WHOLE)
     layer.pointer_down("curtain", 0.0, 0.5)
     layer.pointer_move(0.5, 0.5)  # pulled from the left edge to the middle
     colors, frame = _tick(layer, clock)
@@ -214,7 +218,7 @@ def test_curtain_covers_what_is_behind_its_edge(clock):
 
 
 def test_curtain_works_in_any_direction(clock):
-    layer = _layer(softness=0.0)
+    layer = _layer(softness=0.0, curtain_width=WHOLE)
     layer.pointer_down("curtain", 1.0, 0.5)
     layer.pointer_move(0.5, 0.5)  # from the right this time
     _, frame = _tick(layer, clock)
@@ -222,13 +226,118 @@ def test_curtain_works_in_any_direction(clock):
 
 
 def test_curtain_stays_with_hold_paint(clock):
-    layer = _layer(softness=0.0, latch=True)
+    layer = _layer(softness=0.0, latch=True, curtain_width=WHOLE, throw=True)
     layer.pointer_down("curtain", 0.0, 0.5)
     layer.pointer_move(0.5, 0.5)
     _tick(layer, clock)
     layer.pointer_up()
     _, frame = _run(layer, clock, 2.0)
     assert set(frame.coverage) == {"a", "b"}
+
+
+def test_curtain_is_a_band_whose_back_edge_follows(clock):
+    layer = _layer(softness=0.0, curtain_width=0.6, curtain_stretch_s=0.0, trail_s=0.05)
+    layer.pointer_down("curtain", 0.0, 0.5)
+    layer.pointer_move(0.5, 0.5)  # the front at 1.0: the band from 0.4 to 1.0
+    _run(layer, clock, 0.5)
+    colors, frame = _tick(layer, clock)
+    assert set(frame.coverage) == {"b"} and colors["a"] is BLUE  # a is behind the back edge
+    assert layer.curtain_band() == pytest.approx(0.6)
+    layer.pointer_move(0.8, 0.5)  # pulled on: 1.0 to 1.6
+    _run(layer, clock, 0.5)
+    _, frame = _tick(layer, clock)
+    assert set(frame.coverage) == {"c"}
+    layer.pointer_move(0.5, 0.5)  # and back: it follows that way too
+    _run(layer, clock, 0.5)
+    _, frame = _tick(layer, clock)
+    assert set(frame.coverage) == {"b"}
+    layer.config.curtain_width = WHOLE  # the wheel turned all the way up, mid-pull: no back edge
+    _, frame = _tick(layer, clock)
+    assert set(frame.coverage) == {"a", "b"} and layer.curtain_band() is None
+
+
+def test_curtain_gradient_runs_from_its_front_to_its_back(clock):
+    layer = _layer(softness=0.0, curtain_width=1.2, curtain_stretch_s=0.0)
+    layer.pointer_down("curtain", 0.0, 0.5)
+    layer.pointer_move(0.7, 0.5)  # the band from 0.2 to 1.4: a at its back edge, c near its front
+    colors, _ = _run(layer, clock, 0.3)
+    palette = layer.style.palette
+    assert _rgb(colors["c"]) == pytest.approx(gradient_at(palette, 0.1), abs=0.02)
+    assert _rgb(colors["b"]) == pytest.approx(gradient_at(palette, 0.55), abs=0.02)
+
+
+def test_a_fast_pull_stretches_the_curtain_and_it_gathers_when_the_pointer_stops(clock):
+    layer = _layer(softness=0.0, curtain_width=0.3, curtain_stretch_s=0.5)
+    layer.pointer_down("curtain", 0.0, 0.5)
+    x = 0.0
+    for _ in range(45):  # 1.2 stage heights a second for a second and a half
+        x += 0.6 / 30.0
+        layer.pointer_move(x, 0.5)
+        _tick(layer, clock)
+    assert layer.curtain_band() == pytest.approx(0.3 + 1.2 * 0.5, abs=0.08)  # its width + speed x stretch
+    _run(layer, clock, 3.0)  # the pointer held still
+    assert layer.curtain_band() == pytest.approx(0.3, abs=0.01)
+    # A slow pull barely stretches it.
+    slow = _layer(softness=0.0, curtain_width=0.3, curtain_stretch_s=0.5)
+    slow.pointer_down("curtain", 0.0, 0.5)
+    x = 0.0
+    for _ in range(90):
+        x += 0.05 / 30.0
+        slow.pointer_move(x, 0.5)
+        _tick(slow, clock)
+    assert slow.curtain_band() == pytest.approx(0.3 + 0.1 * 0.5, abs=0.03)
+
+
+def test_a_thin_curtain_pulled_fast_skips_no_lamp(clock):
+    layer = _layer(softness=0.0, curtain_width=0.05, curtain_stretch_s=0.0)
+    layer.pointer_down("curtain", 0.0, 0.5)
+    _tick(layer, clock)
+    layer.pointer_move(1.0, 0.5)  # right across, before the engine ticks again
+    _, frame = _tick(layer, clock)
+    assert set(frame.coverage) == set(LAMPS)
+    _, frame = _run(layer, clock, 1.5)  # held at the far edge: the band is past them all
+    assert frame.coverage == {}
+
+
+def _pull_and_let_go(layer, clock, to=(0.1, 0.2)):
+    layer.pointer_down("curtain", 0.0, 0.5)
+    for x in to:
+        layer.pointer_move(x, 0.5)
+        _tick(layer, clock)
+    layer.pointer_up()
+
+
+def test_a_curtain_let_go_of_while_moving_flies_on_across_the_stage(clock):
+    layer = _layer(softness=0.0, curtain_width=0.3, curtain_stretch_s=0.0, throw=True, trail_s=0.05)
+    _pull_and_let_go(layer, clock)  # 6 stage heights a second: it leaves at the top speed, 4
+    assert layer.pointer_state() is None and len(layer._waves) == 1
+    wave = layer._waves[0]
+    assert wave.width == pytest.approx(0.3) and (wave.dx, wave.dy) == pytest.approx((1.0, 0.0))
+    first, last = {}, {}
+    for step in range(40):
+        _, frame = _tick(layer, clock)
+        for lamp in frame.coverage:
+            first.setdefault(lamp, step)
+            last[lamp] = step
+    assert "".join(sorted(first, key=first.get)) == "abcd"  # on from where it was let go (over a), in order
+    assert first["c"] - first["b"] == pytest.approx(0.54 / 4.0 * 30, abs=1.5)  # at the speed it left the hand
+    assert last["b"] < first["d"]  # a band, not a curtain left behind
+    assert not layer.active  # off the far edge, and gone
+
+
+def test_a_curtain_stays_put_when_let_go_of_slowly_latched_or_without_a_back_edge(clock):
+    slow = _layer(softness=0.0, curtain_width=0.3, throw=True)
+    _pull_and_let_go(slow, clock, to=(0.005, 0.01, 0.015, 0.02))
+    assert slow._waves == []
+    held = _layer(softness=0.0, curtain_width=0.3, throw=True, latch=True)
+    _pull_and_let_go(held, clock)
+    assert held._waves == [] and held.ink_levels()  # Hold paint keeps it where it is
+    whole = _layer(softness=0.0, curtain_width=WHOLE, throw=True)
+    _pull_and_let_go(whole, clock)
+    assert whole._waves == []
+    off = _layer(softness=0.0, curtain_width=0.3, throw=False)
+    _pull_and_let_go(off, clock)
+    assert off._waves == []
 
 
 def test_spot_keeps_the_show_only_under_the_pointer(clock):
@@ -303,6 +412,24 @@ def test_wave_length_follows_the_tempo(clock):
     slow = _layer(wave_beats=2.0)
     slow.trigger("flash")  # no tempo: as if at 120 BPM
     assert slow._waves[-1].duration == pytest.approx(1.0)
+
+
+def test_wave_length_goes_up_to_eight_bars(clock):
+    layer = _layer(wave_beats=16.0)
+    layer.trigger("sweep_right")
+    assert layer._waves[-1].duration == pytest.approx(8.0)  # 16 beats at 120 BPM
+    first, last = {}, {}
+    for step in range(260):
+        _, frame = _tick(layer, clock)
+        for lamp in frame.coverage:
+            first.setdefault(lamp, step)
+            last[lamp] = step
+    assert "".join(sorted(first, key=first.get)) == "abcd"
+    assert (last["a"] - first["a"]) / 30.0 > 2.0  # each lamp glows for seconds as the band goes by
+    assert not layer.active
+    layer.config.wave_beats = 500.0  # (a hand-edited config)
+    layer.trigger("flash")
+    assert layer._waves[-1].duration == pytest.approx(16.0)  # 32 beats at most
 
 
 def test_snap_to_beat_waits_for_the_next_half_beat(clock):
@@ -474,6 +601,94 @@ def test_strobe_look_flashes_on_the_beats_subdivisions(clock):
     assert strobe_per_beat(1.0, 0.3) == 3  # 200 BPM: 16ths would be 13 a second
 
 
+def _sparkle_run(layer, clock, seconds=10.0, base=None, hz=100):
+    """Flood in the sparkle look, sampled `hz` times a second: per lamp the
+    colours it showed, and its white LEDs' levels."""
+    base = base or Color(0.0, 0.0, 0.3)
+    layer.config.look = "sparkle"
+    layer.hold("flood", True)
+    _run(layer, clock, 0.2)
+    shown = {lamp: [] for lamp in LAMPS}
+    whites = {lamp: [] for lamp in LAMPS}
+    for _ in range(int(seconds * hz)):
+        colors, frame = _tick(layer, clock, base=base, dt=1.0 / hz)
+        for lamp in LAMPS:
+            shown[lamp].append(_rgb(colors[lamp]))
+            whites[lamp].append(frame.whites.get(lamp, (0.0, 1.0))[0])
+    return shown, whites
+
+
+def _glints(samples, base=(0.0, 0.0, 0.3)):
+    """The runs of samples that aren't the show's colour: (length, the brightest sample's level)."""
+    runs, current = [], []
+    for sample in samples + [base]:
+        if sample != pytest.approx(base):
+            current.append(max(sample))
+        elif current:
+            runs.append((len(current), max(current)))
+            current = []
+    return runs
+
+
+def test_sparkle_glints_are_quick_crisp_and_at_full_brightness(clock):
+    layer = _layer(speed=1.0, music=0.0)
+    shown, whites = _sparkle_run(layer, clock)
+    for lamp in LAMPS:
+        glints = _glints(shown[lamp])
+        assert 20 <= len(glints) <= 45, len(glints)  # two to four and a half a second on every lamp
+        for length, peak in glints[1:-1]:  # (the first and the last may be cut by the run's ends)
+            assert peak == pytest.approx(1.0)  # every one reaches full, however dim the show under it
+            assert length >= 10  # ...and holds it a tenth of a second: a lamp on 20 commands/s shows it
+        dark = sum(1 for sample in shown[lamp] if sample == pytest.approx((0.0, 0.0, 0.3)))
+        assert dark > 0.4 * len(shown[lamp])  # the show stays between them
+        assert max(whites[lamp]) == 0.0  # Neon is all colour: no white LEDs
+    together = sum(
+        1 for samples in zip(*shown.values()) if all(s != pytest.approx((0.0, 0.0, 0.3)) for s in samples)
+    )
+    assert together < 0.1 * len(shown["a"])  # each lamp on its own: not a strobe
+
+
+def test_sparkle_speed_sets_how_often_it_glints(clock):
+    counts = {}
+    for speed in (0.25, 1.0, 4.0):
+        shown, _ = _sparkle_run(_layer(speed=speed), clock)
+        counts[speed] = sum(len(_glints(shown[lamp])) for lamp in LAMPS)
+    assert counts[0.25] < 0.4 * counts[1.0]
+    slow, _ = _sparkle_run(_layer(speed=1.0), clock)
+    fast, _ = _sparkle_run(_layer(speed=4.0), clock)
+    share = lambda shown: sum(  # noqa: E731
+        1 for lamp in LAMPS for s in shown[lamp] if s != pytest.approx((0.0, 0.0, 0.3))
+    ) / (4.0 * len(shown["a"]))
+    assert share(fast) > share(slow) + 0.1  # past what the lamps can flash: more of them instead
+
+
+def test_sparkle_picks_the_colour_that_stands_out_from_the_show(clock):
+    layer = _layer(speed=1.0)
+    layer.config.palette = ["#ff0000", "#00ffff"]
+    shown, _ = _sparkle_run(layer, clock, base=Color(0.5, 0.0, 0.0))  # a red show
+    peaks = [s for lamp in LAMPS for s in shown[lamp] if max(s) == pytest.approx(1.0)]
+    cyan = sum(1 for r, g, b in peaks if g > r)
+    assert cyan > 0.65 * len(peaks)  # an even pick would be half
+
+
+def test_sparkle_flashes_the_white_leds_for_the_pale_colours(clock):
+    layer = _layer(speed=1.0)
+    layer.config.palette = list(PALETTES["Snow"])  # white and a pale blue
+    _, whites = _sparkle_run(layer, clock, seconds=5.0)
+    for lamp in LAMPS:
+        assert max(whites[lamp]) == pytest.approx(1.0, abs=0.05)
+        assert sum(1 for level in whites[lamp] if level == 0.0) > 0.4 * len(whites[lamp])
+    dim = _layer(speed=1.0, brightness=0.5)
+    dim.config.palette = ["#ffffff"]
+    _, whites = _sparkle_run(dim, clock, seconds=3.0)
+    assert max(whites["a"]) == pytest.approx(0.5)  # Brightness is the glint's too
+    slow_bulbs = _layer(speed=1.0)
+    slow_bulbs.config.palette = list(PALETTES["Snow"])
+    slow_bulbs.instant_white = False  # bulbs that switch work mode for white: colour glints only
+    shown, whites = _sparkle_run(slow_bulbs, clock, seconds=3.0)
+    assert max(whites["a"]) == 0.0 and _glints(shown["a"])
+
+
 def test_every_look_renders(clock):
     for look in LOOKS:
         layer = _layer(look=look, speed=1.0, music=0.5)
@@ -532,6 +747,7 @@ def test_settings_survive_a_save_and_bad_values_dont():
     cfg.realtime.positions = {"a": [0.25, 0.75]}
     cfg.realtime.palette = ["#112233", "#445566"]
     cfg.realtime.look, cfg.realtime.tool, cfg.realtime.latch = "plasma", "curtain", True
+    cfg.realtime.curtain_width, cfg.realtime.curtain_stretch_s, cfg.realtime.wave_beats = 1.5, 0.7, 12.0
     again = AppConfig.from_dict(cfg.to_dict())
     assert again.realtime == cfg.realtime
     assert AppConfig.from_dict({}).realtime == RealtimeConfig()  # a config from before the tab
@@ -610,6 +826,22 @@ def test_engine_blinder_respects_the_true_white_multiplier(monkeypatch):
     lamps.white_calls.clear()
     _run_engine(engine, clock, 1.0)
     assert lamps.white_calls == []  # ...and the lamps are back on plain colour
+
+
+def test_engine_sparkles_white_only_on_bulbs_that_take_it_at_once(monkeypatch):
+    for transitions, expected in (("direct", True), ("legacy", False), ("gradient", False)):
+        engine, clock, lamps = _engine(monkeypatch, transitions=transitions)
+        engine.config.color_mapping.beat_sync.white_pulse_enabled = False  # no white of the show's own
+        engine.realtime.config.look = "sparkle"
+        engine.realtime.config.speed = 1.0
+        engine.realtime.config.palette = ["#ffffff"]
+        engine.realtime.hold("flood", True)
+        _run_engine(engine, clock, 3.0)
+        glints = [target for _, targets in lamps.white_calls for target in targets.values()]
+        assert bool(glints) is expected, transitions
+        if expected:
+            assert max(t.brightness for t in glints) == pytest.approx(1.0)
+            assert all(t.temp == 1.0 and t.under is not None for t in glints)  # cool white, over the colour
 
 
 def test_engine_legacy_bulbs_drop_the_white_flash_where_the_layer_covers(monkeypatch):

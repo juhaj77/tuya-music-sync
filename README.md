@@ -989,17 +989,24 @@ Pick one above the stage (or with its key) and use the pointer on the lamps:
 | Tool | Key | What the pointer does |
 |---|---|---|
 | **Brush** | Z | Drag over the lamps: they take the [look](#looks-and-the-palette) under the circle and keep it for the *Trail* time - a comet's tail behind the pointer. However fast you swipe, every lamp on the way is caught. Let go **while moving** and the brush is *thrown*: it glides on by itself, bounces off the stage's edges and slows to a stop (throw several; switch off with **Throw**). |
-| **Curtain** | X | Press and pull: an edge follows the pointer, square to the direction you pull, and everything behind it takes the look - like drawing a curtain from where you pressed, in any direction. Pull back to open it. With the *Complement* look this is a line with the opposite colours on its other side. |
+| **Curtain** | X | Press and pull, in any direction: a band of the look follows the pointer, its front edge square to the way you pull and its back edge trailing *Curtain width* behind. The faster you pull, the wider it stretches (*Curtain stretch*); stop, and it gathers up to its width. Let go **while moving** and it flies on across the stage at the speed it left your hand (**Throw**). With *Curtain width* all the way up there's no back edge: everything behind the front takes the look - with *Complement* a line with the opposite colours on its other side. |
 | **Ripple** | C | Click: a ring of the look spreads from that point. Drag to leave a row of them. |
 | **Spot** | V | Press: only the lamps under the pointer keep the show, all the others take the look - with *Blackout* a spotlight you point with. |
 
-- **Mouse wheel** over the stage: the brush's radius. **Shift + wheel**: the trail.
+- **Mouse wheel** over the stage: the brush's radius - with the curtain picked, its width,
+  also in the middle of a pull. **Shift + wheel**: the trail.
 - **Right-click** anywhere on the stage: a ripple, whatever the tool.
 - **Hold paint**: strokes stay on the lamps until **Clear** (Esc) instead of fading - and
   each stroke keeps the look it was made with, so one corner can burn in *Fire* while
   another shimmers in *Ocean*. **Ctrl + drag** with the brush erases.
 - **Radius**, **Softness** (0 = everything inside the circle in full, 1 = fading from the
-  middle out; also the softness of the curtain's edge) and **Trail** are on the right.
+  middle out; also the softness of the curtain's edges) and **Trail** are on the right.
+- **Curtain width** and **Curtain stretch** take the Radius's place while the curtain is
+  picked. Width: how thick the band is, in stage heights (3.00, the top = no back edge).
+  Stretch: how far behind in time the back edge follows the front - the band is its width
+  plus the distance you pull in that time, so a slow pull keeps it thin and a fast swipe
+  draws it out. 0 = always exactly its width. Lamps the back edge has passed fade over
+  the *Trail* time.
 
 ### Looks and the palette
 
@@ -1011,7 +1018,7 @@ The look is what the tools and the pads paint with - picked on the right:
 | **Plasma** | The palette's colours flowing over the stage in slow swirls, each lamp where it stands. |
 | **Rainbow** | Every hue, turning round the pointer. |
 | **Flicker** | Each lamp flickers on its own between the palette's colours - fire with the *Fire* palette. |
-| **Sparkle** | The show stays, and lamps twinkle in the palette's colours on top of it. |
+| **Sparkle** | The show stays, and the lamps glint on top of it: short, crisp flashes at full brightness, about three a second on each lamp at Speed 1, in the palette's colours (whichever of two random picks stands out more from what the lamp shows). Pale palette colours also flash the lamp's white LEDs - with a white in the palette (*Snow*, *Ice*) the glints are real white, far brighter than any colour (needs Lamp transitions `direct` or `smooth`). |
 | **Strobe** | Flashes through the palette's colours - on the 16ths at Speed 1, in time with the beat clock when it's locked. |
 | **Complement** | The show's own colour turned round the colour wheel by *Hue turn* (180 = the complementary colour). The music's flashes and fades stay. |
 | **Freeze** | The lamp keeps the colour it had when it was touched, while the show goes on around it. |
@@ -1058,8 +1065,10 @@ The keys work wherever the focus is on this tab (except while typing in a number
 | I | **Chase sweep** | The sequencer's [color sweep](#color-sweep), once round the Chase order, with its own settings. |
 | O | **Dark sweep** | The sequencer's [dark sweep](#dark-sweep), likewise. |
 
-- **Wave length** - how long a sweep, burst, ripple or flash takes, in beats of the beat
-  clock, and how many bars the Orbit takes to go round.
+- **Wave length** - how long the tap pads' effects last: the time a sweep, burst, implode,
+  close, open or ripple takes to cross the stage and a flash to fade, in beats of the
+  beat clock - from a quarter of a beat to 32 beats (8 bars: a slow wash through the
+  room). Also how many bars the Orbit takes to go round.
 - **Snap to beat** - the tap pads and ripples wait for the next half beat, so a press a
   little early still lands on the music (one only just late goes at once).
 - **Esc** / **Clear** wipes everything played: held paint, latched pads, waves in flight.

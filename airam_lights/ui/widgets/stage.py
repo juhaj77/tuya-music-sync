@@ -6,8 +6,9 @@ pointer).
 Two ways to use it:
 
 - Play (the default): the pointer is the tool picked on the tab - press and
-  drag over the lamps. The wheel sets the brush's radius (with Shift: the
-  trail), Ctrl+drag erases held paint, a right-click drops a ripple.
+  drag over the lamps. The wheel sets the brush's radius or the curtain's
+  width (with Shift: the trail), Ctrl+drag erases held paint, a right-click
+  drops a ripple.
 - Arrange: drag each lamp to its place. The lamp being held lights up in
   the room, so it's easy to tell which is which.
 """
@@ -22,7 +23,7 @@ from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPen, QRadialGradient
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from ...color.models import Color
-from ...effects.realtime import RealtimeLayer, hex_to_rgb
+from ...effects.realtime import CURTAIN_WIDTH_RANGE, RealtimeLayer, hex_to_rgb
 from .. import theme
 
 _MARGIN = 6
@@ -38,7 +39,7 @@ def _qcolor(color: Color, alpha: int = 255) -> QColor:
 
 
 class StageCanvas(QWidget):
-    settingsNudged = Signal()  # the wheel changed the radius or the trail - the sliders catch up
+    settingsNudged = Signal()  # the wheel changed the radius, the curtain's width or the trail - the sliders catch up
     layoutChanged = Signal()  # a lamp was moved
 
     def __init__(self, controller, parent=None):
@@ -183,6 +184,9 @@ class StageCanvas(QWidget):
         if event.modifiers() & Qt.ShiftModifier:
             trail = cfg.trail_s * 1.25 ** steps if cfg.trail_s > 0.04 else (0.1 if steps > 0 else 0.0)
             cfg.trail_s = 0.0 if trail < 0.05 else min(TRAIL_RANGE[1], trail)
+        elif cfg.tool == "curtain":
+            low, high = CURTAIN_WIDTH_RANGE
+            cfg.curtain_width = max(low, min(high, cfg.curtain_width * 1.12 ** steps))
         else:
             cfg.radius = max(RADIUS_RANGE[0], min(RADIUS_RANGE[1], cfg.radius * 1.12 ** steps))
         self.settingsNudged.emit()
@@ -261,9 +265,14 @@ class StageCanvas(QWidget):
         painter.rotate(math.degrees(math.atan2(dy, dx)))
         shade = QColor(theme.LIVE)
         shade.setAlpha(26)
-        painter.fillRect(QRectF(-far, -far, far, 2.0 * far), shade)  # behind the edge: covered
+        band = self.layer.curtain_band()
+        depth = far if band is None else band * stage.height()  # no back edge: all the way back
+        painter.fillRect(QRectF(-depth, -far, depth, 2.0 * far), shade)  # behind the front edge: covered
         painter.setPen(QPen(QColor(theme.LIVE), 1.5))
         painter.drawLine(QPointF(0.0, -far), QPointF(0.0, far))
+        if band is not None:
+            painter.setPen(QPen(QColor(theme.LIVE), 1.0, Qt.DashLine))
+            painter.drawLine(QPointF(-depth, -far), QPointF(-depth, far))  # the back edge, following
         painter.restore()
         painter.setPen(QPen(QColor(theme.LIVE_DIM), 1.0, Qt.DashLine))
         painter.drawLine(start, here)
@@ -289,9 +298,17 @@ class StageCanvas(QWidget):
                 for side in (-1.0, 1.0):
                     x = origin.x() + side * offset
                     painter.drawLine(QPointF(x, stage.top()), QPointF(x, stage.bottom()))
-            else:  # "linear": a front square to its direction
-                x = origin.x() + shape["dx"] * front
-                painter.drawLine(QPointF(x, stage.top()), QPointF(x, stage.bottom()))
+            else:  # "linear": a front square to its direction (a sweep, or a thrown curtain at any angle)
+                far = stage.width() + stage.height()
+                painter.save()
+                painter.translate(origin)
+                painter.rotate(math.degrees(math.atan2(shape["dy"], shape["dx"])))
+                painter.drawLine(QPointF(front, -far), QPointF(front, far))
+                if shape["band"] > 0.0:
+                    painter.setPen(QPen(color, 1.0, Qt.DashLine))
+                    back = front - shape["band"] * height
+                    painter.drawLine(QPointF(back, -far), QPointF(back, far))
+                painter.restore()
 
     @staticmethod
     def _draw_lamp(

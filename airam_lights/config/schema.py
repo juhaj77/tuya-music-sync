@@ -1396,13 +1396,18 @@ class RealtimeConfig:
     softness: float = 0.6  # 0 = a hard edge .. 1 = fading from the centre out
     trail_s: float = 0.6  # how long a lamp keeps the look after the pointer has left it
     latch: bool = False  # Hold paint: strokes stay until cleared
-    throw: bool = True  # the brush let go of while moving keeps gliding
+    throw: bool = True  # the brush (or the curtain) let go of while moving keeps going
+    # The curtain: how thick it is behind its front edge, in stage heights (3.0, the top
+    # of the range = the whole way back, no back edge), and how far behind in time the
+    # back edge follows the front - so a fast pull stretches it.
+    curtain_width: float = 0.6
+    curtain_stretch_s: float = 0.3
     speed: float = 1.0  # the look's animation, x
     music: float = 0.3  # 0 = the look at its own brightness .. 1 = as bright as the show has the lamp
     brightness: float = 1.0
     hue_shift_deg: float = 180.0  # the "hue_shift" look: 180 = the complementary colour
     white_temp: float = 1.0  # the "white" look and the blinder: 0 = warmest .. 1 = coolest
-    wave_beats: float = 1.0  # how long a sweep, burst or ripple takes to cross the stage
+    wave_beats: float = 1.0  # how long a sweep, burst or ripple takes to cross the stage (0.25..32)
     snap_to_beat: bool = False  # one-shots start on the next half beat
     strobe_hz: float = 9.0  # the Strobe pad's ceiling, flashes a second
     strobe_brightness: float = 1.0

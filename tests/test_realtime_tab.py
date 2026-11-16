@@ -111,7 +111,16 @@ def test_tools_looks_and_the_palette_are_picked_on_the_tab(window, qapp):
     tab = _tab(window)
     cfg = window.controller.config.realtime
     tab.tool_buttons["curtain"].click()
-    assert cfg.tool == "curtain" and not tab.radius_slider.isEnabled()
+    assert cfg.tool == "curtain"
+    # The curtain has its width and stretch where the brush has its radius.
+    assert tab.radius_slider.isHidden() and not tab.curtain_slider.isHidden() and not tab.stretch_slider.isHidden()
+    tab.curtain_slider._spin.setValue(1.5)
+    tab.stretch_slider._spin.setValue(0.7)
+    assert cfg.curtain_width == pytest.approx(1.5) and cfg.curtain_stretch_s == pytest.approx(0.7)
+    tab.curtain_slider._spin.setValue(3.0)  # all the way up: no back edge, nothing to stretch
+    assert not tab.stretch_slider.isEnabled()
+    tab.tool_buttons["brush"].click()
+    assert not tab.radius_slider.isHidden() and tab.curtain_slider.isHidden() and tab.stretch_slider.isHidden()
     tab.look_buttons["hue_shift"].click()
     assert cfg.look == "hue_shift"
     assert not tab.hue_slider.isHidden() and tab.temp_slider.isHidden()
@@ -146,6 +155,28 @@ def test_the_wheel_sets_the_radius_and_shift_wheel_the_trail(window, qapp):
     wheel(Qt.ShiftModifier)
     assert cfg.trail_s > before_trail
     assert tab.trail_slider.value() == pytest.approx(cfg.trail_s, abs=0.01)
+    # With the curtain picked the wheel is its width.
+    tab.tool_buttons["curtain"].click()
+    radius, width = cfg.radius, cfg.curtain_width
+    wheel(Qt.NoModifier)
+    assert cfg.radius == radius and cfg.curtain_width == pytest.approx(width * 1.12)
+    assert tab.curtain_slider.value() == pytest.approx(cfg.curtain_width, abs=0.01)
+
+
+def test_wave_length_slider_reaches_eight_bars_with_room_for_the_short_ones(window):
+    tab = _tab(window)
+    cfg = window.controller.config.realtime
+    slider = tab.wave_slider
+    slider._slider.setValue(0)
+    assert cfg.wave_beats == pytest.approx(0.25)
+    slider._slider.setValue(1000)
+    assert cfg.wave_beats == pytest.approx(32.0)
+    slider._slider.setValue(500)  # half way along: the middle of the ratios, not of the numbers
+    assert cfg.wave_beats == pytest.approx((0.25 * 32.0) ** 0.5, abs=0.01)
+    slider._spin.setValue(4.0)  # typed: the slider follows
+    assert cfg.wave_beats == pytest.approx(4.0) and slider._slider.value() == 571
+    slider.set_value(1.0)
+    assert slider._slider.value() == 286 and slider.value() == pytest.approx(1.0)
 
 
 def test_arranging_moves_a_lamp_and_lights_it_up(window, qapp):

@@ -5,6 +5,8 @@ don't have to hand-roll slider<->spinbox syncing repeatedly.
 """
 from __future__ import annotations
 
+import math
+
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import QDoubleSpinBox, QHBoxLayout, QLabel, QSlider, QWidget
 
@@ -24,10 +26,16 @@ class FloatSlider(QWidget):
         suffix: str = "",
         tooltip: str = "",
         parent=None,
+        logarithmic: bool = False,
     ):
+        """`logarithmic`: the slider's travel is spread evenly over the
+        range's ratios, not its differences - for a range like 0.25..32,
+        where the small values would otherwise share the first few pixels
+        (needs a minimum above 0)."""
         super().__init__(parent)
         self._min = minimum
         self._max = maximum
+        self._log = logarithmic and minimum > 0.0 and maximum > minimum
         self._updating = False
 
         layout = QHBoxLayout(self)
@@ -61,18 +69,30 @@ class FloatSlider(QWidget):
     def _on_slider(self, step: int) -> None:
         if self._updating:
             return
-        value = self._min + (self._max - self._min) * (step / _STEPS)
+        if self._log:
+            value = self._min * (self._max / self._min) ** (step / _STEPS)
+        else:
+            value = self._min + (self._max - self._min) * (step / _STEPS)
         self._updating = True
         self._spin.setValue(value)
         self._updating = False
         self.valueChanged.emit(value)
 
+    def _step_of(self, value: float) -> int:
+        """Where on the slider `value` is."""
+        if self._max <= self._min:
+            return 0
+        if self._log:
+            share = math.log(max(value, self._min) / self._min) / math.log(self._max / self._min)
+        else:
+            share = (value - self._min) / (self._max - self._min)
+        return int(round(share * _STEPS))
+
     def _on_spin(self, value: float) -> None:
         if self._updating:
             return
-        step = int(round((value - self._min) / (self._max - self._min) * _STEPS)) if self._max > self._min else 0
         self._updating = True
-        self._slider.setValue(step)
+        self._slider.setValue(self._step_of(value))
         self._updating = False
         self.valueChanged.emit(value)
 
@@ -83,6 +103,5 @@ class FloatSlider(QWidget):
         self._updating = True
         value = max(self._min, min(self._max, value))
         self._spin.setValue(value)
-        step = int(round((value - self._min) / (self._max - self._min) * _STEPS)) if self._max > self._min else 0
-        self._slider.setValue(step)
+        self._slider.setValue(self._step_of(value))
         self._updating = False

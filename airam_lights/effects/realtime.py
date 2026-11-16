@@ -57,12 +57,26 @@ PALETTES: Dict[str, Tuple[str, ...]] = {
     "Snow": ("#ffffff", "#bfe0ff"),
 }
 MAX_PALETTE_COLORS = 6
+# The curtain's thickness, stage heights; at the top of the range it has no
+# back edge at all - everything behind its front is covered.
+CURTAIN_WIDTH_RANGE = (0.05, 3.0)
+WAVE_BEATS_RANGE = (0.25, 32.0)
 
 # The strobe look flashes on a subdivision of the beat, at most this often
 # (a flash is an on and an off command, and the lamps take ~20 a second).
 _STROBE_SUBDIVISIONS = (1, 2, 3, 4, 6, 8)
 _STROBE_MAX_HZ = 10.0
 _NO_TEMPO_BEAT_S = 0.5  # without a tempo: as if at 120 BPM
+
+# The sparkle look: each lamp has this many chances a second to glint at
+# Speed 1 (more with Speed, up to the ceiling - a glint is an on and an off
+# command), takes about four in ten of them, and a glint stays at full for
+# _SPARKLE_ON_S: long enough that a lamp taking 20 commands a second always
+# shows it at full, short enough to read as a glint.
+_SPARKLE_HZ = 8.0
+_SPARKLE_MAX_HZ = 10.0
+_SPARKLE_ON_S = 0.1
+_SPARKLE_CHANCE = 0.4
 
 _TRAIL_MIN_S = 0.03
 _CLEAR_FADE_S = 0.25
@@ -215,6 +229,7 @@ class _Moment:
     beat_s: float
     master: float  # the show's Brightness (Quick Controls)
     show_running: bool
+    instant_white: bool = True  # the lamps can flash their white LEDs over the colour at once
 
 
 def strobe_per_beat(speed: float, beat_s: float) -> int:
@@ -251,14 +266,7 @@ def render(
     t = moment.t * style.speed
     palette = style.palette
     if look == "sparkle":
-        slot = moment.t * 5.0 * style.speed + _hash01(seed) * 7.0
-        index = math.floor(slot)
-        if _hash01(seed * 31 + index) >= 0.4:
-            return under, 0.0
-        glow = (1.0 - (slot - index)) ** 2
-        rgb = palette_at(palette, _hash01(seed * 17 + index))
-        k = style.brightness * moment.master
-        return under.blend(Color(rgb[0] * k, rgb[1] * k, rgb[2] * k), glow), 0.0
+        return _sparkle(style, under, seed, moment)
 
     level = 1.0
     if look == "plasma":
@@ -285,6 +293,55 @@ def render(
     music = style.music if show_level is not None else 0.0
     k = level * style.brightness * moment.master * ((1.0 - music) + music * clip(show_level or 0.0))
     return Color(rgb[0] * k, rgb[1] * k, rgb[2] * k), 0.0
+
+
+def _sparkle(style: Style, under: Color, seed: int, moment: _Moment) -> Tuple[Color, float]:
+    """The sparkle look on one lamp: the show's colour, and now and then a
+    glint over it - (colour, white LEDs' level).
+
+    A glint is crisp: straight to full, held for _SPARKLE_ON_S, then gone
+    (not a fade, most of which would be too dim to see). It's a colour of
+    the palette at full strength - of two picked at random the one further
+    from what the lamp shows, so it stands out from the show - and a pale
+    one flashes the lamp's white LEDs with it, the paler the more: a white
+    in the palette is a real white glint, far brighter than white mixed from
+    the colours, while the vivid colours stay pure colour."""
+    rate = min(_SPARKLE_MAX_HZ, _SPARKLE_HZ * style.speed)
+    slot = moment.t * rate + _hash01(seed) * 7.0
+    index = math.floor(slot)
+    # Speed beyond the ceiling can't glint faster - it glints more often instead.
+    chance = _SPARKLE_CHANCE + 0.25 * clip((style.speed * _SPARKLE_HZ / _SPARKLE_MAX_HZ - 1.0) / 2.0)
+    if _hash01(seed * 31 + index) >= chance:
+        return under, 0.0
+    on = min(0.8, _SPARKLE_ON_S * rate)  # of the slot
+    into = slot - index
+    if into >= on + 0.15:
+        return under, 0.0
+    glow = 1.0 if into <= on else (1.0 - (into - on) / 0.15) ** 2
+
+    # One of the palette's own colours, not a blend of two: a glint is short, its colour should be clear.
+    palette = style.palette or ((1.0, 1.0, 1.0),)
+    count = len(palette)
+    rgb = palette[min(count - 1, int(_hash01(seed * 17 + index) * count))]
+    level = max(under.r, under.g, under.b)
+    if level > 0.02:
+        def apart(candidate: RGB) -> float:
+            top = max(candidate) or 1.0
+            return sum(abs(c / top - s / level) for c, s in zip(candidate, (under.r, under.g, under.b)))
+
+        other = palette[min(count - 1, int(_hash01(seed * 53 + index) * count))]
+        if apart(other) > apart(rgb):
+            rgb = other
+    top = max(rgb)
+    if top <= 0.0:
+        return under.blend(Color.black(), glow), 0.0  # a black in the palette: a glint of dark
+    k = style.brightness * moment.master / top  # at full, whatever the palette colour's own level
+    spark = Color(rgb[0] * k, rgb[1] * k, rgb[2] * k)
+    white = 0.0
+    if moment.instant_white:
+        paleness = min(rgb) / top  # 1 - the colour's saturation: white 1, a pastel ~0.7, a vivid colour ~0
+        white = clip((paleness - 0.4) / 0.6) ** 1.5 * glow * style.brightness
+    return under.blend(spark, glow), white
 
 
 # -- what's on the stage --------------------------------------------------------------------
@@ -317,6 +374,9 @@ class _Pointer:
     stamps: Dict[str, Stamp] = field(default_factory=dict)  # the brush, since the last tick
     track: List[Tuple[float, float, float]] = field(default_factory=list)  # (time, x, y) lately
     ripple_at: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # The curtain's back edge: how far along the pull it is from where the pointer
+    # was pressed, stage heights (None: not pulled yet, or no back edge).
+    back: Optional[float] = None
 
 
 @dataclass
@@ -343,6 +403,9 @@ class _Wave:
     dy: float = 0.0
     lamp: Optional[str] = None  # "pop": the one lamp
     u: float = 0.0
+    # Above 0: a flat band with edges this soft (a thrown curtain) instead of
+    # the comet that snaps on at the front and fades behind it.
+    soft: float = 0.0
 
     def progress(self, now: float) -> float:
         return (now - self.t0) / self.duration if self.duration > 0.0 else 1.0
@@ -367,6 +430,9 @@ class _Wave:
         else:  # "linear"
             q = (x - self.ox) * self.dx + (y - self.oy) * self.dy
         behind = (self.reach + self.width) * p - q
+        if self.soft > 0.0:
+            amount = _smooth(0.5 + behind / self.soft) * _smooth(0.5 + (self.width - behind) / self.soft)
+            return (amount, clip(behind / self.width)) if amount > 0.0 else None
         if behind <= 0.0 or behind >= self.width:
             return None
         u = behind / self.width
@@ -426,6 +492,9 @@ class RealtimeLayer:
         self.rng = rng or random.Random()
         self.aspect = 1.6  # the stage's width / height (the tab keeps it up to date)
         self.identify: Optional[str] = None  # a lamp to light up: the one being moved on the stage
+        # Whether the lamps take a white flash over their colour in one command (the engine
+        # says: Lamp transitions "direct" / "smooth") - the sparkle's white glints need it.
+        self.instant_white = True
         self._ink: Dict[str, _Ink] = {}
         self._pointer: Optional[_Pointer] = None
         self._gliders: List[_Glider] = []
@@ -530,6 +599,8 @@ class RealtimeLayer:
             self._commit_stroke()  # (the brush's paint stuck as it was laid)
         if pointer.tool == "brush" and self.config.throw and not pointer.erase:
             self._throw(pointer)
+        elif pointer.tool == "curtain" and self.config.throw and not self.config.latch:
+            self._throw_curtain(pointer)
 
     def _throw(self, pointer: _Pointer) -> None:
         """The brush let go of while moving keeps going, as fast as it left the hand."""
@@ -561,24 +632,92 @@ class RealtimeLayer:
             if amount > into.get(lamp, (0.0, 0.0, 0.0))[0]:
                 into[lamp] = (amount, distance / radius, math.atan2(ly - cy, lx * aspect - cx))
 
-    def _curtain_stamps(self, pointer: _Pointer) -> Dict[str, Stamp]:
-        """The curtain: a straight edge through the pointer, square to the way
-        it was pulled from where it was pressed - everything behind the edge
-        is covered, the gradient running from the edge back to the start."""
-        aspect = self.aspect
-        dx, dy = (pointer.x - pointer.ax) * aspect, pointer.y - pointer.ay
+    def _curtain_pull(self, pointer: _Pointer) -> Optional[Tuple[float, float, float]]:
+        """The curtain's pull: (how far the pointer is from where it was
+        pressed, stage heights, and the direction as a unit vector) - None
+        until it has been pulled at all."""
+        dx, dy = (pointer.x - pointer.ax) * self.aspect, pointer.y - pointer.ay
         length = math.hypot(dx, dy)
         if length < 0.02:
+            return None
+        return length, dx / length, dy / length
+
+    def _curtain_stamps(self, pointer: _Pointer, dt: float = 0.0) -> Dict[str, Stamp]:
+        """The curtain: a band across the stage with its front edge through
+        the pointer, square to the way it was pulled from where it was
+        pressed, the gradient running from the front edge to the back.
+
+        The back edge follows Curtain width behind the front - Curtain
+        stretch later in time, so the band is as much thicker as the pull is
+        fast (its width plus the distance pulled in that time) and draws up
+        to its width when the pointer stops. At the top of the width's range
+        there's no back edge: everything behind the front is covered, the
+        gradient running back to where the pointer was pressed."""
+        pull = self._curtain_pull(pointer)
+        if pull is None:
+            pointer.back = None
             return {}
-        nx, ny = dx / length, dy / length
-        soft = max(0.02, 0.5 * clip(self.config.softness))  # the edge's width
+        length, nx, ny = pull
+        aspect = self.aspect
+        cfg = self.config
+        soft = max(0.02, 0.5 * clip(cfg.softness))  # an edge's width
+        back = None
+        if cfg.curtain_width < CURTAIN_WIDTH_RANGE[1] - 1e-6:
+            width = max(CURTAIN_WIDTH_RANGE[0], cfg.curtain_width)
+            # Where the back edge was a tick ago - at first its width behind where the pointer was pressed.
+            before = pointer.back if pointer.back is not None else -width
+            now = target = length - width
+            if cfg.curtain_stretch_s > 1e-3:
+                now = before + (target - before) * (1.0 - math.exp(-dt / cfg.curtain_stretch_s))
+            now = min(now, length - 0.02)  # never past the front (the pointer pulled back)
+            # Covered from where it was: a thin band pulled fast skips no lamp between two ticks.
+            back = min(now, before)
+            pointer.back = now
+            soft = min(soft, length - now)
+        else:
+            pointer.back = None
+        span = length if back is None else max(0.02, length - back)
         stamps: Dict[str, Stamp] = {}
         for lamp, lx, ly in self._lamps():
             ahead = (lx - pointer.x) * aspect * nx + (ly - pointer.y) * ny
             amount = _smooth(0.5 - ahead / soft)
+            if back is not None:
+                amount *= _smooth(0.5 + (length + ahead - back) / soft)
             if amount > 0.0:
-                stamps[lamp] = (amount, clip(-ahead / length), math.atan2(ny, nx))
+                stamps[lamp] = (amount, clip(-ahead / span), math.atan2(ny, nx))
         return stamps
+
+    def _throw_curtain(self, pointer: _Pointer) -> None:
+        """The curtain let go of while moving flies on: the band as thick as
+        it was, at the speed it left the hand, until it's off the stage."""
+        pull = self._curtain_pull(pointer)
+        if pull is None or pointer.back is None:
+            return  # (with no back edge there's no band to fly)
+        length, nx, ny = pull
+        now = time.perf_counter()
+        recent = [s for s in pointer.track if now - s[0] <= _THROW_WINDOW_S]
+        if len(recent) < 2 or recent[-1][0] - recent[0][0] < 0.015:
+            return
+        (t0, x0, y0), (t1, x1, y1) = recent[0], recent[-1]
+        aspect = self.aspect
+        speed = ((x1 - x0) * aspect * nx + (y1 - y0) * ny) / (t1 - t0)  # along the pull
+        if speed < _THROW_MIN_SPEED:
+            return
+        speed = min(speed, _GLIDE_MAX_SPEED)
+        width = max(0.02, length - pointer.back)
+        soft = min(max(0.02, 0.5 * clip(self.config.softness)), width)
+        ax, ay = pointer.ax * aspect, pointer.ay
+        reach = soft + max(
+            (cx * aspect - ax) * nx + (cy - ay) * ny for cx in (0.0, 1.0) for cy in (0.0, 1.0)
+        )  # to the far corner
+        if reach <= length:
+            return
+        # A wave whose front is where the pointer is right now, moving at `speed`.
+        self._waves.append(_Wave(
+            "linear", now - length / speed, (reach + width) / speed, self.style, reach=reach, width=width,
+            ox=ax, oy=ay, dx=nx, dy=ny, soft=soft,
+        ))
+        del self._waves[:-_MAX_WAVES]
 
     def _spot_stamps(self, pointer: _Pointer) -> Dict[str, Stamp]:
         """The spot: every lamp but the ones under the pointer."""
@@ -613,7 +752,7 @@ class RealtimeLayer:
         if cfg.snap_to_beat if snap is None else snap:
             now += self._snap_delay(now)
         aspect = self.aspect
-        duration = max(0.08, cfg.wave_beats * self._beat_s())
+        duration = max(0.08, min(WAVE_BEATS_RANGE[1], cfg.wave_beats) * self._beat_s())
         wave = _Wave("linear", now, duration, self.style)
         if kind in ("ripple", "burst"):
             x, y = origin if origin is not None and kind == "ripple" else (0.5, 0.5)
@@ -688,6 +827,15 @@ class RealtimeLayer:
         p = self._pointer
         return None if p is None else (p.tool, p.x, p.y, p.ax, p.ay, p.erase)
 
+    def curtain_band(self) -> Optional[float]:
+        """How thick the curtain being pulled is right now, stage heights -
+        None while none is, or it has no back edge."""
+        pointer = self._pointer
+        if pointer is None or pointer.tool != "curtain" or pointer.back is None:
+            return None
+        pull = self._curtain_pull(pointer)
+        return None if pull is None else max(0.0, pull[0] - pointer.back)
+
     def glider_points(self) -> List[Tuple[float, float]]:
         return [(g.x, g.y) for g in self._gliders]
 
@@ -703,7 +851,7 @@ class RealtimeLayer:
             shapes.append({
                 "kind": wave.kind, "x": wave.ox / self.aspect, "y": wave.oy, "dx": wave.dx, "dy": wave.dy,
                 "front": (wave.reach + wave.width) * p, "reach": wave.reach, "fade": 1.0 - p,
-                "rgb": wave.style.palette[0],
+                "band": wave.width if wave.soft > 0.0 else 0.0, "rgb": wave.style.palette[0],
             })
         return shapes
 
@@ -719,7 +867,9 @@ class RealtimeLayer:
         look go by it, by 120 BPM without. `master`: the show's Brightness."""
         self.sync_clock(now, beat_period, beats)
         beat_s = self._beat_s()
-        moment = _Moment(now, beats if beats is not None else now / beat_s, beat_s, master, show_running)
+        moment = _Moment(
+            now, beats if beats is not None else now / beat_s, beat_s, master, show_running, self.instant_white
+        )
         self._advance_ink(dt)
         self._advance_holds(now, dt, colors)
         self._waves = [w for w in self._waves if w.progress(now) < 1.0]
@@ -759,6 +909,8 @@ class RealtimeLayer:
                     return
                 if with_style.look == "blackout":
                     white *= 1.0 - amount
+                elif amount * white_level > white:
+                    white, temp = amount * white_level, 1.0  # a glint: cool white, it lights up fastest
                 color = color.blend(shown, amount)
                 keep *= 1.0 - amount
 
@@ -835,7 +987,7 @@ class RealtimeLayer:
                 self._stamp_brush(pointer.x, pointer.y, pointer.x, pointer.y, pointer.stamps)
                 stamps, pointer.stamps = pointer.stamps, {}
             elif pointer.tool == "curtain":
-                stamps, shape = self._curtain_stamps(pointer), True
+                stamps, shape = self._curtain_stamps(pointer, dt), True
             elif pointer.tool == "spot":
                 stamps, shape = self._spot_stamps(pointer), True
         self._advance_gliders(dt, stamps)
